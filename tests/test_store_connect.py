@@ -3,6 +3,7 @@
 import pytest
 
 from crabriks.store import (
+    SCHEMA,
     MemorySessionStore,
     MissingDatabaseCredential,
     PgConnect,
@@ -97,3 +98,11 @@ def test_lakebase_names_without_a_host_are_refused() -> None:
 async def test_open_store_uses_memory_when_no_database_is_configured() -> None:
     store = await open_store({})
     assert isinstance(store, MemorySessionStore)
+
+
+def test_tables_live_in_the_app_owned_schema() -> None:
+    assert "CREATE SCHEMA IF NOT EXISTS crabriks;" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS crabriks.sessions" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS crabriks.runs" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS crabriks.transcript_entries" in SCHEMA
+    assert "ON crabriks.runs (session_id)" in SCHEMA
