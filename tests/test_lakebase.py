@@ -49,6 +49,34 @@ async def test_one_running_claim_per_session_and_a_reloadable_transcript() -> No
         await store.close()
 
 
+async def test_sessions_are_listed_for_their_owner_with_a_title() -> None:
+    pool = await _pool()
+    store = LakebaseSessionStore(pool)
+    try:
+        await store.migrate()
+        await pool.execute(
+            "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+        )
+        first = await store.create_session(OWNER)
+        second = await store.create_session(OWNER)
+        other = await store.create_session("grace@example.com")
+        model = FunctionModel(stream_function=await _reply("ok"))
+        await run_turn(
+            first.id,
+            "hello there",
+            ctx=TurnContext(owner_id=OWNER, store=store, model=model, now=lambda: FROZEN),
+        )
+        listed = await store.list_sessions(OWNER)
+        foreign = await store.list_sessions("grace@example.com")
+    finally:
+        await store.close()
+
+    assert [session.id for session in listed] == [second.id, first.id]
+    assert listed[0].title == ""
+    assert listed[1].title == "hello there"
+    assert [session.id for session in foreign] == [other.id]
+
+
 async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg.Pool) -> None:
     await store.migrate()
     await pool.execute(

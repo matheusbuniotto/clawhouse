@@ -14,13 +14,14 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 import asyncpg
 from databricks.sdk import WorkspaceClient
 
-from crabriks.shapes import TranscriptEntry, TurnStatus
+from crabriks.shapes import SessionSummary, TranscriptEntry, TurnStatus
 
 logger = logging.getLogger(__name__)
 _CONNECT_ATTEMPTS = 5
@@ -73,6 +74,10 @@ _STALE_RUN_MINUTES = 10
 class SessionStore(Protocol):
     async def open_session(self, session_id: str, owner_id: str) -> None: ...
 
+    async def create_session(self, owner_id: str) -> SessionSummary: ...
+
+    async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]: ...
+
     async def claim_run(self, session_id: str) -> str: ...
 
     async def append_entry(self, session_id: str, run_id: str, entry: TranscriptEntry) -> None: ...
@@ -91,6 +96,7 @@ class RunNotActive(Exception):
 @dataclass
 class _MemorySession:
     owner_id: str
+    created_at: datetime
     entries: list[TranscriptEntry] = field(default_factory=list)
     running: str | None = None
 
@@ -106,10 +112,29 @@ class MemorySessionStore:
         async with self._lock:
             existing = self._sessions.get(session_id)
             if existing is None:
-                self._sessions[session_id] = _MemorySession(owner_id=owner_id)
+                self._sessions[session_id] = _MemorySession(
+                    owner_id=owner_id, created_at=datetime.now(UTC)
+                )
                 return
             if existing.owner_id != owner_id:
                 raise SessionForbidden(session_id)
+
+    async def create_session(self, owner_id: str) -> SessionSummary:
+        async with self._lock:
+            session_id = str(uuid4())
+            session = _MemorySession(owner_id=owner_id, created_at=datetime.now(UTC))
+            self._sessions[session_id] = session
+            return _memory_summary(session_id, session)
+
+    async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]:
+        async with self._lock:
+            owned = [
+                (session_id, session)
+                for session_id, session in self._sessions.items()
+                if session.owner_id == owner_id
+            ]
+        owned.reverse()
+        return tuple(_memory_summary(session_id, session) for session_id, session in owned)
 
     async def claim_run(self, session_id: str) -> str:
         async with self._lock:
@@ -159,6 +184,43 @@ class LakebaseSessionStore:
         session = _uuid(session_id)
         async with self._pool.acquire() as conn:
             await _insert_or_check_owner(cast_querier(conn), session, owner_id)
+
+    async def create_session(self, owner_id: str) -> SessionSummary:
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO crabriks.sessions (id, owner_id)
+            VALUES ($1, $2)
+            RETURNING id, created_at
+            """,
+            uuid4(),
+            owner_id,
+        )
+        return SessionSummary(id=str(row["id"]), title="", created_at=row["created_at"])
+
+    async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]:
+        rows = await self._pool.fetch(
+            """
+            SELECT s.id, s.created_at,
+                (
+                    SELECT t.content FROM crabriks.transcript_entries AS t
+                    WHERE t.session_id = s.id AND t.role = 'user'
+                    ORDER BY t.position
+                    LIMIT 1
+                ) AS title
+            FROM crabriks.sessions AS s
+            WHERE s.owner_id = $1
+            ORDER BY s.created_at DESC
+            """,
+            owner_id,
+        )
+        return tuple(
+            SessionSummary(
+                id=str(row["id"]),
+                title=row["title"] or "",
+                created_at=row["created_at"],
+            )
+            for row in rows
+        )
 
     async def claim_run(self, session_id: str) -> str:
         first = await self._insert_or_reclaim(session_id)
@@ -332,6 +394,11 @@ def _entry_from_row(row: asyncpg.Record) -> TranscriptEntry:
         tool_name=row["tool_name"],
         tool_call_id=row["tool_call_id"],
     )
+
+
+def _memory_summary(session_id: str, session: _MemorySession) -> SessionSummary:
+    title = next((entry.content for entry in session.entries if entry.role == "user"), "")
+    return SessionSummary(id=session_id, title=title, created_at=session.created_at)
 
 
 async def _insert_or_check_owner(conn: _Querier, session: UUID, owner_id: str) -> None:

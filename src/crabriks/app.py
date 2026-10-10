@@ -23,7 +23,7 @@ from crabriks.model import (
     select_model,
 )
 from crabriks.settings import Settings, request_token, settings_from_env
-from crabriks.shapes import TranscriptEntry
+from crabriks.shapes import SessionSummary, TranscriptEntry
 from crabriks.store import (
     RunInProgress,
     SessionForbidden,
@@ -60,6 +60,12 @@ class ModelOptionOut(BaseModel):
     id: str
     label: str
     default: bool
+
+
+class SessionOut(BaseModel):
+    id: str
+    title: str
+    created_at: str
 
 
 class EntryOut(BaseModel):
@@ -101,6 +107,11 @@ def create_app(
 
 
 def _routes(app: FastAPI) -> None:
+    _page_routes(app)
+    _api_routes(app)
+
+
+def _page_routes(app: FastAPI) -> None:
     @app.get("/")
     @app.get("/chat")
     async def chat_page(caller: Caller = _require_caller) -> FileResponse:
@@ -115,6 +126,26 @@ def _routes(app: FastAPI) -> None:
     async def chat_style() -> FileResponse:
         return FileResponse(STATIC / "chat.css", media_type="text/css")
 
+    @app.get("/sessions")
+    async def sessions_page(caller: Caller = _require_caller) -> FileResponse:
+        del caller
+        return FileResponse(STATIC / "sessions.html")
+
+    @app.get("/new")
+    async def new_page(caller: Caller = _require_caller) -> FileResponse:
+        del caller
+        return FileResponse(STATIC / "new.html")
+
+    @app.get("/sessions.js")
+    async def sessions_script() -> FileResponse:
+        return FileResponse(STATIC / "sessions.js", media_type="text/javascript")
+
+    @app.get("/new.js")
+    async def new_script() -> FileResponse:
+        return FileResponse(STATIC / "new.js", media_type="text/javascript")
+
+
+def _api_routes(app: FastAPI) -> None:
     @app.get("/api/me")
     async def me(caller: Caller = _require_caller) -> dict[str, str]:
         return {"user_id": caller.user_id}
@@ -132,6 +163,22 @@ def _routes(app: FastAPI) -> None:
                 for entry in settings.models
             ]
         }
+
+    @app.get("/api/sessions")
+    async def list_sessions(
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> dict[str, list[SessionOut]]:
+        summaries = await request.app.state.store.list_sessions(caller.user_id)
+        return {"sessions": [_session_out(summary) for summary in summaries]}
+
+    @app.post("/api/sessions", status_code=201)
+    async def create_session(
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> SessionOut:
+        summary = await request.app.state.store.create_session(caller.user_id)
+        return _session_out(summary)
 
     @app.get("/api/sessions/{session_id}/transcript")
     async def read_transcript(
@@ -272,6 +319,14 @@ def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, str]]:
 
 def _entry_out(entry: TranscriptEntry) -> EntryOut:
     return EntryOut.model_validate(asdict(entry))
+
+
+def _session_out(summary: SessionSummary) -> SessionOut:
+    return SessionOut(
+        id=summary.id,
+        title=summary.title,
+        created_at=summary.created_at.isoformat(),
+    )
 
 
 def _production_model(settings: Settings, env: Mapping[str, str]) -> ModelFor:

@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap");
+
 :root {
   color-scheme: light;
   --bg: #f3efe6;
@@ -56,6 +58,68 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.nav {
+  display: flex;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: var(--ink);
+}
+
+.sessions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-link {
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.session-link:hover {
+  color: var(--accent);
+}
+
+.when {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.start {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 0 22px;
+}
+
+.agent {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .log {
