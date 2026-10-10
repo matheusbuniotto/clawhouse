@@ -1,7 +1,7 @@
 # ADR-0002: Lakebase plus user workspace storage
 
 Date: 2026-10-10
-Status: accepted
+Status: accepted (partially amended by [ADR-0005](0005-platform-controlled-agent.md): agent personal files are platform-owned, not per-user, in v1)
 
 ## Context
 
