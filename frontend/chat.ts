@@ -1,9 +1,16 @@
 const SESSION_KEY = "crabriks.session";
+const MODEL_KEY = "crabriks.model";
 
 interface Entry {
   role: "user" | "assistant" | "tool_call" | "tool_result";
   content: string;
   tool_name: string | null;
+}
+
+interface ModelOption {
+  id: string;
+  label: string;
+  default: boolean;
 }
 
 interface SseFrame {
@@ -16,9 +23,10 @@ const who = document.querySelector<HTMLElement>("#who");
 const form = document.querySelector<HTMLFormElement>("#composer");
 const message = document.querySelector<HTMLTextAreaElement>("#message");
 const statusNode = document.querySelector<HTMLElement>("#status");
+const modelSelect = document.querySelector<HTMLSelectElement>("#model");
 const send = form?.querySelector<HTMLButtonElement>("button");
 
-if (!log || !who || !form || !message || !statusNode || !send) {
+if (!log || !who || !form || !message || !statusNode || !modelSelect || !send) {
   throw new Error("chat page is missing a required element");
 }
 
@@ -27,6 +35,7 @@ const identity = who;
 const composer = form;
 const input = message;
 const statusLine = statusNode;
+const modelPicker = modelSelect;
 const sendButton = send;
 
 let draft: HTMLParagraphElement | null = null;
@@ -105,6 +114,7 @@ function commitReply(reply: string): void {
 function setBusy(busy: boolean): void {
   input.disabled = busy;
   sendButton.disabled = busy;
+  modelPicker.disabled = busy;
 }
 
 function setStatus(text: string): void {
@@ -119,6 +129,25 @@ async function loadIdentity(): Promise<void> {
   }
   const body = (await response.json()) as { user_id: string };
   identity.textContent = body.user_id;
+}
+
+async function loadModels(): Promise<void> {
+  const response = await fetch("/api/models");
+  if (!response.ok) return;
+  const body = (await response.json()) as { models: ModelOption[] };
+  const saved = sessionStorage.getItem(MODEL_KEY);
+  modelPicker.replaceChildren();
+  for (const option of body.models) {
+    const node = document.createElement("option");
+    node.value = option.id;
+    node.textContent = option.label;
+    modelPicker.append(node);
+  }
+  const wanted =
+    saved && body.models.some((option) => option.id === saved)
+      ? saved
+      : body.models.find((option) => option.default)?.id;
+  if (wanted) modelPicker.value = wanted;
 }
 
 async function loadTranscript(): Promise<void> {
@@ -203,7 +232,7 @@ async function sendMessage(text: string): Promise<void> {
   const response = await fetch(`/api/sessions/${sessionId()}/turns`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message: text }),
+    body: JSON.stringify({ message: text, model: modelPicker.value || null }),
   });
   if (response.status === 409) {
     const body = (await response.json()) as { error?: string };
@@ -246,5 +275,10 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
+modelPicker.addEventListener("change", () => {
+  sessionStorage.setItem(MODEL_KEY, modelPicker.value);
+});
+
 void loadIdentity();
+void loadModels();
 void loadTranscript();

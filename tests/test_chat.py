@@ -11,7 +11,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
 from crabriks.app import create_app
 from crabriks.identity import Caller
-from crabriks.model import MissingAccessToken
+from crabriks.model import MissingAccessToken, ModelEntry, UnknownModel
 from crabriks.settings import Settings
 from crabriks.store import MemorySessionStore
 from crabriks.turn import BUSY_TURN, FAILED_TURN
@@ -54,7 +54,8 @@ def _app(store: MemorySessionStore, model: FunctionModel):
         workspace_host=None,
     )
 
-    def model_for(caller: Caller) -> FunctionModel:
+    def model_for(caller: Caller, model_id: str | None) -> FunctionModel:
+        del model_id
         if not caller.access_token:
             raise MissingAccessToken
         return model
@@ -64,6 +65,28 @@ def _app(store: MemorySessionStore, model: FunctionModel):
 
 def _client(app: object) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")  # type: ignore[arg-type]
+
+
+def _entry(model_id: str, *, default: bool = False) -> ModelEntry:
+    return ModelEntry(
+        id=model_id,
+        label=model_id,
+        provider="openai_compatible",
+        model="meta-llama/llama-3.3-70b-instruct",
+        base_url="https://openrouter.ai/api/v1",
+        api_key_env="OPENROUTER_API_KEY",
+        is_default=default,
+    )
+
+
+def _catalog_settings(models: tuple[ModelEntry, ...]) -> Settings:
+    return Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host=None,
+        models=models,
+    )
 
 
 def _events(body: str) -> list[tuple[str, dict[str, str]]]:
@@ -96,6 +119,56 @@ async def test_chat_page_requires_a_signed_in_user() -> None:
     assert "dapi-secret" not in page.text
     assert me.json() == {"user_id": "ada@example.com"}
     assert "dapi-secret" not in me.text
+
+
+async def test_the_model_picker_lists_choices_and_forwards_the_selection() -> None:
+    seen: list[str | None] = []
+    settings = _catalog_settings((_entry("databricks", default=True), _entry("openrouter-llama")))
+
+    def model_for(caller: Caller, model_id: str | None) -> FunctionModel:
+        del caller
+        seen.append(model_id)
+        return FunctionModel(stream_function=_reply("ok"))
+
+    app = create_app(settings=settings, model_for=model_for, store=MemorySessionStore())
+    async with _client(app) as client:
+        catalog = await client.get("/api/models", headers=HEADERS)
+        chosen = await client.post(
+            f"/api/sessions/{SESSION}/turns",
+            headers=HEADERS,
+            json={"message": "hello", "model": "openrouter-llama"},
+        )
+
+    assert catalog.json() == {
+        "models": [
+            {"id": "databricks", "label": "databricks", "default": True},
+            {"id": "openrouter-llama", "label": "openrouter-llama", "default": False},
+        ]
+    }
+    assert chosen.status_code == 200
+    assert seen == ["openrouter-llama"]
+
+
+async def test_an_unknown_model_is_refused() -> None:
+    def model_for(caller: Caller, model_id: str | None) -> FunctionModel:
+        del caller
+        if model_id is not None and model_id != "databricks":
+            raise UnknownModel(model_id)
+        return FunctionModel(stream_function=_reply("ok"))
+
+    app = create_app(
+        settings=_catalog_settings((_entry("databricks", default=True),)),
+        model_for=model_for,
+        store=MemorySessionStore(),
+    )
+    async with _client(app) as client:
+        response = await client.post(
+            f"/api/sessions/{SESSION}/turns",
+            headers=HEADERS,
+            json={"message": "hello", "model": "nope"},
+        )
+
+    assert response.status_code == 422
 
 
 async def test_a_turn_streams_over_sse_and_survives_reload() -> None:

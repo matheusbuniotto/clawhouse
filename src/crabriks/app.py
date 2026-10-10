@@ -2,7 +2,7 @@
 
 import json
 import os
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -14,7 +14,14 @@ from pydantic import BaseModel
 from pydantic_ai.models import Model
 
 from crabriks.identity import Caller, Unauthenticated, resolve_caller
-from crabriks.model import MissingAccessToken, MissingModelConfig, databricks_chat_model
+from crabriks.model import (
+    MissingAccessToken,
+    MissingModelConfig,
+    UnknownModel,
+    databricks_chat_model,
+    openai_compatible_chat_model,
+    select_model,
+)
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.shapes import TranscriptEntry
 from crabriks.store import (
@@ -41,11 +48,18 @@ from crabriks.turn import (
 STATIC = Path(__file__).parent / "static"
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 OpenStore = Callable[[], Awaitable[SessionStore]]
-ModelFor = Callable[[Caller], Model]
+ModelFor = Callable[[Caller, str | None], Model]
 
 
 class TurnIn(BaseModel):
     message: str
+    model: str | None = None
+
+
+class ModelOptionOut(BaseModel):
+    id: str
+    label: str
+    default: bool
 
 
 class EntryOut(BaseModel):
@@ -105,6 +119,20 @@ def _routes(app: FastAPI) -> None:
     async def me(caller: Caller = _require_caller) -> dict[str, str]:
         return {"user_id": caller.user_id}
 
+    @app.get("/api/models")
+    async def list_models(
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> dict[str, list[ModelOptionOut]]:
+        del caller
+        settings: Settings = request.app.state.settings
+        return {
+            "models": [
+                ModelOptionOut(id=entry.id, label=entry.label, default=entry.is_default)
+                for entry in settings.models
+            ]
+        }
+
     @app.get("/api/sessions/{session_id}/transcript")
     async def read_transcript(
         session_id: str,
@@ -124,7 +152,7 @@ def _routes(app: FastAPI) -> None:
         message = body.message.strip()
         if not message:
             raise HTTPException(status_code=422, detail="message is empty")
-        return await _stream_turn(request, session_id, message, caller)
+        return await _stream_turn(request, session_id, message, caller, model_id=body.model)
 
 
 def _caller(request: Request) -> Caller:
@@ -158,8 +186,10 @@ async def _stream_turn(
     session_id: str,
     message: str,
     caller: Caller,
+    *,
+    model_id: str | None,
 ) -> Response:
-    model = _model_for_caller(request, caller)
+    model = _model_for_caller(request, caller, model_id)
     ctx = TurnContext(
         owner_id=caller.user_id,
         store=request.app.state.store,
@@ -177,14 +207,16 @@ async def _stream_turn(
     )
 
 
-def _model_for_caller(request: Request, caller: Caller) -> Model:
+def _model_for_caller(request: Request, caller: Caller, model_id: str | None) -> Model:
     try:
-        return request.app.state.model_for(caller)
+        return request.app.state.model_for(caller, model_id)
     except MissingAccessToken as exc:
         raise HTTPException(
             status_code=401,
             detail="Databricks did not forward a user token.",
         ) from exc
+    except UnknownModel as exc:
+        raise HTTPException(status_code=422, detail="Unknown model.") from exc
     except MissingModelConfig as exc:
         raise HTTPException(
             status_code=503,
@@ -242,10 +274,17 @@ def _entry_out(entry: TranscriptEntry) -> EntryOut:
     return EntryOut.model_validate(asdict(entry))
 
 
-def _production_model(settings: Settings) -> ModelFor:
-    def model_for(caller: Caller) -> Model:
+def _production_model(settings: Settings, env: Mapping[str, str]) -> ModelFor:
+    def model_for(caller: Caller, model_id: str | None) -> Model:
+        entry = select_model(settings.models, model_id)
+        if entry.provider == "openai_compatible":
+            return openai_compatible_chat_model(
+                model=entry.model,
+                base_url=entry.base_url or "",
+                api_key=env.get(entry.api_key_env or "", ""),
+            )
         return databricks_chat_model(
-            endpoint=settings.serving_endpoint or "",
+            endpoint=entry.model,
             workspace_host=settings.workspace_host or "",
             access_token=request_token(
                 forwarded=caller.access_token,
@@ -259,4 +298,4 @@ def _production_model(settings: Settings) -> ModelFor:
 
 
 _settings = settings_from_env(os.environ)
-app = create_app(settings=_settings, model_for=_production_model(_settings))
+app = create_app(settings=_settings, model_for=_production_model(_settings, os.environ))

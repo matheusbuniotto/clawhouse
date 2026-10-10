@@ -14,3 +14,7 @@ env:
     valueFrom: serving-endpoint
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
+  - name: OPENROUTER_API_KEY
+    valueFrom: openrouter-api-key
+  - name: CRABRIKS_MODELS
+    value: '[{"id":"openrouter-llama","label":"Llama 3.3 70B (OpenRouter)","model":"meta-llama/llama-3.3-70b-instruct","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY"}]'
