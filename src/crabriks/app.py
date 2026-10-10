@@ -22,6 +22,7 @@ from crabriks.model import (
     openai_compatible_chat_model,
     select_model,
 )
+from crabriks.prompt import AGENT_NAME
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.shapes import SessionSummary, TranscriptEntry
 from crabriks.store import (
@@ -44,6 +45,7 @@ from crabriks.turn import (
     canonical_session_id,
     iter_turn,
 )
+from crabriks.workspace import resolve_agent_workspace
 
 STATIC = Path(__file__).parent / "static"
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -102,6 +104,7 @@ def create_app(
     app.state.store = store
     app.state.settings = settings
     app.state.model_for = model_for
+    app.state.workspace = resolve_agent_workspace(settings.agent_root, AGENT_NAME)
     _routes(app)
     return app
 
@@ -242,6 +245,7 @@ async def _stream_turn(
         store=request.app.state.store,
         model=model,
         now=lambda: datetime.now(UTC),
+        workspace=request.app.state.workspace,
     )
     iterator = iter_turn(session_id, message, ctx=ctx)
     first = await _first_item(iterator)

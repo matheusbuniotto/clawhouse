@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from pydantic_ai.messages import ModelMessage
@@ -22,6 +23,7 @@ from crabriks.turn import (
     TurnNotice,
     run_turn,
 )
+from crabriks.workspace import WorkspacePaths, resolve_agent_workspace
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 OWNER = "ada@example.com"
@@ -37,6 +39,7 @@ def _ctx(
     *,
     owner: str = OWNER,
     emit: list[TurnNotice] | None = None,
+    workspace: WorkspacePaths | None = None,
 ) -> TurnContext:
     async def capture(notice: TurnNotice) -> None:
         if emit is not None:
@@ -48,6 +51,7 @@ def _ctx(
         model=model,
         now=lambda: FROZEN,
         emit=capture,
+        workspace=workspace,
     )
 
 
@@ -73,6 +77,7 @@ async def _clock_then_reply(
     assert info.instructions is not None
     assert info.instructions.startswith("# Identity\nYou are Crabriks, the platform agent main.")
     assert f"session_id: {SESSION}" in info.instructions
+    assert "time: 2026-10-10T12:00:00Z" in info.instructions
     if "tool-return" not in _parts(messages):
         yield {0: DeltaToolCall(name="clock", json_args="{}", tool_call_id=CALL_ID)}
         return
@@ -225,6 +230,39 @@ async def test_another_user_cannot_continue_the_session() -> None:
         )
 
     assert [entry.content for entry in await store.transcript(SESSION, OWNER)] == ["hello", "HELLO"]
+
+
+async def test_editing_the_git_folder_changes_the_next_turn(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.directory.mkdir(parents=True)
+    paths.agents.write_text("Agree to alpha.\n", encoding="utf-8")
+    paths.agents.chmod(0o444)
+    seen: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen.append(info.instructions or "")
+        yield "ok"
+
+    ctx = _ctx(MemorySessionStore(), FunctionModel(stream_function=capture), workspace=paths)
+    first = await run_turn(SESSION, "hello", ctx=ctx)
+
+    assert first.status == "ok"
+    assert "Agree to alpha." in seen[0]
+    assert "[MISSING] SOUL.md" in seen[0]
+    assert f"session_id: {SESSION}" in seen[0]
+    assert paths.agents.read_text(encoding="utf-8") == "Agree to alpha.\n"
+
+    paths.agents.chmod(0o644)
+    paths.agents.write_text("Agree to beta.\n", encoding="utf-8")
+    paths.agents.chmod(0o444)
+    second = await run_turn(SESSION, "again", ctx=ctx)
+
+    assert second.status == "ok"
+    assert "Agree to beta." in seen[1]
+    assert "Agree to alpha." not in seen[1]
+    assert paths.agents.read_text(encoding="utf-8") == "Agree to beta.\n"
+    assert not paths.soul.exists()
 
 
 def _reply(text: str):

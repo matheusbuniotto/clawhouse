@@ -2,12 +2,18 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from crabriks.model import ModelEntry
 
 MODELS_ENV = "CRABRIKS_MODELS"
 DEFAULT_MODEL_ID = "databricks"
+
+
+def default_agent_root() -> Path:
+    """The app source root: two levels above this package when run from `src/`."""
+    return Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +23,7 @@ class Settings:
     serving_endpoint: str | None
     workspace_host: str | None
     models: tuple[ModelEntry, ...] = ()
+    agent_root: Path = field(default_factory=default_agent_root)
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:

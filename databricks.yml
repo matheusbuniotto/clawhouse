@@ -16,7 +16,8 @@ sync:
     - frontend/
     - "**/__pycache__/"
     - "**/*.pyc"
-    - AGENTS.md
+    # Root guide only. claw/agents/main/AGENTS.md is the platform agent file and must sync.
+    - /AGENTS.md
     - README.md
     - pyproject.toml
     - uv.lock
