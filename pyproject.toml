@@ -1,0 +1,125 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crabriks"
+version = "0.1.0"
+description = "Crabriks"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "complexipy>=0.4.0",
+    "pre-commit>=4.6.2",
+    "pyright>=1.1.395",
+    "ruff>=0.9.9",
+    "vulture>=2.14",
+]
+
+# ==============================================================================
+# RUFF CONFIGURATION
+# ==============================================================================
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = [
+    "F",      # Pyflakes (hallucinated variables, unused imports)
+    "E", "W", # pycodestyle
+    "I",      # isort
+    "UP",     # pyupgrade (modern Python syntax)
+    "YTT",    # flake8-2020
+    "B",      # flake8-bugbear (common bug patterns & premature ABC interfaces)
+    "BLE",    # flake8-blind-except (NO bare except or Exception swallowing)
+    "A",      # flake8-builtins (shadowing builtins)
+    "C4",     # flake8-comprehensions
+    "C90",    # mccabe (cyclomatic complexity)
+    "T10",    # flake8-debugger
+    "T20",    # flake8-print (disallow lingering print statements)
+    "SIM",    # flake8-simplify (collapsing redundant nested logic)
+    "RET",    # flake8-return (guard clauses, early returns)
+    "ARG",    # flake8-unused-arguments
+    "ERA",    # eradicate (commented-out dead code)
+    "PLR",    # Pylint Refactor (metrics & code structure)
+    "PLW",    # Pylint Warnings
+    "PLE",    # Pylint Errors
+    "PLC",    # Pylint Conventions
+    "TRY",    # tryceratops (exception best practices)
+    "RUF",    # Ruff-specific rules
+    "S110",   # Bandit: try-except-pass detection
+    "S112",   # Bandit: try-except-continue detection
+]
+
+ignore = [
+    # Critical: Intentionally omitted D100-D107. DO NOT force docstrings everywhere,
+    # as AI responds by generating vacuous, redundant narration.
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+
+    # Allow magic numbers in general expressions where obvious (e.g. status codes)
+    "PLR2004",
+
+    # Don't require long docstring error messages to be separate classes if trivial
+    "TRY003",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 9
+
+[tool.ruff.lint.pylint]
+max-branches = 8
+max-statements = 35
+max-args = 5
+max-positional-args = 4
+max-returns = 5
+max-nested-blocks = 3
+max-locals = 10
+max-public-methods = 15
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = [
+    "ARG",      # Fixtures often have unused arguments
+    "PLR0915",  # Integration tests often have many statements
+    "T201",     # Debug prints often acceptable in local test debugging
+]
+
+# ==============================================================================
+# PYRIGHT CONFIGURATION
+# ==============================================================================
+[tool.pyright]
+include = ["src"]
+exclude = ["**/node_modules", "**/__pycache__", ".venv"]
+typeCheckingMode = "standard"
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportUnusedImport = false      # Handled by Ruff F401
+reportUnusedVariable = false    # Handled by Ruff F841
+reportDuplicateImport = true
+reportGeneralTypeIssues = true
+reportOptionalMemberAccess = true
+reportPrivateUsage = "warning"
+
+# ==============================================================================
+# VULTURE CONFIGURATION (Whole-project dead code)
+# ==============================================================================
+[tool.vulture]
+paths = ["src"]
+min_confidence = 80
+ignore_names = ["*__", "test_*"]

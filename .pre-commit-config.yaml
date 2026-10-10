@@ -1,0 +1,38 @@
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+fail_fast: true
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  # 1. Fast formatting & linting with Ruff (auto-fixing what it can)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.9
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # 2. Cognitive Complexity Gate (Rust-powered)
+  - repo: https://github.com/rohaquinlop/complexipy-pre-commit
+    rev: v6.1.0
+    hooks:
+      - id: complexipy
+        args: [--max-complexity-allowed=15]
+
+  # 3. Static Type Check / Hallucination Gate with Pyright
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.395
+    hooks:
+      - id: pyright
+        pass_filenames: false
+        always_run: true

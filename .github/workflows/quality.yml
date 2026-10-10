@@ -1,0 +1,47 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Code Quality & Complexity Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Ruff Lint & Format Check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Cognitive Complexity Gate (Complexipy)
+        run: uv run complexipy src -c 15
+
+      - name: Type Check & Hallucination Guard (Pyright)
+        run: uv run pyright
+
+      - name: Dead Code Audit (Vulture)
+        run: uv run vulture src --min-confidence 80
+
+      - name: Duplicate Code Check (jscpd)
+        run: |
+          npx jscpd@5 src \
+            --threshold 3 \
+            --min-lines 5 \
+            --min-tokens 50 \
+            --reporters console
