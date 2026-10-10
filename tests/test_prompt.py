@@ -1,8 +1,12 @@
 """Cache-stable system prompt for the platform agent."""
 
+from pathlib import Path
+
 import pytest
 
-from crabriks.prompt import CLOCK, build_system_prompt
+from crabriks.bootstrap import BootstrapContext, BootstrapFile
+from crabriks.prompt import CLOCK, RuntimeMeta, SkillCard, build_system_prompt
+from crabriks.workspace import resolve_agent_workspace
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
 SESSION_B = "22222222-2222-4222-8222-222222222222"
@@ -16,8 +20,8 @@ You are Crabriks, the platform agent main.
 
 
 def test_prefix_ignores_the_session_and_suffix_names_it() -> None:
-    first = build_system_prompt(tools=(CLOCK,), session_id=SESSION_A)
-    second = build_system_prompt(tools=(CLOCK,), session_id=SESSION_B)
+    first = build_system_prompt(tools=(CLOCK,), runtime=RuntimeMeta(session_id=SESSION_A))
+    second = build_system_prompt(tools=(CLOCK,), runtime=RuntimeMeta(session_id=SESSION_B))
 
     assert first.prefix == EXPECTED_PREFIX
     assert second.prefix == EXPECTED_PREFIX
@@ -28,4 +32,141 @@ def test_prefix_ignores_the_session_and_suffix_names_it() -> None:
 
 def test_agent_without_a_tool_is_rejected() -> None:
     with pytest.raises(ValueError, match="at least one tool"):
-        build_system_prompt(tools=(), session_id=SESSION_A)
+        build_system_prompt(tools=(), runtime=RuntimeMeta(session_id=SESSION_A))
+
+
+def test_sections_follow_fixed_order_and_the_prefix_ignores_the_session(
+    tmp_path: Path,
+) -> None:
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    bootstrap = _bootstrap(
+        {
+            "AGENTS.md": "Follow the agreement.",
+            "SOUL.md": "Be brief.",
+            "IDENTITY.md": "Name: Crabriks.",
+            "USER.md": "Prefers tables.",
+            "MEMORY.md": "Lakebase holds sessions.",
+        }
+    )
+    directory = (tmp_path / "claw" / "agents" / "main").as_posix()
+    expected_prefix = f"""\
+# Identity
+You are Crabriks, the platform agent main.
+
+## SOUL.md
+Be brief.
+
+## IDENTITY.md
+Name: Crabriks.
+
+# Tools
+- clock: Return the current UTC time as an ISO-8601 timestamp.
+
+# Skills
+- sql: Run a warehouse query.
+
+# Project Context
+## AGENTS.md
+Follow the agreement.
+
+## USER.md
+Prefers tables.
+
+## MEMORY.md
+Lakebase holds sessions.
+
+# Workspace
+{directory}"""
+
+    first = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+        bootstrap=bootstrap,
+        workspace=workspace,
+        skills=(SkillCard(name="sql", description="Run a warehouse query."),),
+    )
+    second = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_B),
+        bootstrap=bootstrap,
+        workspace=workspace,
+        skills=(SkillCard(name="sql", description="Run a warehouse query."),),
+    )
+
+    assert first.prefix == expected_prefix
+    assert second.prefix == expected_prefix
+    assert SESSION_A not in first.prefix
+    assert first.suffix == f"# Runtime\nsession_id: {SESSION_A}"
+    assert second.suffix == f"# Runtime\nsession_id: {SESSION_B}"
+    assert first.text == f"{expected_prefix}\n\n{first.suffix}"
+
+
+def test_the_clock_time_stays_in_the_per_turn_suffix() -> None:
+    first = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A, time="2026-10-10T12:00:00Z"),
+    )
+    second = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A, time="2026-10-10T12:05:00Z"),
+    )
+
+    assert first.prefix == second.prefix == EXPECTED_PREFIX
+    assert "2026-10-10" not in first.prefix
+    assert first.suffix == f"# Runtime\nsession_id: {SESSION_A}\ntime: 2026-10-10T12:00:00Z"
+    assert second.suffix == f"# Runtime\nsession_id: {SESSION_A}\ntime: 2026-10-10T12:05:00Z"
+
+
+def test_empty_skills_project_and_workspace_sections_are_omitted() -> None:
+    bootstrap = _bootstrap(dict.fromkeys(_NAMES, ""))
+
+    prompt = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+        bootstrap=bootstrap,
+    )
+
+    assert prompt.prefix == EXPECTED_PREFIX
+    assert "# Skills" not in prompt.text
+    assert "# Project Context" not in prompt.text
+    assert "# Workspace" not in prompt.text
+
+
+def test_a_truncation_notice_appears_once_and_names_no_file() -> None:
+    bootstrap = BootstrapContext(
+        files=(
+            BootstrapFile(name="AGENTS.md", text="Follow the agreement."),
+            BootstrapFile(name="SOUL.md", text="[MISSING] SOUL.md"),
+            BootstrapFile(name="IDENTITY.md", text=""),
+            BootstrapFile(name="USER.md", text=""),
+            BootstrapFile(name="MEMORY.md", text=""),
+        ),
+        notice="Bootstrap context was truncated to fit the budget.",
+    )
+
+    prompt = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+        bootstrap=bootstrap,
+    )
+
+    assert prompt.text.count("Bootstrap context was truncated to fit the budget.") == 1
+    assert "## SOUL.md\n[MISSING] SOUL.md" in prompt.prefix
+    assert "## IDENTITY.md" not in prompt.text
+    project = (
+        "# Project Context\n"
+        "## AGENTS.md\n"
+        "Follow the agreement.\n\n"
+        "Bootstrap context was truncated to fit the budget."
+    )
+    assert project in prompt.text
+
+
+_NAMES = ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")
+
+
+def _bootstrap(contents: dict[str, str]) -> BootstrapContext:
+    return BootstrapContext(
+        files=tuple(BootstrapFile(name=name, text=contents.get(name, "")) for name in _NAMES),
+        notice=None,
+    )

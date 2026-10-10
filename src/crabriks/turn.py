@@ -20,11 +20,13 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 
-from crabriks.agent import TurnDeps, crabriks_agent
+from crabriks.agent import TurnDeps, crabriks_agent, format_utc
+from crabriks.bootstrap import BootstrapContext, load_bootstrap
 from crabriks.history import to_model_messages
-from crabriks.prompt import CLOCK, build_system_prompt
+from crabriks.prompt import CLOCK, RuntimeMeta, build_system_prompt
 from crabriks.shapes import TranscriptEntry, TurnResult, TurnStatus
 from crabriks.store import RunInProgress, SessionForbidden, SessionStore
+from crabriks.workspace import WorkspacePaths
 
 logger = logging.getLogger("crabriks.turn")
 
@@ -74,6 +76,7 @@ class TurnContext:
     model: Model
     now: Callable[[], datetime]
     emit: Emit | None = None
+    workspace: WorkspacePaths | None = None
 
 
 def canonical_session_id(value: str) -> str:
@@ -172,7 +175,12 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     await _append_user(claimed)
-    prompt = build_system_prompt(tools=(CLOCK,), session_id=claimed.session_id)
+    prompt = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
+        bootstrap=_bootstrap(ctx),
+        workspace=ctx.workspace,
+    )
     result = await crabriks_agent().run(
         claimed.user_message,
         message_history=to_model_messages(prior) or None,
@@ -191,6 +199,12 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         error=None,
         transcript=transcript,
     )
+
+
+def _bootstrap(ctx: TurnContext) -> BootstrapContext | None:
+    if ctx.workspace is None:
+        return None
+    return load_bootstrap(ctx.workspace)
 
 
 async def _append_user(claimed: _Claimed) -> None:

@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -16,6 +17,7 @@ from crabriks.model import MissingAccessToken, ModelEntry, UnknownModel
 from crabriks.settings import Settings
 from crabriks.store import MemorySessionStore
 from crabriks.turn import BUSY_TURN, FAILED_TURN
+from crabriks.workspace import resolve_agent_workspace
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 HEADERS = {
@@ -170,6 +172,45 @@ async def test_an_unknown_model_is_refused() -> None:
         )
 
     assert response.status_code == 422
+
+
+async def test_a_turn_reads_the_platform_agent_folder(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.directory.mkdir(parents=True)
+    paths.identity.write_text("Name: FromDisk\n", encoding="utf-8")
+    seen: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen.append(info.instructions or "")
+        yield "ok"
+
+    settings = Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host=None,
+        agent_root=tmp_path,
+    )
+
+    def model_for(caller: Caller, model_id: str | None) -> FunctionModel:
+        del model_id
+        if not caller.access_token:
+            raise MissingAccessToken
+        return FunctionModel(stream_function=capture)
+
+    app = create_app(settings=settings, model_for=model_for, store=MemorySessionStore())
+    async with _client(app) as client:
+        response = await client.post(
+            f"/api/sessions/{SESSION}/turns",
+            headers=HEADERS,
+            json={"message": "hello"},
+        )
+
+    assert response.status_code == 200
+    assert "Name: FromDisk" in seen[0]
+    assert "[MISSING] AGENTS.md" in seen[0]
+    assert paths.identity.read_text(encoding="utf-8") == "Name: FromDisk\n"
 
 
 async def test_a_turn_streams_over_sse_and_survives_reload() -> None:
