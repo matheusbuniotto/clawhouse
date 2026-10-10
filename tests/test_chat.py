@@ -213,6 +213,49 @@ async def test_a_turn_reads_the_platform_agent_folder(tmp_path: Path) -> None:
     assert paths.identity.read_text(encoding="utf-8") == "Name: FromDisk\n"
 
 
+async def test_a_turn_includes_discovered_skills_in_prompt(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.skills.mkdir(parents=True)
+    sql_dir = paths.skills / "sql"
+    sql_dir.mkdir()
+    (sql_dir / "SKILL.md").write_text(
+        "---\nname: sql\ndescription: Run a warehouse query.\n---\n# Secret Body\nBody text.\n",
+        encoding="utf-8",
+    )
+    seen: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen.append(info.instructions or "")
+        yield "ok"
+
+    settings = Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host=None,
+        agent_root=tmp_path,
+    )
+
+    def model_for(caller: Caller, model_id: str | None) -> FunctionModel:
+        del model_id
+        if not caller.access_token:
+            raise MissingAccessToken
+        return FunctionModel(stream_function=capture)
+
+    app = create_app(settings=settings, model_for=model_for, store=MemorySessionStore())
+    async with _client(app) as client:
+        response = await client.post(
+            f"/api/sessions/{SESSION}/turns",
+            headers=HEADERS,
+            json={"message": "hello"},
+        )
+
+    assert response.status_code == 200
+    assert "# Skills\n- sql: Run a warehouse query." in seen[0]
+    assert "Secret Body" not in seen[0]
+
+
 async def test_a_turn_streams_over_sse_and_survives_reload() -> None:
     store = MemorySessionStore()
     app = _app(store, FunctionModel(stream_function=_clock))

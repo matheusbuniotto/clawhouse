@@ -23,8 +23,9 @@ from pydantic_ai.models import Model
 from crabriks.agent import TurnDeps, crabriks_agent, format_utc
 from crabriks.bootstrap import BootstrapContext, load_bootstrap
 from crabriks.history import to_model_messages
-from crabriks.prompt import CLOCK, RuntimeMeta, build_system_prompt
+from crabriks.prompt import BUILTIN_TOOLS, RuntimeMeta, build_system_prompt
 from crabriks.shapes import TranscriptEntry, TurnResult, TurnStatus
+from crabriks.skills import SkillsCache, SkillsCatalog, load_skills
 from crabriks.store import RunInProgress, SessionForbidden, SessionStore
 from crabriks.workspace import WorkspacePaths
 
@@ -77,6 +78,7 @@ class TurnContext:
     now: Callable[[], datetime]
     emit: Emit | None = None
     workspace: WorkspacePaths | None = None
+    skills_cache: SkillsCache | None = None
 
 
 def canonical_session_id(value: str) -> str:
@@ -171,22 +173,31 @@ def _status(holder: list[TurnResult]) -> TurnStatus:
     return holder[0].status
 
 
+def _skills_for_session(claimed: _Claimed) -> SkillsCatalog:
+    if claimed.ctx.skills_cache is not None:
+        return claimed.ctx.skills_cache.get_or_discover(claimed.session_id, claimed.ctx.workspace)
+    skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
+    return load_skills(skills_dir)
+
+
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     await _append_user(claimed)
+    skills = _skills_for_session(claimed)
     prompt = build_system_prompt(
-        tools=(CLOCK,),
+        tools=BUILTIN_TOOLS,
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
         bootstrap=_bootstrap(ctx),
         workspace=ctx.workspace,
+        skills=skills.cards(),
     )
     result = await crabriks_agent().run(
         claimed.user_message,
         message_history=to_model_messages(prior) or None,
         model=ctx.model,
         instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now),
+        deps=TurnDeps(now=ctx.now, skills=skills),
         event_stream_handler=_persist_and_emit(claimed, queue),
     )
     reply = result.output if isinstance(result.output, str) else str(result.output)
