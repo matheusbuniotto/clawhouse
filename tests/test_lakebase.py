@@ -51,7 +51,9 @@ async def test_one_running_claim_per_session_and_a_reloadable_transcript() -> No
 
 async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg.Pool) -> None:
     await store.migrate()
-    await pool.execute("TRUNCATE transcript_entries, runs, sessions CASCADE")
+    await pool.execute(
+        "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+    )
     index = await pool.fetchval(
         "SELECT indexdef FROM pg_indexes WHERE indexname = 'runs_one_running_per_session'"
     )
