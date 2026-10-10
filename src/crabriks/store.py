@@ -1,10 +1,11 @@
 """Session, transcript, and run-lock storage.
 
 The production store is Lakebase. A partial unique index on running runs is the
-lock: two claims for one session cannot both commit. Apps authenticate with an
-OAuth token minted from `LAKEBASE_ENDPOINT`; a postgres URI or `PGPASSWORD` is
-the local path. `MemorySessionStore` is the same contract for tests and for a
-process with no database.
+lock: two claims for one session cannot both commit. A running row older than
+10 minutes is finished as error, so a dead process does not hold the session.
+Apps authenticate with an OAuth token minted from `LAKEBASE_ENDPOINT`; a
+postgres URI or `PGPASSWORD` is the local path. `MemorySessionStore` is the
+same contract for tests and for a process with no database.
 """
 
 import asyncio
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS transcript_entries (
 """
 
 _RUNNING_INDEX = "runs_one_running_per_session"
+_STALE_RUN_MINUTES = 10
 
 
 class SessionStore(Protocol):
@@ -150,18 +152,53 @@ class LakebaseSessionStore:
             await _insert_or_check_owner(cast_querier(conn), session, owner_id)
 
     async def claim_run(self, session_id: str) -> str:
-        run_id = uuid4()
+        first = await self._insert_or_reclaim(session_id)
+        if first is not None:
+            return first
         try:
-            await self._pool.execute(
-                "INSERT INTO runs (id, session_id, status) VALUES ($1, $2, 'running')",
-                run_id,
-                _uuid(session_id),
-            )
+            return await self._insert_running(session_id)
         except asyncpg.UniqueViolationError as exc:
             if _constraint_name(exc) == _RUNNING_INDEX:
                 raise RunInProgress(session_id) from exc
             raise
+
+    async def _insert_or_reclaim(self, session_id: str) -> str | None:
+        try:
+            return await self._insert_running(session_id)
+        except asyncpg.UniqueViolationError as exc:
+            if _constraint_name(exc) != _RUNNING_INDEX:
+                raise
+            if not await self._reclaim_stale(session_id):
+                raise RunInProgress(session_id) from exc
+            return None
+
+    async def _insert_running(self, session_id: str) -> str:
+        run_id = uuid4()
+        await self._pool.execute(
+            "INSERT INTO runs (id, session_id, status) VALUES ($1, $2, 'running')",
+            run_id,
+            _uuid(session_id),
+        )
         return str(run_id)
+
+    async def _reclaim_stale(self, session_id: str) -> bool:
+        reclaimed = await self._pool.fetchval(
+            """
+            UPDATE runs
+            SET status = 'error', finished_at = now()
+            WHERE id = (
+                SELECT id FROM runs
+                WHERE session_id = $1
+                  AND status = 'running'
+                  AND started_at < now() - make_interval(mins => $2)
+                LIMIT 1
+            )
+            RETURNING id
+            """,
+            _uuid(session_id),
+            _STALE_RUN_MINUTES,
+        )
+        return reclaimed is not None
 
     async def append_entry(self, session_id: str, run_id: str, entry: TranscriptEntry) -> None:
         session = _uuid(session_id)

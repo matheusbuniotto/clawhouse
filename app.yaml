@@ -2,7 +2,8 @@
 # Add a serving endpoint (key serving-endpoint) and a Lakebase Autoscaling
 # database (key postgres) in the app UI. The platform injects PGHOST, PGPORT,
 # PGUSER, PGDATABASE, and PGSSLMODE. Do not set CRABRIKS_DEV_USER or
-# DATABRICKS_TOKEN here.
+# DATABRICKS_TOKEN here. Create the app with user-authorization scope
+# `model-serving`, or the forwarded user token cannot call the endpoint.
 command:
   - uvicorn
   - crabriks.app:app

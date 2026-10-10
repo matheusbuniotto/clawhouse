@@ -51,4 +51,4 @@ CRABRIKS_DEV_USER=you@example.com CRABRIKS_STORE=memory \
 
 The page is at <http://localhost:8000/chat>. A turn needs a Databricks user token and a serving endpoint. Forward the token as `X-Forwarded-Access-Token`, or set `DATABRICKS_TOKEN` when the caller is `CRABRIKS_DEV_USER`. Also set `SERVING_ENDPOINT` and `DATABRICKS_HOST`. Without them the page loads, and a turn returns 401 or 503.
 
-On Databricks Apps, `app.yaml` names the serving endpoint and the Lakebase Autoscaling endpoint. The platform injects `PGHOST`, `PGUSER`, `PGDATABASE`, `PGPORT`, and `PGSSLMODE`. The app mints a short-lived database password from `LAKEBASE_ENDPOINT`. Do not set `CRABRIKS_DEV_USER` or `DATABRICKS_TOKEN` on the deployed app.
+On Databricks Apps, `app.yaml` names the serving endpoint and the Lakebase Autoscaling endpoint. The platform injects `PGHOST`, `PGUSER`, `PGDATABASE`, `PGPORT`, and `PGSSLMODE`. The app mints a short-lived database password from `LAKEBASE_ENDPOINT`. Create the app with user-authorization scope `model-serving`, or the forwarded user token cannot call the endpoint. Do not set `CRABRIKS_DEV_USER` or `DATABRICKS_TOKEN` on the deployed app.

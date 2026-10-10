@@ -20,9 +20,8 @@ def to_model_messages(entries: Sequence[TranscriptEntry]) -> list[ModelMessage]:
     index = 0
     while index < len(entries):
         consumed = _append_entry(messages, entries, index)
-        if consumed == 0:
-            break
-        index += consumed
+        # An unpaired tool call is omitted. Later turns still replay.
+        index += consumed or 1
     return messages
 
 

@@ -175,11 +175,12 @@ function onFrame(frame: SseFrame): void {
   }
 }
 
-async function readSse(response: Response): Promise<void> {
+async function readSse(response: Response): Promise<boolean> {
   const reader = response.body?.getReader();
-  if (!reader) return;
+  if (!reader) return false;
   const decoder = new TextDecoder();
   let buffer = "";
+  let finished = false;
   for (;;) {
     const chunk = await reader.read();
     if (chunk.done) break;
@@ -188,9 +189,12 @@ async function readSse(response: Response): Promise<void> {
     buffer = frames.pop() ?? "";
     for (const raw of frames) {
       const frame = parseFrame(raw);
-      if (frame) onFrame(frame);
+      if (!frame) continue;
+      onFrame(frame);
+      if (frame.event === "done" || frame.event === "error") finished = true;
     }
   }
+  return finished;
 }
 
 async function sendMessage(text: string): Promise<void> {
@@ -214,9 +218,14 @@ async function sendMessage(text: string): Promise<void> {
   }
   transcript.querySelector(".empty")?.remove();
   transcript.append(el("p", "bubble user", text));
+  let finished = false;
   try {
-    await readSse(response);
+    finished = await readSse(response);
   } finally {
+    if (!finished) {
+      dropDraft();
+      setStatus("The turn failed before a reply was completed.");
+    }
     setBusy(false);
     input.focus();
   }

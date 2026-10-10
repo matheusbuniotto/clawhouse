@@ -3,6 +3,7 @@
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from uuid import UUID
 
 import asyncpg
 import pytest
@@ -68,7 +69,14 @@ async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg
     first = await store.claim_run(SESSION)
     with pytest.raises(RunInProgress):
         await store.claim_run(SESSION)
-    await store.finish_run(SESSION, first, "ok")
+    await pool.execute(
+        "UPDATE runs SET started_at = now() - make_interval(mins => 11) WHERE id = $1",
+        UUID(first),
+    )
+    reclaimed = await store.claim_run(SESSION)
+    assert reclaimed != first
+    assert await pool.fetchval("SELECT status FROM runs WHERE id = $1", UUID(first)) == "error"
+    await store.finish_run(SESSION, reclaimed, "ok")
     await store.claim_run(SESSION)
 
     assert result.transcript == (
