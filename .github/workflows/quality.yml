@@ -2,9 +2,8 @@ name: Quality Gate
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
 
 jobs:
   quality:
@@ -30,7 +29,7 @@ jobs:
           uv run ruff format --check .
 
       - name: Cognitive Complexity Gate (Complexipy)
-        run: uv run complexipy src -c 15
+        run: uv run complexipy src --max-complexity-allowed 15
 
       - name: Type Check & Hallucination Guard (Pyright)
         run: uv run pyright
