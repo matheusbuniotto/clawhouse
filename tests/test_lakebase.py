@@ -72,12 +72,15 @@ async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg
     with pytest.raises(RunInProgress):
         await store.claim_run(SESSION)
     await pool.execute(
-        "UPDATE runs SET started_at = now() - make_interval(mins => 11) WHERE id = $1",
+        "UPDATE crabriks.runs SET started_at = now() - make_interval(mins => 11) WHERE id = $1",
         UUID(first),
     )
     reclaimed = await store.claim_run(SESSION)
     assert reclaimed != first
-    assert await pool.fetchval("SELECT status FROM runs WHERE id = $1", UUID(first)) == "error"
+    assert (
+        await pool.fetchval("SELECT status FROM crabriks.runs WHERE id = $1", UUID(first))
+        == "error"
+    )
     await store.finish_run(SESSION, reclaimed, "ok")
     await store.claim_run(SESSION)
 
