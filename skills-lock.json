@@ -19,6 +19,12 @@
       "skillPath": "skills/engineering/codebase-design/SKILL.md",
       "computedHash": "b2888e4f4e8c0af3bfd557575a64b905c44e6248c3101d72077816882b3a92b9"
     },
+    "databricks-apps-frontend-design": {
+      "source": "iamwonseokchoi/useful-databricks-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-apps-frontend-design/SKILL.md",
+      "computedHash": "46cfc75e4a96e3e128d2bb89f7e7545771015e251bc2e2786540b75ebf562d3b"
+    },
     "domain-modeling": {
       "source": "mattpocock/skills",
       "sourceType": "github",
