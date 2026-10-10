@@ -9,14 +9,26 @@ description = "Crabriks"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "asyncpg>=0.32.0",
     "databricks-sdk>=0.151.0",
+    "fastapi>=0.143.0",
+    "pydantic-ai>=2.55.0",
+    "uvicorn[standard]>=0.54.0",
 ]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/crabriks/static/index.html" = "crabriks/static/index.html"
+"src/crabriks/static/chat.css" = "crabriks/static/chat.css"
+"src/crabriks/static/chat.js" = "crabriks/static/chat.js"
 
 [dependency-groups]
 dev = [
     "complexipy>=0.4.0",
+    "httpx>=0.28.1",
     "pre-commit>=4.6.2",
     "pyright>=1.1.395",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.9.9",
     "vulture>=2.14",
 ]
@@ -105,10 +117,19 @@ max-public-methods = 15
 ]
 
 # ==============================================================================
+# PYTEST
+# ==============================================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+# ==============================================================================
 # PYRIGHT CONFIGURATION
 # ==============================================================================
 [tool.pyright]
-include = ["src"]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
 exclude = ["**/node_modules", "**/__pycache__", ".venv"]
 typeCheckingMode = "standard"
 reportMissingImports = true

@@ -10,6 +10,20 @@ jobs:
   quality:
     name: Code Quality & Complexity Gate
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crabriks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +44,7 @@ jobs:
           uv run ruff format --check .
 
       - name: Cognitive Complexity Gate (Complexipy)
-        run: uv run complexipy src -c 15
+        run: uv run complexipy src --max-complexity-allowed 15
 
       - name: Type Check & Hallucination Guard (Pyright)
         run: uv run pyright
@@ -45,3 +59,8 @@ jobs:
             --min-lines 5 \
             --min-tokens 50 \
             --reporters console
+
+      - name: Tests
+        env:
+          CRABRIKS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/crabriks
+        run: uv run pytest -q --tb=short

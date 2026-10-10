@@ -1,0 +1,15 @@
+# Uvicorn reads UVICORN_HOST and UVICORN_PORT, which the Apps runtime sets.
+# Add a serving endpoint (key serving-endpoint) and a Lakebase Autoscaling
+# database (key postgres) in the app UI. The platform injects PGHOST, PGPORT,
+# PGUSER, PGDATABASE, and PGSSLMODE. Do not set CRABRIKS_DEV_USER or
+# DATABRICKS_TOKEN here.
+command:
+  - uvicorn
+  - crabriks.app:app
+env:
+  - name: PYTHONPATH
+    value: src
+  - name: SERVING_ENDPOINT
+    valueFrom: serving-endpoint
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres

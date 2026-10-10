@@ -1,0 +1,6 @@
+# Databricks Apps runtime. Development tools stay in the uv dev group.
+asyncpg>=0.32.0
+databricks-sdk>=0.151.0
+fastapi>=0.143.0
+pydantic-ai>=2.55.0
+uvicorn[standard]>=0.54.0

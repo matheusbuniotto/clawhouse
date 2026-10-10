@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crabriks</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/chat.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <p class="mark">Crabriks</p>
+        <p id="who" class="who">Checking sign-in…</p>
+      </header>
+      <main id="log" class="log" aria-live="polite"></main>
+      <form id="composer" class="composer">
+        <label class="sr" for="message">Message</label>
+        <textarea id="message" rows="1" placeholder="Message the agent" required></textarea>
+        <button type="submit">Send</button>
+        <p id="status" class="status" role="status"></p>
+      </form>
+    </div>
+    <script type="module" src="/chat.js"></script>
+  </body>
+</html>
