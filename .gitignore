@@ -41,3 +41,6 @@ htmlcov/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Agent run logs
+logs/
