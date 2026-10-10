@@ -1,0 +1,3 @@
+interface:
+  display_name: "Databricks CLI"
+  short_description: "Official CLI for workspace operations"
