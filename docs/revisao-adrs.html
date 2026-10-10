@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Revisão ADRs — DatabricksClaw</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0f0f12; color: #f0f0f0; padding: 24px; max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .sub { color: #999; font-size: 14px; margin-bottom: 20px; }
+  .card { background: #1a1a20; border: 1px solid #2c2c35; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 18px; margin-bottom: 8px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 20px; margin-bottom: 10px; }
+  .ok { background: #1a3d1f; color: #5fd97a; }
+  .draft { background: #3d3319; color: #f0c441; }
+  .tldr { font-size: 16px; line-height: 1.5; margin: 10px 0; }
+  .tldr li { margin-bottom: 6px; list-style: none; }
+  .risk { background: #2a1a1a; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 10px; color: #ffb3b3; }
+  .decide { display: flex; gap: 10px; margin-top: 14px; }
+  .decide button { flex: 1; padding: 12px; font-size: 15px; font-weight: 700; border: none; border-radius: 8px; cursor: pointer; }
+  .yes { background: #22c55e; color: #000; }
+  .no { background: #33333c; color: #fff; }
+  .decide button.picked-yes { outline: 3px solid #86efac; }
+  .decide button.picked-no { outline: 3px solid #f0c441; }
+  .footer { margin-top: 24px; padding: 16px; background: #1a1a20; border-radius: 12px; font-size: 14px; color: #aaa; }
+  .footer b { color: #fff; }
+  #progress { position: sticky; top: 0; background: #0f0f12; padding: 10px 0; font-size: 14px; color: #5fd97a; font-weight: 700; }
+  a { color: #7db8ff; }
+</style>
+</head>
+<body>
+<h1>🧠 Revisão rápida — 3 decisões</h1>
+<p class="sub">Leitura de 3 min. Frases curtas. Aperte ✅ ou ❌ em cada uma.</p>
+<div id="progress">0 de 4 revisados</div>
+
+<div class="card" id="adr1">
+  <span class="badge ok">✅ ACEITA</span>
+  <h2>1. Backend FastAPI + tela em TypeScript</h2>
+  <ul class="tldr">
+    <li>🔧 <b>Backend:</b> FastAPI (API com tipos, roda bem no Databricks App)</li>
+    <li>🖥️ <b>Tela:</b> TypeScript / HTML simples</li>
+    <li>🚫 <b>Fora:</b> Dash e Streamlit (não entram no MVP)</li>
+  </ul>
+  <p style="font-size:14px;color:#aaa">Na prática: o chat chama a API. O resto é detalhe.</p>
+  <div class="decide">
+    <button class="yes" onclick="vote('adr1',true,this)">✅ Mantém</button>
+    <button class="no" onclick="vote('adr1',false,this)">❌ Mudar</button>
+  </div>
+</div>
+
+<div class="card" id="adr2">
+  <span class="badge ok">✅ ACEITA</span>
+  <h2>2. Onde salva: Lakebase + pasta do usuário</h2>
+  <ul class="tldr">
+    <li>🗄️ <b>Conversas e sessões</b> → Lakebase (banco Postgres gerenciado)</li>
+    <li>📁 <b>Arquivos do agente</b> (AGENTS.md, memória, skills) → pasta do usuário</li>
+    <li>🔑 Permissão segue as duas camadas (banco + arquivos)</li>
+  </ul>
+  <p style="font-size:14px;color:#aaa">Resumo: dado estruturado no banco, arquivo pessoal na pasta.</p>
+  <div class="decide">
+    <button class="yes" onclick="vote('adr2',true,this)">✅ Mantém</button>
+    <button class="no" onclick="vote('adr2',false,this)">❌ Mudar</button>
+  </div>
+</div>
+
+<div class="card" id="adr3">
+  <span class="badge draft">🟡 RASCUNHO — precisa do seu OK</span>
+  <h2>3. Cérebro: Pydantic AI (não deep-agents)</h2>
+  <ul class="tldr">
+    <li>🤖 <b>Escolha:</b> Pydantic AI (leve, tipado, encaixa no nosso desenho)</li>
+    <li>🔌 MCP via HTTP funciona. Token por usuário funciona. Streaming p/ tela funciona.</li>
+    <li>🧠 Memória e skills já vêm prontos no formato que a gente quer</li>
+    <li>❌ deep-agents: mais pesado (LangGraph), memória diferente, foco em LangSmith</li>
+  </ul>
+  <div class="risk">⚠️ <b>2 adaptações:</b> 1) modelo Databricks via API compatível OpenAI (sem provedor oficial) 2) nome de ferramenta com __ duplo feito no nosso módulo. Nenhum bloqueia.</div>
+  <div class="risk">⚠️ <b>Risco real:</b> streaming longo pode bater em timeout do proxy. Plano B: polling. Precisa de 1 teste no App deployado.</div>
+  <div class="decide">
+    <button class="yes" onclick="vote('adr3',true,this)">✅ Aprova</button>
+    <button class="no" onclick="vote('adr3',false,this)">❌ Rejeita</button>
+  </div>
+</div>
+
+<div class="card" id="rfc">
+  <span class="badge draft">🟡 RFC ABERTA</span>
+  <h2>4. Copiar a tela do OpenClaw</h2>
+  <ul class="tldr">
+    <li>📋 Inventário pronto: ~50 telas mapeadas, 26 descritas</li>
+    <li>✂️ <b>Copiar no v1:</b> chat, lista de sessões, status da execução, aprovação de ferramenta, erros</li>
+    <li>⏭️ <b>Depois:</b> canais (WhatsApp etc.), pareamento de devices, apps nativos</li>
+  </ul>
+  <div class="decide">
+    <button class="yes" onclick="vote('rfc',true,this)">✅ Lista ok</button>
+    <button class="no" onclick="vote('rfc',false,this)">❌ Ajustar</button>
+  </div>
+</div>
+
+<div class="footer" id="resumo">
+  <b>Resumo pra colar no chat:</b><br>
+  <span id="resumo-txt">Nada votado ainda.</span>
+</div>
+
+<script>
+const votes = {};
+function vote(id, val, btn) {
+  votes[id] = val;
+  const card = document.getElementById(id);
+  card.querySelectorAll('button').forEach(b => b.classList.remove('picked-yes','picked-no'));
+  btn.classList.add(val ? 'picked-yes' : 'picked-no');
+  const n = Object.keys(votes).length;
+  document.getElementById('progress').textContent = n + ' de 4 revisados';
+  const names = {adr1:'FastAPI+TS', adr2:'Lakebase', adr3:'PydanticAI', rfc:'UI-OpenClaw'};
+  const txt = Object.entries(votes).map(([k,v]) => names[k] + ': ' + (v ? '✅' : '❌')).join(' | ');
+  document.getElementById('resumo-txt').textContent = txt;
+}
+</script>
+</body>
+</html>
