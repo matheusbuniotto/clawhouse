@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crabriks · New session</title>
+    <link rel="stylesheet" href="/chat.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <p class="mark">Crabriks</p>
+        <p class="who">New session</p>
+      </header>
+      <nav class="nav">
+        <a href="/chat">Chat</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/new">New session</a>
+      </nav>
+      <main class="log">
+        <form id="start" class="start">
+          <p class="agent">Agent <strong>main</strong> · built-in, read-only</p>
+          <button type="submit">Start session</button>
+          <p id="status" class="status" role="status"></p>
+        </form>
+      </main>
+    </div>
+    <script type="module" src="/new.js"></script>
+  </body>
+</html>

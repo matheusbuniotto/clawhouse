@@ -1,4 +1,3 @@
-"use strict";
 const SESSION_KEY = "crabriks.session";
 const MODEL_KEY = "crabriks.model";
 const log = document.querySelector("#log");
@@ -20,6 +19,11 @@ const modelPicker = modelSelect;
 const sendButton = send;
 let draft = null;
 function sessionId() {
+    const fromUrl = new URLSearchParams(location.search).get("session");
+    if (fromUrl) {
+        sessionStorage.setItem(SESSION_KEY, fromUrl);
+        return fromUrl;
+    }
     const existing = sessionStorage.getItem(SESSION_KEY);
     if (existing)
         return existing;
@@ -243,3 +247,4 @@ modelPicker.addEventListener("change", () => {
 void loadIdentity();
 void loadModels();
 void loadTranscript();
+export {};

@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -305,7 +306,58 @@ async def test_blank_and_foreign_sessions_are_refused() -> None:
     assert bad_id.status_code == 422
 
 
-@pytest.mark.parametrize("path", ["/chat.js", "/chat.css"])
+async def test_the_sessions_list_is_scoped_to_the_caller() -> None:
+    store = MemorySessionStore()
+    app = _app(store, FunctionModel(stream_function=_reply("ok")))
+    other = "22222222-2222-4222-8222-222222222222"
+    async with _client(app) as client:
+        await client.post(
+            f"/api/sessions/{SESSION}/turns", headers=HEADERS, json={"message": "first"}
+        )
+        await client.post(
+            f"/api/sessions/{other}/turns", headers=HEADERS, json={"message": "second"}
+        )
+        listed = await client.get("/api/sessions", headers=HEADERS)
+        grace = await client.get(
+            "/api/sessions",
+            headers={
+                "x-forwarded-email": "grace@example.com",
+                "x-forwarded-access-token": "dapi-other",
+            },
+        )
+
+    body = listed.json()["sessions"]
+    assert [session["title"] for session in body] == ["second", "first"]
+    assert {session["id"] for session in body} == {SESSION, other}
+    assert grace.json() == {"sessions": []}
+
+
+async def test_starting_a_session_creates_it_for_the_caller() -> None:
+    store = MemorySessionStore()
+    app = _app(store, FunctionModel(stream_function=_reply("ok")))
+    async with _client(app) as client:
+        created = await client.post("/api/sessions", headers=HEADERS)
+        listed = await client.get("/api/sessions", headers=HEADERS)
+
+    assert created.status_code == 201
+    body = created.json()
+    UUID(body["id"])
+    assert body["title"] == ""
+    assert [session["id"] for session in listed.json()["sessions"]] == [body["id"]]
+
+
+@pytest.mark.parametrize("path", ["/sessions", "/new"])
+async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) -> None:
+    app = _app(MemorySessionStore(), FunctionModel(stream_function=_reply("ok")))
+    async with _client(app) as client:
+        missing = await client.get(path)
+        page = await client.get(path, headers=HEADERS)
+
+    assert missing.status_code == 401
+    assert page.status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/chat.js", "/chat.css", "/sessions.js", "/new.js"])
 async def test_static_assets_are_served(path: str) -> None:
     app = _app(MemorySessionStore(), FunctionModel(stream_function=_reply("ok")))
     async with _client(app) as client:

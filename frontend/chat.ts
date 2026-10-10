@@ -41,6 +41,11 @@ const sendButton = send;
 let draft: HTMLParagraphElement | null = null;
 
 function sessionId(): string {
+  const fromUrl = new URLSearchParams(location.search).get("session");
+  if (fromUrl) {
+    sessionStorage.setItem(SESSION_KEY, fromUrl);
+    return fromUrl;
+  }
   const existing = sessionStorage.getItem(SESSION_KEY);
   if (existing) return existing;
   const created = crypto.randomUUID();
