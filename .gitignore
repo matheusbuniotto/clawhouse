@@ -44,3 +44,6 @@ Thumbs.db
 
 # Agent run logs
 logs/
+
+# Databricks Asset Bundle state
+.databricks/
