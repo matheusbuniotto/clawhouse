@@ -27,6 +27,7 @@ repos:
     rev: v6.1.0
     hooks:
       - id: complexipy
+        exclude: ^\.agents/skills/databricks-
         args: [--max-complexity-allowed=15]
 
   # 3. Static Type Check / Hallucination Gate with Pyright

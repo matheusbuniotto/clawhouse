@@ -19,12 +19,6 @@
       "skillPath": "skills/engineering/codebase-design/SKILL.md",
       "computedHash": "b2888e4f4e8c0af3bfd557575a64b905c44e6248c3101d72077816882b3a92b9"
     },
-    "databricks-apps-frontend-design": {
-      "source": "iamwonseokchoi/useful-databricks-skills",
-      "sourceType": "github",
-      "skillPath": "skills/databricks-apps-frontend-design/SKILL.md",
-      "computedHash": "46cfc75e4a96e3e128d2bb89f7e7545771015e251bc2e2786540b75ebf562d3b"
-    },
     "domain-modeling": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -126,6 +120,76 @@
       "sourceType": "github",
       "skillPath": "skills/in-progress/writing-shape/SKILL.md",
       "computedHash": "0d0ac1150c4d65f8370ad194fc097ee17855247f6e5943d05f075806980e7401"
+    },
+    "databricks-app-design": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-app-design/SKILL.md",
+      "computedHash": "c41195b58a80939770fd289fb4b054283ae22af25d3984d504dea55c9b962f49",
+      "version": "0.2.10"
+    },
+    "databricks-apps": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-apps/SKILL.md",
+      "computedHash": "b49a630bb7f7b982ea0cbf17f6f043986968962582ac0e0a872ebc57ad155d4b",
+      "version": "0.2.10"
+    },
+    "databricks-apps-python": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-apps-python/SKILL.md",
+      "computedHash": "89c4fb79173e615412ed3db3665d72a39c66e71af984031dfbfb2218d155fadd",
+      "version": "0.2.10"
+    },
+    "databricks-core": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-core/SKILL.md",
+      "computedHash": "dd526c86abe8c1139dedb40d0fc1c243630b3ceee305d9f0c35b5d8dac42432f",
+      "version": "0.2.10"
+    },
+    "databricks-dbsql": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-dbsql/SKILL.md",
+      "computedHash": "7d58a08aac3ec601478332de9eb2d3146ab64ac0e1007b97cacaf29229ac4c6a",
+      "version": "0.2.10"
+    },
+    "databricks-jobs": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-jobs/SKILL.md",
+      "computedHash": "5293473c510665bf7393ea1d0a8d1d9297ed06bf94bb56ce6f4488bfd1e2cd32",
+      "version": "0.2.10"
+    },
+    "databricks-lakebase": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-lakebase/SKILL.md",
+      "computedHash": "155eaa65499902aac25a5ffb7cd5b5293329c373b52dec744558f0d252bdee8f",
+      "version": "0.2.10"
+    },
+    "databricks-model-serving": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-model-serving/SKILL.md",
+      "computedHash": "289590686e8eb93a3b2182dec932ed85d6336ea03792b9b6309f42b29976f507",
+      "version": "0.2.10"
+    },
+    "databricks-python-sdk": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-python-sdk/SKILL.md",
+      "computedHash": "1cf3702fd174d316e6fc8f836a3dfe2bad74595ce64352b6ae04128694aa240a",
+      "version": "0.2.10"
+    },
+    "databricks-unity-catalog": {
+      "source": "databricks/databricks-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/databricks-unity-catalog/SKILL.md",
+      "computedHash": "f7c19ee1ed74fcd0ed800b4f5d5dedd39b6c48de67559a38994d77b205f2341b",
+      "version": "0.2.10"
     }
   }
 }
