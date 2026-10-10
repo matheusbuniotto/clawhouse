@@ -1,12 +1,14 @@
 "use strict";
 const SESSION_KEY = "crabriks.session";
+const MODEL_KEY = "crabriks.model";
 const log = document.querySelector("#log");
 const who = document.querySelector("#who");
 const form = document.querySelector("#composer");
 const message = document.querySelector("#message");
 const statusNode = document.querySelector("#status");
+const modelSelect = document.querySelector("#model");
 const send = form?.querySelector("button");
-if (!log || !who || !form || !message || !statusNode || !send) {
+if (!log || !who || !form || !message || !statusNode || !modelSelect || !send) {
     throw new Error("chat page is missing a required element");
 }
 const transcript = log;
@@ -14,6 +16,7 @@ const identity = who;
 const composer = form;
 const input = message;
 const statusLine = statusNode;
+const modelPicker = modelSelect;
 const sendButton = send;
 let draft = null;
 function sessionId() {
@@ -82,6 +85,7 @@ function commitReply(reply) {
 function setBusy(busy) {
     input.disabled = busy;
     sendButton.disabled = busy;
+    modelPicker.disabled = busy;
 }
 function setStatus(text) {
     statusLine.textContent = text;
@@ -94,6 +98,25 @@ async function loadIdentity() {
     }
     const body = (await response.json());
     identity.textContent = body.user_id;
+}
+async function loadModels() {
+    const response = await fetch("/api/models");
+    if (!response.ok)
+        return;
+    const body = (await response.json());
+    const saved = sessionStorage.getItem(MODEL_KEY);
+    modelPicker.replaceChildren();
+    for (const option of body.models) {
+        const node = document.createElement("option");
+        node.value = option.id;
+        node.textContent = option.label;
+        modelPicker.append(node);
+    }
+    const wanted = saved && body.models.some((option) => option.id === saved)
+        ? saved
+        : body.models.find((option) => option.default)?.id;
+    if (wanted)
+        modelPicker.value = wanted;
 }
 async function loadTranscript() {
     const response = await fetch(`/api/sessions/${sessionId()}/transcript`);
@@ -172,7 +195,7 @@ async function sendMessage(text) {
     const response = await fetch(`/api/sessions/${sessionId()}/turns`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, model: modelPicker.value || null }),
     });
     if (response.status === 409) {
         const body = (await response.json());
@@ -214,5 +237,9 @@ input.addEventListener("keydown", (event) => {
         composer.requestSubmit();
     }
 });
+modelPicker.addEventListener("change", () => {
+    sessionStorage.setItem(MODEL_KEY, modelPicker.value);
+});
 void loadIdentity();
+void loadModels();
 void loadTranscript();

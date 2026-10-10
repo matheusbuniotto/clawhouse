@@ -113,6 +113,26 @@ body {
   padding: 8px 0 22px;
 }
 
+.model-row {
+  grid-column: 1 / -1;
+}
+
+.model {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf9;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+}
+
+.model:focus {
+  outline: 2px solid rgb(154 52 18 / 35%);
+  border-color: transparent;
+}
+
 textarea {
   grid-column: 1;
   width: 100%;
@@ -147,7 +167,8 @@ button {
 }
 
 button:disabled,
-textarea:disabled {
+textarea:disabled,
+select:disabled {
   cursor: progress;
   opacity: 0.6;
 }
