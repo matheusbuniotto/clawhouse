@@ -1,7 +1,7 @@
 # ADR-0003: Pydantic AI as the DatabricksClaw agent runtime
 
 Date: 2026-10-10
-Status: draft (proposed) — resolves the `deep-agents vs pydantic-ai` open question in issue #1, blocks the turn-orchestrator build
+Status: accepted (approved 2026-10-10 via HTML review: FastAPI+TS ✅ | Lakebase ✅ | PydanticAI ✅)
 Deciders: crabriks maintainers
 Related: [ADR-0001 FastAPI + TypeScript UI](0001-fastapi-typescript-ui.md), [ADR-0002 Lakebase + user workspace storage](0002-lakebase-workspace-storage.md), [issue #1 spec](../..), [issue #2 RFC](https://github.com/matheusbuniotto/crabriks/issues/2)
 
