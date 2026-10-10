@@ -21,6 +21,16 @@ class ToolCard:
 
 CLOCK = ToolCard(name=CLOCK_NAME, description=CLOCK_DESCRIPTION)
 
+SKILLS_SEARCH_NAME = "skills_search"
+SKILLS_SEARCH_DESCRIPTION = "Find relevant skills by matching name/description/goal."
+SKILLS_SEARCH = ToolCard(name=SKILLS_SEARCH_NAME, description=SKILLS_SEARCH_DESCRIPTION)
+
+SKILLS_READ_NAME = "skills_read"
+SKILLS_READ_DESCRIPTION = "Load the full skill body for an exact skill name."
+SKILLS_READ = ToolCard(name=SKILLS_READ_NAME, description=SKILLS_READ_DESCRIPTION)
+
+BUILTIN_TOOLS: tuple[ToolCard, ...] = (CLOCK, SKILLS_SEARCH, SKILLS_READ)
+
 
 @dataclass(frozen=True, slots=True)
 class SkillCard:

@@ -609,6 +609,7 @@ dependencies = [
     { name = "databricks-sdk" },
     { name = "fastapi" },
     { name = "pydantic-ai" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -630,6 +631,7 @@ requires-dist = [
     { name = "databricks-sdk", specifier = ">=0.151.0" },
     { name = "fastapi", specifier = ">=0.143.0" },
     { name = "pydantic-ai", specifier = ">=2.55.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
 

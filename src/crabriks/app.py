@@ -25,6 +25,7 @@ from crabriks.model import (
 from crabriks.prompt import AGENT_NAME
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.shapes import SessionSummary, TranscriptEntry
+from crabriks.skills import SkillsCache
 from crabriks.store import (
     RunInProgress,
     SessionForbidden,
@@ -105,6 +106,7 @@ def create_app(
     app.state.settings = settings
     app.state.model_for = model_for
     app.state.workspace = resolve_agent_workspace(settings.agent_root, AGENT_NAME)
+    app.state.skills_cache = SkillsCache()
     _routes(app)
     return app
 
@@ -246,6 +248,7 @@ async def _stream_turn(
         model=model,
         now=lambda: datetime.now(UTC),
         workspace=request.app.state.workspace,
+        skills_cache=request.app.state.skills_cache,
     )
     iterator = iter_turn(session_id, message, ctx=ctx)
     first = await _first_item(iterator)

@@ -1,6 +1,7 @@
 """The chat seam: one turn composes the prompt, dispatches the tool, and persists."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,8 +10,13 @@ import pytest
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from crabriks.prompt import CLOCK_DESCRIPTION
+from crabriks.prompt import (
+    CLOCK_DESCRIPTION,
+    SKILLS_READ_DESCRIPTION,
+    SKILLS_SEARCH_DESCRIPTION,
+)
 from crabriks.shapes import TranscriptEntry
+from crabriks.skills import SkillsCache
 from crabriks.store import MemorySessionStore
 from crabriks.turn import (
     FAILED_TURN,
@@ -72,8 +78,14 @@ def _string_contents(messages: list[ModelMessage]) -> list[str]:
 async def _clock_then_reply(
     messages: list[ModelMessage], info: AgentInfo
 ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
-    assert [tool.name for tool in info.function_tools] == ["clock"]
+    assert [tool.name for tool in info.function_tools] == [
+        "clock",
+        "skills_search",
+        "skills_read",
+    ]
     assert info.function_tools[0].description == CLOCK_DESCRIPTION
+    assert info.function_tools[1].description == SKILLS_SEARCH_DESCRIPTION
+    assert info.function_tools[2].description == SKILLS_READ_DESCRIPTION
     assert info.instructions is not None
     assert info.instructions.startswith("# Identity\nYou are Crabriks, the platform agent main.")
     assert f"session_id: {SESSION}" in info.instructions
@@ -271,3 +283,170 @@ def _reply(text: str):
         yield text
 
     return stream
+
+
+async def test_turn_with_skills_in_workspace(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.skills.mkdir(parents=True)
+    sql_dir = paths.skills / "sql"
+    sql_dir.mkdir()
+    (sql_dir / "SKILL.md").write_text(
+        "---\nname: sql\ndescription: Run a warehouse query.\n---\n# SQL\nFull instructions.\n",
+        encoding="utf-8",
+    )
+    seen: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen.append(info.instructions or "")
+        yield "ok"
+
+    ctx = _ctx(MemorySessionStore(), FunctionModel(stream_function=capture), workspace=paths)
+    result = await run_turn(SESSION, "hello", ctx=ctx)
+
+    assert result.status == "ok"
+    assert "# Skills\n- sql: Run a warehouse query." in seen[0]
+    assert "Full instructions." not in seen[0]
+
+
+async def test_turn_dispatches_skills_search_and_skills_read(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.skills.mkdir(parents=True)
+    sql_dir = paths.skills / "sql"
+    sql_dir.mkdir()
+    (sql_dir / "SKILL.md").write_text(
+        "---\nname: sql\ndescription: Run a warehouse query.\n---\n# SQL\nFull instructions here.",
+        encoding="utf-8",
+    )
+
+    async def search_and_read(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        parts = _parts(messages)
+        if "tool-return" not in parts:
+            yield {
+                0: DeltaToolCall(
+                    name="skills_search",
+                    json_args=json.dumps({"query": "warehouse"}),
+                    tool_call_id="call-search",
+                )
+            }
+            return
+        tool_returns = [
+            getattr(p, "content", "")
+            for m in messages
+            for p in m.parts
+            if p.part_kind == "tool-return"
+        ]
+        if len(tool_returns) == 1:
+            assert "- sql: Run a warehouse query." in tool_returns[0]
+            yield {
+                0: DeltaToolCall(
+                    name="skills_read",
+                    json_args=json.dumps({"name": "sql"}),
+                    tool_call_id="call-read",
+                )
+            }
+            return
+        if len(tool_returns) == 2:
+            assert "# SQL\nFull instructions here." in tool_returns[1]
+            yield "Loaded skill sql successfully"
+
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=search_and_read),
+        workspace=paths,
+    )
+    result = await run_turn(SESSION, "help me query", ctx=ctx)
+
+    assert result.status == "ok"
+    assert result.reply == "Loaded skill sql successfully"
+    transcript_roles = [e.role for e in result.transcript]
+    assert transcript_roles == [
+        "user",
+        "tool_call",
+        "tool_result",
+        "tool_call",
+        "tool_result",
+        "assistant",
+    ]
+    assert result.transcript[2].content == "- sql: Run a warehouse query."
+    assert result.transcript[4].content == "# SQL\nFull instructions here."
+
+
+async def test_turn_skills_read_oversize_rejects_with_error(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.skills.mkdir(parents=True)
+    big_dir = paths.skills / "big"
+    big_dir.mkdir()
+    oversize = "x" * 33_000
+    (big_dir / "SKILL.md").write_text(
+        f"---\nname: big\ndescription: Big skill.\n---\n{oversize}",
+        encoding="utf-8",
+    )
+
+    async def call_read(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del messages, info
+        yield {
+            0: DeltaToolCall(
+                name="skills_read",
+                json_args=json.dumps({"name": "big"}),
+                tool_call_id="call-big",
+            )
+        }
+
+    ctx = _ctx(MemorySessionStore(), FunctionModel(stream_function=call_read), workspace=paths)
+    result = await run_turn(SESSION, "load big", ctx=ctx)
+
+    assert result.status == "error"
+    assert result.error == FAILED_TURN
+
+
+async def test_turn_skills_discovery_is_cached_per_session(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.skills.mkdir(parents=True)
+    sql_dir = paths.skills / "sql"
+    sql_dir.mkdir()
+    (sql_dir / "SKILL.md").write_text(
+        "---\nname: sql\ndescription: Initial description.\n---\nbody",
+        encoding="utf-8",
+    )
+    seen: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen.append(info.instructions or "")
+        yield "ok"
+
+    ctx = TurnContext(
+        owner_id=OWNER,
+        store=MemorySessionStore(),
+        model=FunctionModel(stream_function=capture),
+        now=lambda: FROZEN,
+        workspace=paths,
+        skills_cache=SkillsCache(),
+    )
+    first = await run_turn(SESSION, "first turn", ctx=ctx)
+    assert first.status == "ok"
+    assert "- sql: Initial description." in seen[0]
+
+    # Modify on disk
+    (sql_dir / "SKILL.md").write_text(
+        "---\nname: sql\ndescription: Modified description.\n---\nbody",
+        encoding="utf-8",
+    )
+
+    # Second turn on same session uses cached skills
+    second = await run_turn(SESSION, "second turn", ctx=ctx)
+    assert second.status == "ok"
+    assert "- sql: Initial description." in seen[1]
+    assert "- sql: Modified description." not in seen[1]
+
+    # Turn on different session discovers modified skills
+    other_session = "22222222-2222-4222-8222-222222222222"
+    third = await run_turn(other_session, "third turn", ctx=ctx)
+    assert third.status == "ok"
+    assert "- sql: Modified description." in seen[2]
