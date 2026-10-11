@@ -1,7 +1,6 @@
 """Agent reasoning loop, turn execution, model connectors, and prompt composition."""
 
 from crabriks.agent.core import (
-    ApprovalRequired,
     TurnDeps,
     crabriks_agent,
     format_utc,
@@ -35,7 +34,6 @@ from crabriks.agent.turn import (
 __all__ = [
     "AGENT_NAME",
     "ApprovalNotice",
-    "ApprovalRequired",
     "ModelEntry",
     "SystemPrompt",
     "Token",

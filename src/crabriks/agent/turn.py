@@ -10,7 +10,8 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic_ai import DeferredToolRequests, RunContext
-from pydantic_ai.capabilities import AgentCapability
+from pydantic_ai.capabilities import AbstractCapability, AgentCapability, CapabilityOrdering
+from pydantic_ai.capabilities._deferred_capability_loader import DeferredCapabilityLoader
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -23,7 +24,7 @@ from pydantic_ai.messages import (
     ToolCallPart,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.tools import DeferredToolResults, ToolApproved, ToolDenied
+from pydantic_ai.tools import DeferredToolResults, ToolApproved, ToolDefinition, ToolDenied
 from pydantic_ai.toolsets import AbstractToolset, ApprovalRequiredToolset
 
 from crabriks.agent.core import TurnDeps, crabriks_agent, format_utc
@@ -293,27 +294,38 @@ def _status(holder: list[TurnResult]) -> TurnStatus:
     return holder[0].status
 
 
-def _skills_for_turn(claimed: _Claimed) -> list[AgentCapability[TurnDeps]] | None:
+@dataclass
+class SensitiveToolGate(AbstractCapability[TurnDeps]):
+    """Pause every listed tool through the one wrapper around the assembled toolset."""
+
+    names: frozenset[str]
+
+    def get_ordering(self) -> CapabilityOrdering:
+        # The loader handles `load_capability` itself, so the gate has to sit outside it.
+        return CapabilityOrdering(position="outermost", wraps=(DeferredCapabilityLoader,))
+
+    def get_wrapper_toolset(self, toolset: AbstractToolset[TurnDeps]) -> AbstractToolset[TurnDeps]:
+        names = self.names
+
+        def approval_required(
+            _ctx: RunContext[TurnDeps],
+            tool_def: ToolDefinition,
+            _args: dict[str, object],
+        ) -> bool:
+            return tool_def.name in names
+
+        return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)
+
+
+def _capabilities_for_turn(claimed: _Claimed) -> list[AgentCapability[TurnDeps]] | None:
+    capabilities: list[AgentCapability[TurnDeps]] = []
     skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
     skills = skills_capability(skills_dir)
-    if skills is None:
-        return None
-    return [skills]
-
-
-def _wrap_toolsets(
-    toolsets: tuple[AbstractToolset[object], ...] | tuple[()],
-    sensitive_tools: tuple[str, ...],
-) -> tuple[AbstractToolset[object], ...]:
-    if not toolsets or not sensitive_tools:
-        return toolsets
-    return tuple(
-        ApprovalRequiredToolset(
-            ts,
-            approval_required_func=lambda _ctx, tdef, _args: tdef.name in sensitive_tools,
-        )
-        for ts in toolsets
-    )
+    if skills is not None:
+        capabilities.append(skills)
+    if claimed.ctx.sensitive_tools:
+        capabilities.append(SensitiveToolGate(frozenset(claimed.ctx.sensitive_tools)))
+    return capabilities or None
 
 
 def _prompt_for(claimed: _Claimed, mcp_bundle: object) -> SystemPrompt:
@@ -338,16 +350,15 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         toolset_factory=ctx.mcp_toolset_factory,
     )
     prompt = _prompt_for(claimed, mcp_bundle)
-    toolsets = _wrap_toolsets(mcp_bundle.toolsets, ctx.sensitive_tools)
     result = await crabriks_agent().run(
         claimed.user_message,
         message_history=to_model_messages(prior) or None,
         model=ctx.model,
         instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now, sensitive_tools=ctx.sensitive_tools),
+        deps=TurnDeps(now=ctx.now),
         event_stream_handler=_persist_and_emit(claimed, queue),
-        toolsets=toolsets or None,
-        capabilities=_skills_for_turn(claimed),
+        toolsets=mcp_bundle.toolsets or None,
+        capabilities=_capabilities_for_turn(claimed),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
@@ -378,7 +389,6 @@ async def _run_model_resume(
         toolset_factory=ctx.mcp_toolset_factory,
     )
     prompt = _prompt_for(claimed, mcp_bundle)
-    toolsets = _wrap_toolsets(mcp_bundle.toolsets, ctx.sensitive_tools)
     history = to_model_messages(prior)
     call_args = approval.arguments
     if ctx.user_token and "[REDACTED]" in call_args:
@@ -400,12 +410,12 @@ async def _run_model_resume(
         deferred_tool_results=deferred_results,
         model=ctx.model,
         instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now, sensitive_tools=ctx.sensitive_tools),
+        deps=TurnDeps(now=ctx.now),
         event_stream_handler=_persist_and_emit(
             claimed, queue, skip_tool_call_id=approval.tool_call_id
         ),
-        toolsets=toolsets or None,
-        capabilities=_skills_for_turn(claimed),
+        toolsets=mcp_bundle.toolsets or None,
+        capabilities=_capabilities_for_turn(claimed),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
