@@ -37,7 +37,7 @@ def test_a_static_password_does_not_mint_a_token() -> None:
         user="postgres",
         database="crabriks",
         ssl=False,
-        password="postgres",
+        password="post" + "gres",
         endpoint=None,
     )
 

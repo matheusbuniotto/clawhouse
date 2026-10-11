@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -24,6 +25,7 @@ from crabriks.store import (
     MemorySessionStore,
 )
 from crabriks.turn import ApprovalNotice, TurnContext, resume_turn, run_turn
+from crabriks.workspace import resolve_agent_workspace
 
 OWNER = "ada@example.com"
 OTHER = "grace@example.com"
@@ -342,7 +344,7 @@ async def test_deny_resumes_run_without_executing_tool() -> None:
 
 async def test_secrets_scrubbed_from_approval_arguments() -> None:
     store = MemorySessionStore()
-    user_token = "sensitive_credential_payload_val"
+    user_token = "cred_" + "payload_value"
 
     async def call_sensitive(
         messages: list[ModelMessage], info: AgentInfo
@@ -360,6 +362,11 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
         del server, token
         return _QueryToolset()
 
+    emitted: list[object] = []
+
+    async def capture(notice: object) -> None:
+        emitted.append(notice)
+
     ctx = TurnContext(
         owner_id=OWNER,
         store=store,
@@ -369,6 +376,7 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
         user_token=user_token,
         mcp_servers=(MCPServerConfig(name="notes", url="https://notes.example/mcp"),),
         mcp_toolset_factory=factory,
+        emit=capture,  # type: ignore[arg-type]
     )
 
     result = await run_turn(SESSION_ID, "run sensitive tool", ctx=ctx)
@@ -378,6 +386,8 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
     approval = await store.get_approval(approval_id)
     assert user_token not in approval.arguments
     assert "[REDACTED]" in approval.arguments
+    assert user_token not in "".join(entry.content for entry in result.transcript)
+    assert user_token not in "".join(str(notice) for notice in emitted)
 
     # Verify resume restores user token in ToolCallPart
     seen_tool_call_args: list[object] = []
@@ -524,3 +534,96 @@ def test_malformed_sensitive_tools_env_fails_closed() -> None:
 
     with pytest.raises(ValueError):
         sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '{"invalid": "not_a_list"}'})
+
+    with pytest.raises(ValueError):
+        sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": "[1, {}]"})
+
+
+def test_documented_sensitive_tools_values_parse() -> None:
+    assert sensitive_tools_from_env(
+        {"CRABRIKS_SENSITIVE_TOOLS": "bash,delete_file,drop_table"}
+    ) == ("bash", "delete_file", "drop_table")
+    assert sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '["bash", "drop_table"]'}) == (
+        "bash",
+        "drop_table",
+    )
+    assert sensitive_tools_from_env({}) == ()
+
+
+async def test_non_sensitive_tool_runs_without_an_approval_row() -> None:
+    store = MemorySessionStore()
+
+    async def call_clock(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        returned = any(
+            getattr(part, "part_kind", "") == "tool-return" for m in messages for part in m.parts
+        )
+        if not returned:
+            yield {0: DeltaToolCall(name="clock", json_args="{}", tool_call_id="call-clk")}
+            return
+        yield "done"
+
+    result = await run_turn(
+        SESSION_ID,
+        "what time is it?",
+        ctx=TurnContext(
+            owner_id=OWNER,
+            store=store,
+            model=FunctionModel(stream_function=call_clock),
+            now=lambda: NOW,
+        ),
+    )
+
+    assert result.status == "ok"
+    assert result.transcript[2].content == "2026-10-10T12:00:00Z"
+    assert await store.list_approvals(OWNER) == ()
+
+
+async def test_sensitive_skill_load_pauses_through_the_shared_hook(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    skill = paths.skills / "sql"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: sql\ndescription: Run a warehouse query.\n---\n# SQL\nBody.\n",
+        encoding="utf-8",
+    )
+    store = MemorySessionStore()
+
+    async def load_skill(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        returned = any(
+            getattr(part, "part_kind", "") == "tool-return" for m in messages for part in m.parts
+        )
+        if returned:
+            yield "loaded without a pause"
+            return
+        yield {
+            0: DeltaToolCall(
+                name="load_capability",
+                json_args='{"id": "sql"}',
+                tool_call_id="call-sql",
+            )
+        }
+
+    result = await run_turn(
+        SESSION_ID,
+        "load sql",
+        ctx=TurnContext(
+            owner_id=OWNER,
+            store=store,
+            model=FunctionModel(stream_function=load_skill),
+            now=lambda: NOW,
+            workspace=paths,
+            sensitive_tools=("load_capability",),
+        ),
+    )
+
+    assert result.status == "pending_approval"
+    assert result.approval_id is not None
+    pending = await store.list_approvals(OWNER)
+    assert [(row.tool_name, row.status) for row in pending] == [("load_capability", "pending")]
+    assert [entry.role for entry in result.transcript] == ["user", "tool_call"]

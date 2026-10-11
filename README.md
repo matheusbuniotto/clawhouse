@@ -71,10 +71,12 @@ export OPENROUTER_API_KEY=sk-or-...
 
 ## Sensitive Tool Guardrails
 
-Protect destructive or privileged tools with interactive user approvals:
+Protect destructive or privileged tools with interactive user approvals. Provide a
+comma-separated list of tool names, or an equivalent JSON array (both parse the same way):
 
 ```bash
 export CRABRIKS_SENSITIVE_TOOLS="bash,delete_file,drop_table"
+# or: export CRABRIKS_SENSITIVE_TOOLS='["bash", "delete_file", "drop_table"]'
 ```
 
 Pending approvals freeze the run and appear in the UI approvals inbox (`/approvals`).

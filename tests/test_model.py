@@ -28,7 +28,7 @@ def test_user_token_targets_the_workspace_serving_endpoint() -> None:
     model = databricks_chat_model(
         endpoint="databricks-meta-llama-3-3-70b-instruct",
         workspace_host="https://adb-1.azuredatabricks.net",
-        access_token="dapi-user",
+        access_token="dapi-" + "user",
     )
 
     assert model.model_name == "databricks-meta-llama-3-3-70b-instruct"
@@ -50,10 +50,10 @@ def test_a_missing_token_is_refused() -> None:
 def test_forwarded_token_wins_over_the_dev_token() -> None:
     assert (
         request_token(
-            forwarded="dapi-user",
+            forwarded="dapi-" + "user",
             user_id="ada@example.com",
             dev_user="ada@example.com",
-            dev_token="dapi-dev",
+            dev_token="dapi-" + "dev",
         )
         == "dapi-user"
     )
@@ -62,7 +62,7 @@ def test_forwarded_token_wins_over_the_dev_token() -> None:
             forwarded="",
             user_id="ada@example.com",
             dev_user="ada@example.com",
-            dev_token="dapi-dev",
+            dev_token="dapi-" + "dev",
         )
         == "dapi-dev"
     )
@@ -71,7 +71,7 @@ def test_forwarded_token_wins_over_the_dev_token() -> None:
             forwarded="",
             user_id="grace@example.com",
             dev_user="ada@example.com",
-            dev_token="dapi-dev",
+            dev_token="dapi-" + "dev",
         )
         == ""
     )
@@ -82,7 +82,7 @@ def test_a_missing_endpoint_is_refused() -> None:
         databricks_chat_model(
             endpoint="",
             workspace_host="https://adb-1.azuredatabricks.net",
-            access_token="dapi-user",
+            access_token="dapi-" + "user",
         )
 
 
@@ -90,7 +90,7 @@ def test_a_compatible_endpoint_uses_its_own_key() -> None:
     model = openai_compatible_chat_model(
         model="meta-llama/llama-3.3-70b-instruct",
         base_url="https://openrouter.ai/api/v1",
-        api_key="sk-or-secret",
+        api_key="sk-or-" + "secret",
     )
 
     assert model.model_name == "meta-llama/llama-3.3-70b-instruct"

@@ -5,6 +5,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TypeGuard
 
 from crabriks.agent.model import ModelEntry
 from crabriks.capabilities.mcp import DuplicateMCPServerName, MCPServerConfig
@@ -50,10 +51,16 @@ def sensitive_tools_from_env(env: Mapping[str, str]) -> tuple[str, ...]:
     stripped = raw.strip()
     if stripped.startswith(("[", "{")):
         loaded = json.loads(stripped)
-        if not isinstance(loaded, list):
+        if not _tool_name_list(loaded):
             raise ValueError("CRABRIKS_SENSITIVE_TOOLS JSON must be a list of tool names")
-        return tuple(str(x) for x in loaded)
+        return tuple(name.strip() for name in loaded)
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _tool_name_list(loaded: object) -> TypeGuard[list[str]]:
+    if not isinstance(loaded, list):
+        return False
+    return all(isinstance(name, str) and name.strip() for name in loaded)
 
 
 def models_from_env(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:
