@@ -23,11 +23,11 @@ OWNER = "ada@example.com"
 OTHER = "grace@example.com"
 HEADERS = {
     "x-forwarded-email": OWNER,
-    "x-forwarded-access-token": "dapi-token-ada",
+    "x-forwarded-access-token": "mock_token_ada",
 }
 OTHER_HEADERS = {
     "x-forwarded-email": OTHER,
-    "x-forwarded-access-token": "dapi-token-grace",
+    "x-forwarded-access-token": "mock_token_grace",
 }
 
 
@@ -197,7 +197,7 @@ async def test_status_api_dev_user_auth_snapshot() -> None:
     store = MemorySessionStore()
     settings_with_token = Settings(
         dev_user="dev@local",
-        dev_token="dev-secret",
+        dev_token="mock_dev_token",
         serving_endpoint=None,
         workspace_host=None,
     )
