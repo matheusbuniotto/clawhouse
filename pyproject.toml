@@ -32,6 +32,7 @@ dependencies = [
 "src/crabriks/static/status.js" = "crabriks/static/status.js"
 "src/crabriks/static/tokens.css" = "crabriks/static/tokens.css"
 "src/crabriks/static/transcript.css" = "crabriks/static/transcript.css"
+"src/crabriks/static/transcript.js" = "crabriks/static/transcript.js"
 
 [dependency-groups]
 dev = [

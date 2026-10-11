@@ -238,6 +238,10 @@ def _script_routes(app: FastAPI) -> None:
     async def sessions_script() -> FileResponse:
         return FileResponse(STATIC / "sessions.js", media_type="text/javascript")
 
+    @app.get("/transcript.js")
+    async def transcript_script() -> FileResponse:
+        return FileResponse(STATIC / "transcript.js", media_type="text/javascript")
+
     @app.get("/new.js")
     async def new_script() -> FileResponse:
         return FileResponse(STATIC / "new.js", media_type="text/javascript")
