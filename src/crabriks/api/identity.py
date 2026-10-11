@@ -2,6 +2,9 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
+
+AuthMode = Literal["forwarded", "dev"]
 
 
 class Unauthenticated(Exception):
@@ -14,6 +17,7 @@ class Caller:
 
     user_id: str
     access_token: str
+    auth_mode: AuthMode = "forwarded"
 
 
 def resolve_caller(
@@ -31,7 +35,7 @@ def resolve_caller(
     user_id = lowered.get("x-forwarded-email") or lowered.get("x-forwarded-user")
     token = lowered.get("x-forwarded-access-token", "")
     if user_id:
-        return Caller(user_id=user_id, access_token=token)
+        return Caller(user_id=user_id, access_token=token, auth_mode="forwarded")
     if dev_user:
-        return Caller(user_id=dev_user, access_token=token)
+        return Caller(user_id=dev_user, access_token=token, auth_mode="dev")
     raise Unauthenticated

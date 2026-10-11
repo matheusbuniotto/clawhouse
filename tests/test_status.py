@@ -121,7 +121,7 @@ async def test_status_api_returns_connection_and_auth_snapshot() -> None:
     data = resp.json()
     assert data["auth"]["user_id"] == OWNER
     assert data["auth"]["token_present"] is True
-    assert data["auth"]["auth_type"] == "oauth"
+    assert data["auth"]["auth_type"] == "forwarded"
     assert data["connection"]["workspace_host"] == "https://adb-test.azuredatabricks.net"
     assert data["connection"]["serving_endpoint"] == "databricks-meta-llama-3-3-70b-instruct"
     assert data["connection"]["store_type"] == "memory"

@@ -336,13 +336,6 @@ def _status_routes(app: FastAPI) -> None:
         )
         token_present = bool(effective_token)
 
-        if caller.access_token:
-            auth_type = "oauth"
-        elif dev_user and caller.user_id == dev_user:
-            auth_type = "dev"
-        else:
-            auth_type = "forwarded"
-
         store_type = "memory" if isinstance(store, MemorySessionStore) else "lakebase"
 
         if settings.log_tail_url:
@@ -357,7 +350,7 @@ def _status_routes(app: FastAPI) -> None:
             auth=AuthSnapshotOut(
                 user_id=caller.user_id,
                 token_present=token_present,
-                auth_type=auth_type,
+                auth_type=caller.auth_mode,
             ),
             connection=ConnectionSnapshotOut(
                 workspace_host=settings.workspace_host,

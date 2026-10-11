@@ -32,7 +32,11 @@ function el(tag, className, text) {
 function renderAuthAndConnection(auth, connection) {
   statUser.textContent = auth.user_id || "Anonymous";
   statAuth.textContent = auth.auth_type.toUpperCase();
-  statToken.textContent = auth.token_present ? "Present (forwarded)" : "Not present";
+  statToken.textContent = auth.token_present
+    ? auth.auth_type === "dev"
+      ? "Present (dev)"
+      : "Present (forwarded)"
+    : "Not present";
   statWorkspace.textContent = connection.workspace_host || "Local environment";
   statModel.textContent = connection.serving_endpoint || "Default endpoint";
   statStore.textContent = connection.store_type === "memory" ? "In-Memory Store" : "Lakebase Postgres";
