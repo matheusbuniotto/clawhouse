@@ -795,3 +795,45 @@ async def test_error_path_scrubs_token_from_transcript_and_notices() -> None:
     for notice in emitted:
         if isinstance(notice, Token):
             assert caller_token not in notice.text
+
+
+async def test_turn_colliding_mcp_tool_names_produce_same_suffixed_names_across_turns() -> None:
+    seen_prompts: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen_prompts.append(info.instructions or "")
+        yield "ok"
+
+    servers = (
+        MCPServerConfig(name="system.ai", url="https://srv1.example.com/mcp"),
+        MCPServerConfig(name="system_ai", url="https://srv2.example.com/mcp"),
+    )
+
+    def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        del token
+        if srv.name == "system.ai":
+            return _StubServerToolset("srv1", "query", "First query")
+        return _StubServerToolset("srv2", "query", "Second query")
+
+    store = MemorySessionStore()
+    ctx = _ctx(
+        store,
+        FunctionModel(stream_function=capture),
+        mcp_servers=servers,
+        mcp_toolset_factory=factory,
+    )
+
+    res1 = await run_turn(SESSION, "turn 1", ctx=ctx)
+    assert res1.status == "ok"
+    assert len(seen_prompts) == 1
+    prompt1 = seen_prompts[0]
+    assert "- system_ai__query: First query" in prompt1
+    assert "- system_ai__query_1: Second query" in prompt1
+
+    res2 = await run_turn(SESSION, "turn 2", ctx=ctx)
+    assert res2.status == "ok"
+    assert len(seen_prompts) == 2
+    prompt2 = seen_prompts[1]
+    assert "- system_ai__query: First query" in prompt2
+    assert "- system_ai__query_1: Second query" in prompt2
