@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from crabriks.mcp import MCPServerConfig
+from crabriks.mcp import DuplicateMCPServerName, MCPServerConfig
 from crabriks.model import ModelEntry
 
 MODELS_ENV = "CRABRIKS_MODELS"
@@ -111,7 +111,13 @@ def mcp_servers_from_env(env: Mapping[str, str]) -> tuple[MCPServerConfig, ...]:
     if not raw:
         return ()
     items: list[dict[str, object]] = json.loads(raw)
-    return tuple(_mcp_server_entry(item) for item in items)
+    servers = tuple(_mcp_server_entry(item) for item in items)
+    seen: set[str] = set()
+    for s in servers:
+        if s.name in seen:
+            raise DuplicateMCPServerName(f"Duplicate MCP server name: {s.name!r}")
+        seen.add(s.name)
+    return servers
 
 
 def _mcp_server_entry(item: Mapping[str, object]) -> MCPServerConfig:

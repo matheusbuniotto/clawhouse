@@ -14,6 +14,7 @@ from pydantic_core import SchemaValidator, core_schema
 
 from crabriks.mcp import (
     MAX_TOOL_NAME_LENGTH,
+    DuplicateMCPServerName,
     InsecureMCPEndpoint,
     MCPServerConfig,
     RawMCPTool,
@@ -395,3 +396,24 @@ async def test_bundle_scrubs_token_from_tool_call_result_at_boundary() -> None:
     content_str = str(received_returns[0])
     assert MOCK_USER_AUTH not in content_str
     assert "[REDACTED]" in content_str
+
+
+@pytest.mark.asyncio
+async def test_duplicate_mcp_server_names_rejected_in_load_mcp_tools() -> None:
+    servers = [
+        MCPServerConfig(name="dupe", url="https://a.example.com/mcp"),
+        MCPServerConfig(name="dupe", url="https://b.example.com/mcp"),
+    ]
+    with pytest.raises(DuplicateMCPServerName, match="Duplicate MCP server name: 'dupe'"):
+        await load_mcp_tools(servers, "test-" + "token")
+
+
+def test_duplicate_mcp_server_names_rejected_in_settings() -> None:
+    raw = json.dumps(
+        [
+            {"name": "dupe", "url": "https://a.example.com/mcp"},
+            {"name": "dupe", "url": "https://b.example.com/mcp"},
+        ]
+    )
+    with pytest.raises(DuplicateMCPServerName, match="Duplicate MCP server name: 'dupe'"):
+        mcp_servers_from_env({"CRABRIKS_MCP_SERVERS": raw})

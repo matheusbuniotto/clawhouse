@@ -1,7 +1,7 @@
 import logging
 import math
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -16,6 +16,10 @@ logger = logging.getLogger("crabriks.mcp")
 
 class InsecureMCPEndpoint(ValueError):
     """MCP server endpoints must use https in v1."""
+
+
+class DuplicateMCPServerName(ValueError):
+    """MCP server names must be unique."""
 
 
 def validate_mcp_url(url: str) -> None:
@@ -205,12 +209,40 @@ def _raw_tool_from_item(item: object, server_name: str, token: str = "") -> RawM
     )
 
 
+def _validate_unique_servers(servers: Sequence[MCPServerConfig]) -> None:
+    seen_names: set[str] = set()
+    for server in servers:
+        if server.name in seen_names:
+            raise DuplicateMCPServerName(f"Duplicate MCP server name: {server.name!r}")
+        seen_names.add(server.name)
+
+
+def _build_active_toolsets(
+    server_toolsets: Mapping[str, AbstractToolset[object]],
+    disambiguated: Sequence[DisambiguatedTool],
+    token: str,
+) -> tuple[AbstractToolset[object], ...]:
+    active: list[AbstractToolset[object]] = []
+    for server_name, toolset in server_toolsets.items():
+        # RenamedToolset(name_map) maps exposed (safe) names to underlying original names.
+        # In call_tool, RenamedToolset uses `self.name_map.get(name, name)` to recover
+        # and invoke the underlying server's original tool name.
+        name_map = {
+            t.safe_name: t.original_name for t in disambiguated if t.server_name == server_name
+        }
+        if name_map:
+            renamed = toolset.renamed(name_map)
+            active.append(ScrubbingToolset(renamed, token=token) if token else renamed)
+    return tuple(active)
+
+
 async def load_mcp_tools(
     servers: Sequence[MCPServerConfig],
     token: str,
     *,
     toolset_factory: Callable[[MCPServerConfig, str], AbstractToolset[object]] | None = None,
 ) -> MCPBundle:
+    _validate_unique_servers(servers)
     raw_tools: list[RawMCPTool] = []
     server_toolsets: dict[str, AbstractToolset[object]] = {}
 
@@ -234,20 +266,8 @@ async def load_mcp_tools(
             continue
 
     disambiguated = disambiguate_tool_names(raw_tools)
-    active_toolsets: list[AbstractToolset[object]] = []
-
-    for server_name, toolset in server_toolsets.items():
-        # RenamedToolset(name_map) maps exposed (safe) names to underlying original names.
-        # In call_tool, RenamedToolset uses `self.name_map.get(name, name)` to recover
-        # and invoke the underlying server's original tool name.
-        name_map = {
-            t.safe_name: t.original_name for t in disambiguated if t.server_name == server_name
-        }
-        if name_map:
-            renamed = toolset.renamed(name_map)
-            active_toolsets.append(ScrubbingToolset(renamed, token=token) if token else renamed)
-
+    active_toolsets = _build_active_toolsets(server_toolsets, disambiguated, token)
     return MCPBundle(
         tools=tuple(disambiguated),
-        toolsets=tuple(active_toolsets),
+        toolsets=active_toolsets,
     )
