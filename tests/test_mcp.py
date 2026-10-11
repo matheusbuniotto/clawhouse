@@ -3,8 +3,10 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import cast
 
+import mcp.types as mcp_t
 import pytest
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage
@@ -490,10 +492,6 @@ def test_duplicate_mcp_server_names_rejected_in_settings() -> None:
 
 @pytest.mark.asyncio
 async def test_bundle_scrubs_token_from_typed_tool_call_result() -> None:
-    from dataclasses import dataclass
-
-    import mcp.types as mcp_t
-
     @dataclass
     class _CustomPayload:
         payload_text: str

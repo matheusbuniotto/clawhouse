@@ -470,6 +470,7 @@ class _StubServerToolset(AbstractToolset[object]):
         name: str = "stub",
         description: str = "",
         result: str = "",
+        *,
         fails: bool = False,
     ) -> None:
         self._id = server_id
