@@ -256,6 +256,106 @@ select:disabled {
   border: 0;
 }
 
+.status-section {
+  margin-bottom: 24px;
+}
+
+.status-section h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.status-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffdf9;
+  box-shadow: var(--shadow);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.status-grid dt {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.status-grid dd {
+  margin: 0;
+  color: var(--ink);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.sessions-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: #fffdf9;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-badge.running {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.idle {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.status-badge.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.btn-link {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.btn-link:hover {
+  opacity: 0.9;
+}
+
+.log-tail-row {
+  margin: 0;
+}
+
 @media (max-width: 640px) {
   .shell {
     width: min(100% - 24px, 720px);

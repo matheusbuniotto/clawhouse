@@ -44,6 +44,7 @@ from crabriks.capabilities.workspace import resolve_agent_workspace
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.store.shapes import (
     ApprovalEntry,
+    RunState,
     SessionSummary,
     TranscriptEntry,
 )
@@ -52,6 +53,7 @@ from crabriks.store.store import (
     ApprovalForbidden,
     ApprovalNotFound,
     ApprovalPending,
+    MemorySessionStore,
     RunInProgress,
     SessionForbidden,
     SessionNotFound,
@@ -80,6 +82,26 @@ class SessionOut(BaseModel):
     id: str
     title: str
     created_at: str
+    run_state: RunState = "idle"
+
+
+class AuthSnapshotOut(BaseModel):
+    user_id: str
+    token_present: bool
+    auth_type: str
+
+
+class ConnectionSnapshotOut(BaseModel):
+    workspace_host: str | None
+    serving_endpoint: str | None
+    store_type: str
+
+
+class StatusOut(BaseModel):
+    auth: AuthSnapshotOut
+    connection: ConnectionSnapshotOut
+    sessions: list[SessionOut]
+    log_tail_url: str
 
 
 class EntryOut(BaseModel):
@@ -153,6 +175,7 @@ def _routes(app: FastAPI) -> None:
     _asset_routes(app)
     _session_routes(app)
     _approval_routes(app)
+    _status_routes(app)
 
 
 def _page_routes(app: FastAPI) -> None:
@@ -177,6 +200,11 @@ def _page_routes(app: FastAPI) -> None:
         del caller
         return FileResponse(STATIC / "approvals.html")
 
+    @app.get("/status")
+    async def status_page(caller: Caller = _require_caller) -> FileResponse:
+        del caller
+        return FileResponse(STATIC / "status.html")
+
 
 def _asset_routes(app: FastAPI) -> None:
     @app.get("/chat.js")
@@ -198,6 +226,10 @@ def _asset_routes(app: FastAPI) -> None:
     @app.get("/approvals.js")
     async def approvals_script() -> FileResponse:
         return FileResponse(STATIC / "approvals.js", media_type="text/javascript")
+
+    @app.get("/status.js")
+    async def status_script() -> FileResponse:
+        return FileResponse(STATIC / "status.js", media_type="text/javascript")
 
 
 def _session_routes(app: FastAPI) -> None:
@@ -284,6 +316,50 @@ def _approval_routes(app: FastAPI) -> None:
         caller: Caller = _require_caller,
     ) -> ApprovalActionOut:
         return await _resolve_and_resume(request, approval_id, "denied", caller)
+
+
+def _status_routes(app: FastAPI) -> None:
+    @app.get("/api/status")
+    async def get_status(
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> StatusOut:
+        settings: Settings = request.app.state.settings
+        store: SessionStore = request.app.state.store
+        dev_user = settings.dev_user
+        dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
+        effective_token = request_token(
+            forwarded=caller.access_token,
+            user_id=caller.user_id,
+            dev_user=dev_user,
+            dev_token=dev_token,
+        )
+        token_present = bool(effective_token)
+
+        store_type = "memory" if isinstance(store, MemorySessionStore) else "lakebase"
+
+        if settings.log_tail_url:
+            log_tail_url = settings.log_tail_url
+        elif settings.workspace_host:
+            log_tail_url = f"{settings.workspace_host.rstrip('/')}/#job/logs"
+        else:
+            log_tail_url = "#"
+
+        summaries = await store.list_sessions(caller.user_id)
+        return StatusOut(
+            auth=AuthSnapshotOut(
+                user_id=caller.user_id,
+                token_present=token_present,
+                auth_type=caller.auth_mode,
+            ),
+            connection=ConnectionSnapshotOut(
+                workspace_host=settings.workspace_host,
+                serving_endpoint=settings.serving_endpoint,
+                store_type=store_type,
+            ),
+            sessions=[_session_out(s) for s in summaries],
+            log_tail_url=log_tail_url,
+        )
 
 
 def _caller(request: Request) -> Caller:
@@ -510,6 +586,7 @@ def _session_out(summary: SessionSummary) -> SessionOut:
         id=summary.id,
         title=summary.title,
         created_at=summary.created_at.isoformat(),
+        run_state=summary.run_state,
     )
 
 

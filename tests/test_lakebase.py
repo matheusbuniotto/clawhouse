@@ -141,3 +141,31 @@ async def test_migration_upgrades_existing_runs_status_constraint() -> None:
         assert status == "pending_approval"
     finally:
         await store.close()
+
+
+async def test_lakebase_list_sessions_reports_run_state_lifecycle() -> None:
+    pool = await _pool()
+    store = LakebaseSessionStore(pool)
+    try:
+        await store.migrate()
+        await pool.execute(
+            "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+        )
+        idle_session = await store.create_session(OWNER)
+
+        running_session = await store.create_session(OWNER)
+        await store.claim_run(running_session.id)
+
+        error_session = await store.create_session(OWNER)
+        error_run = await store.claim_run(error_session.id)
+        await store.finish_run(error_session.id, error_run, "error")
+
+        summaries = await store.list_sessions(OWNER)
+    finally:
+        await store.close()
+
+    assert len(summaries) == 3
+    states_by_id = {s.id: s.run_state for s in summaries}
+    assert states_by_id[idle_session.id] == "idle"
+    assert states_by_id[running_session.id] == "running"
+    assert states_by_id[error_session.id] == "error"
