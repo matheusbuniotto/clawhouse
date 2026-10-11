@@ -1,4 +1,4 @@
-import { el, relativeTime } from "./dom.js";
+import { el, relativeTime, type ActivityState } from "./dom.js";
 
 interface AuthSnapshot {
   user_id: string;
@@ -16,7 +16,7 @@ interface StatusSession {
   id: string;
   title: string;
   created_at: string;
-  run_state: string;
+  run_state: ActivityState;
 }
 
 interface StatusBody {

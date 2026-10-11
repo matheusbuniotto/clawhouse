@@ -181,3 +181,30 @@ test("the rail collapses and expands", async () => {
   expect(shell.hasAttribute("data-collapsed")).toBe(false);
   expect(collapse.getAttribute("aria-expanded")).toBe("true");
 });
+
+test("dragging the rail handle resizes the rail and persists the width", async () => {
+  await mount();
+  const shell = document.querySelector("#shell") as HTMLElement;
+  const handle = document.querySelector("#rail-handle") as HTMLElement;
+
+  handle.dispatchEvent(
+    new MouseEvent("pointerdown", { clientX: 280, bubbles: true, cancelable: true }),
+  );
+  expect(shell.hasAttribute("data-resizing")).toBe(true);
+
+  window.dispatchEvent(new MouseEvent("pointermove", { clientX: 360 }));
+  expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("360px");
+  expect(localStorage.getItem("crabriks.rail-width")).toBe("360");
+
+  window.dispatchEvent(new MouseEvent("pointermove", { clientX: 10 }));
+  expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("180px");
+
+  window.dispatchEvent(new MouseEvent("pointerup"));
+  expect(shell.hasAttribute("data-resizing")).toBe(false);
+});
+
+test("a stored rail width is restored on mount", async () => {
+  localStorage.setItem("crabriks.rail-width", "320");
+  await mount();
+  expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("320px");
+});

@@ -1,5 +1,16 @@
 /** Shared DOM helpers for the shell and the screen modules. */
 
+/**
+ * The activity states the UI renders: run states (`running`/`idle`/`error`)
+ * and tool outcomes (`running`/`ok`/`error`). One union so the rail, the
+ * status badges, and the tool rows agree on the vocabulary.
+ */
+export type ActivityState = "running" | "idle" | "ok" | "error";
+
+export function isRunning(state: ActivityState | string | null | undefined): boolean {
+  return state === "running";
+}
+
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,

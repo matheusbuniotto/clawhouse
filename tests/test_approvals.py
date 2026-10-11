@@ -428,8 +428,8 @@ async def test_approvals_page_requires_signed_in_user() -> None:
     assert missing.status_code == 401
     assert page.status_code == 200
     assert "Crabriks" in page.text
-    assert "Approvals" in page.text
-    assert 'src="/shell.js"' in page.text
+    assert 'src="/boot.js"' in page.text
+    assert 'id="rail"' in page.text
 
 
 async def test_approvals_api_lifecycle_and_guardrails() -> None:

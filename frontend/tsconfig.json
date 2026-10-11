@@ -13,6 +13,7 @@
   },
   "files": [
     "shell.ts",
+    "boot.ts",
     "dom.ts",
     "chat.ts",
     "transcript.ts",
