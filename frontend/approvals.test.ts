@@ -1,11 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-const PAGE = `
-  <ul id="pending-list" class="approvals-list"></ul>
-  <ul id="history-list" class="approvals-list"></ul>
-  <p id="status" class="status" role="status"></p>
-`;
-
 const PENDING = {
   id: "appr-1",
   session_id: "sess-1",
@@ -31,9 +25,8 @@ function jsonResponse(payload: unknown): Response {
 }
 
 beforeEach(() => {
-  vi.resetModules();
   vi.unstubAllGlobals();
-  document.body.innerHTML = PAGE;
+  document.body.innerHTML = "";
 });
 
 test("renders pending cards and resolved history from the approvals endpoint", async () => {
@@ -43,7 +36,7 @@ test("renders pending cards and resolved history from the approvals endpoint", a
     return jsonResponse({ approvals: [PENDING, HISTORY], pending: [PENDING], history: [HISTORY] });
   });
 
-  await import("./approvals");
+  await import("./approvals").then((module) => module.mount(document.body));
   await vi.waitFor(() => {
     expect(document.querySelectorAll(".approval-card")).toHaveLength(1);
   });
@@ -79,7 +72,7 @@ test("approving a pending tool posts the decision and reloads the list", async (
     return jsonResponse({ status: "ok" });
   });
 
-  await import("./approvals");
+  await import("./approvals").then((module) => module.mount(document.body));
   await vi.waitFor(() => {
     expect(document.querySelectorAll(".approval-card")).toHaveLength(1);
   });
@@ -101,7 +94,7 @@ test("approving a pending tool posts the decision and reloads the list", async (
 test("renders an empty state for each approvals list", async () => {
   vi.stubGlobal("fetch", async () => jsonResponse({ approvals: [], pending: [], history: [] }));
 
-  await import("./approvals");
+  await import("./approvals").then((module) => module.mount(document.body));
   await vi.waitFor(() => {
     expect(document.querySelectorAll(".empty")).toHaveLength(2);
   });

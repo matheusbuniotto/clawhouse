@@ -123,7 +123,8 @@ async def test_chat_page_requires_a_signed_in_user() -> None:
     assert missing.status_code == 401
     assert page.status_code == 200
     assert "Crabriks" in page.text
-    assert 'src="/chat.js"' in page.text
+    assert 'src="/shell.js"' in page.text
+    assert 'id="shell"' in page.text
     assert "dapi-secret" not in page.text
     assert me.json() == {"user_id": "ada@example.com"}
     assert "dapi-secret" not in me.text
@@ -451,9 +452,14 @@ async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) ->
 @pytest.mark.parametrize(
     "path",
     [
+        "/shell.js",
+        "/dom.js",
         "/chat.js",
+        "/transcript.js",
         "/sessions.js",
         "/new.js",
+        "/approvals.js",
+        "/status.js",
         "/tokens.css",
         "/shell.css",
         "/transcript.css",

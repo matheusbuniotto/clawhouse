@@ -45,6 +45,9 @@ frontend-install:
 frontend-check:
 	@echo "==> Type-checking frontend (tsc)..."
 	npm run typecheck
+	@echo "==> Building frontend and checking committed output is current..."
+	npm run build
+	git diff --exit-code -- src/crabriks/static
 	@echo "==> Running frontend component tests (vitest)..."
 	npm test
 

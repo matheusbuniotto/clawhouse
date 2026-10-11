@@ -230,6 +230,14 @@ def _style_routes(app: FastAPI) -> None:
 
 
 def _script_routes(app: FastAPI) -> None:
+    @app.get("/shell.js")
+    async def shell_script() -> FileResponse:
+        return FileResponse(STATIC / "shell.js", media_type="text/javascript")
+
+    @app.get("/dom.js")
+    async def dom_script() -> FileResponse:
+        return FileResponse(STATIC / "dom.js", media_type="text/javascript")
+
     @app.get("/chat.js")
     async def chat_script() -> FileResponse:
         return FileResponse(STATIC / "chat.js", media_type="text/javascript")
