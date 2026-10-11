@@ -171,11 +171,26 @@ def create_app(
 
 
 def _routes(app: FastAPI) -> None:
+    _cache_headers(app)
     _page_routes(app)
     _asset_routes(app)
     _session_routes(app)
     _approval_routes(app)
     _status_routes(app)
+
+
+def _cache_headers(app: FastAPI) -> None:
+    """Revalidate on every load so redeploys reach browsers holding stale assets."""
+
+    @app.middleware("http")
+    async def disable_http_cache(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        if "cache-control" not in response.headers:
+            response.headers["cache-control"] = "no-cache"
+        return response
 
 
 def _page_routes(app: FastAPI) -> None:

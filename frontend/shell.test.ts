@@ -182,6 +182,23 @@ test("the rail collapses and expands", async () => {
   expect(collapse.getAttribute("aria-expanded")).toBe("true");
 });
 
+test("a collapsed rail exposes an expand affordance that restores it", async () => {
+  await mount();
+  const shell = document.querySelector("#shell") as HTMLElement;
+  const collapse = document.querySelector("#rail-collapse") as HTMLButtonElement;
+  const expand = document.querySelector("#rail-expand") as HTMLButtonElement;
+
+  expect(expand.hidden).toBe(true);
+  collapse.click();
+  expect(shell.hasAttribute("data-collapsed")).toBe(true);
+  expect(expand.hidden).toBe(false);
+
+  expand.click();
+  expect(shell.hasAttribute("data-collapsed")).toBe(false);
+  expect(expand.hidden).toBe(true);
+  expect(collapse.getAttribute("aria-expanded")).toBe("true");
+});
+
 test("dragging the rail handle resizes the rail and persists the width", async () => {
   await mount();
   const shell = document.querySelector("#shell") as HTMLElement;

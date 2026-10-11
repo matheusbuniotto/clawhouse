@@ -54,6 +54,7 @@ export function mountShell(root = document) {
     const search = requireElement(root, "#rail-search");
     const themeToggle = requireElement(root, "#theme-toggle");
     const collapse = requireElement(root, "#rail-collapse");
+    const expand = requireElement(root, "#rail-expand");
     const newButton = requireElement(root, "#rail-new");
     const handle = requireElement(root, "#rail-handle");
     function navigate(href, options = {}) {
@@ -225,10 +226,16 @@ export function mountShell(root = document) {
         }
     });
     newButton.addEventListener("click", () => navigate("/new"));
-    collapse.addEventListener("click", () => {
-        const collapsed = shell.toggleAttribute("data-collapsed");
+    function setCollapsed(collapsed) {
+        if (collapsed)
+            shell.setAttribute("data-collapsed", "");
+        else
+            shell.removeAttribute("data-collapsed");
         collapse.setAttribute("aria-expanded", String(!collapsed));
-    });
+        expand.hidden = !collapsed;
+    }
+    collapse.addEventListener("click", () => setCollapsed(!shell.hasAttribute("data-collapsed")));
+    expand.addEventListener("click", () => setCollapsed(false));
     handle.addEventListener("pointerdown", startResize);
     shell.addEventListener("click", onClick);
     window.addEventListener("popstate", onPopState);

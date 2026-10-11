@@ -28,6 +28,7 @@ body {
   display: grid;
   grid-template-columns: var(--rail-width) var(--resize-handle-size) minmax(0, 1fr);
   height: 100vh;
+  position: relative;
   transition: grid-template-columns var(--duration) var(--ease);
 }
 
@@ -302,6 +303,41 @@ body {
 
 .rail-handle:hover {
   background: var(--border-hover);
+}
+
+.rail-expand {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--muted);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+
+.rail-expand[hidden] {
+  display: none;
+}
+
+.rail-expand:hover {
+  color: var(--text-strong);
+  border-color: var(--border-hover);
+}
+
+.rail-expand:focus-visible {
+  outline: var(--focus-ring);
 }
 
 .screen {

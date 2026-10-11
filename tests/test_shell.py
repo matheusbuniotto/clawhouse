@@ -60,6 +60,14 @@ async def test_every_route_serves_the_same_shell_document() -> None:
     assert len(set(documents)) == 1
 
 
+async def test_assets_ask_the_browser_to_revalidate() -> None:
+    async with _client(_app()) as client:
+        for path in ("/chat", "/tokens.css", "/shell.css", "/boot.js", "/chat.js"):
+            response = await client.get(path, headers=HEADERS)
+            assert response.status_code == 200
+            assert response.headers["cache-control"] == "no-cache"
+
+
 async def test_shell_chrome_is_present_on_every_route() -> None:
     async with _client(_app()) as client:
         for path in PAGES:
