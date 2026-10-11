@@ -1,4 +1,4 @@
-import { el, relativeTime } from "./dom.js";
+import { el, isRunning, relativeTime, type ActivityState } from "./dom.js";
 
 export interface ScreenContext {
   url: URL;
@@ -13,10 +13,22 @@ interface RailSession {
   id: string;
   title: string;
   created_at: string;
-  run_state?: string;
+  run_state?: ActivityState;
 }
 
 const THEME_KEY = "crabriks.theme-mode";
+const RAIL_WIDTH_KEY = "crabriks.rail-width";
+const MIN_RAIL_WIDTH = 180;
+const MAX_RAIL_WIDTH = 480;
+
+const TITLES: Record<string, string> = {
+  "/": "Crabriks",
+  "/chat": "Crabriks",
+  "/sessions": "Crabriks · Sessions",
+  "/new": "Crabriks · New session",
+  "/approvals": "Crabriks · Approvals",
+  "/status": "Crabriks · Status",
+};
 
 const ROUTES: Record<string, () => Promise<ScreenModule>> = {
   "/": () => import("./chat.js"),
@@ -26,8 +38,6 @@ const ROUTES: Record<string, () => Promise<ScreenModule>> = {
   "/approvals": () => import("./approvals.js"),
   "/status": () => import("./status.js"),
 };
-
-type ShellWindow = Window & { __crabriksShellDispose?: () => void };
 
 function requireElement<T extends Element>(parent: ParentNode, selector: string): T {
   const node = parent.querySelector<T>(selector);
@@ -47,10 +57,14 @@ function groupFor(iso: string, now: number): string {
   return "Earlier";
 }
 
+function clampRailWidth(width: number): number {
+  return Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, Math.round(width)));
+}
+
 /**
- * Bind the persistent shell: rail, theme, session list, and the History-API
- * router. The rail markup is served with every document; this only wires it up
- * and mounts the screen for the current path into `#screen`.
+ * Bind the persistent shell: rail, theme, session list, drag-resize, and the
+ * History-API router. The rail markup is served with the document; this only
+ * wires it up and mounts the screen for the current path into `#screen`.
  */
 export function mountShell(root: ParentNode = document): void {
   const shell = requireElement<HTMLElement>(root, "#shell");
@@ -61,9 +75,7 @@ export function mountShell(root: ParentNode = document): void {
   const themeToggle = requireElement<HTMLButtonElement>(root, "#theme-toggle");
   const collapse = requireElement<HTMLButtonElement>(root, "#rail-collapse");
   const newButton = requireElement<HTMLButtonElement>(root, "#rail-new");
-
-  const shellWindow = window as ShellWindow;
-  shellWindow.__crabriksShellDispose?.();
+  const handle = requireElement<HTMLElement>(root, "#rail-handle");
 
   function navigate(href: string, options: { replace?: boolean } = {}): void {
     const url = new URL(href, location.href);
@@ -78,6 +90,7 @@ export function mountShell(root: ParentNode = document): void {
     const path = normalize(url.pathname);
     const loader = ROUTES[path] ?? ROUTES["/"];
     const module = await loader();
+    document.title = TITLES[path] ?? "Crabriks";
     screen.replaceChildren();
     module.mount(screen, { url, navigate });
     updateActive(path, url);
@@ -127,7 +140,7 @@ export function mountShell(root: ParentNode = document): void {
     link.href = `/chat?session=${item.id}`;
     link.append(el("span", "rail-session-title", item.title || "Untitled session"));
     link.append(el("span", "rail-session-time", relativeTime(item.created_at)));
-    if (item.run_state === "running") {
+    if (isRunning(item.run_state)) {
       const pulse = el("span", "rail-session-pulse");
       pulse.dataset.state = "running";
       pulse.setAttribute("aria-label", "Running");
@@ -192,6 +205,32 @@ export function mountShell(root: ParentNode = document): void {
     themeToggle.textContent = mode === "light" ? "Light" : "Dark";
   }
 
+  function applyRailWidth(width: number): void {
+    const clamped = clampRailWidth(width);
+    document.documentElement.style.setProperty("--rail-width", `${clamped}px`);
+    localStorage.setItem(RAIL_WIDTH_KEY, String(clamped));
+  }
+
+  function startResize(event: MouseEvent): void {
+    if (shell.hasAttribute("data-collapsed")) return;
+    event.preventDefault();
+    shell.setAttribute("data-resizing", "");
+    const left = shell.getBoundingClientRect().left;
+
+    function onMove(move: MouseEvent): void {
+      applyRailWidth(move.clientX - left);
+    }
+    function onEnd(): void {
+      shell.removeAttribute("data-resizing");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
+  }
+
   themeToggle.addEventListener("click", () => {
     const next = document.documentElement.dataset.themeMode === "light" ? "dark" : "light";
     localStorage.setItem(THEME_KEY, next);
@@ -210,14 +249,12 @@ export function mountShell(root: ParentNode = document): void {
     const collapsed = shell.toggleAttribute("data-collapsed");
     collapse.setAttribute("aria-expanded", String(!collapsed));
   });
+  handle.addEventListener("pointerdown", startResize);
   shell.addEventListener("click", onClick);
   window.addEventListener("popstate", onPopState);
 
-  shellWindow.__crabriksShellDispose = () => {
-    window.removeEventListener("popstate", onPopState);
-    shell.removeEventListener("click", onClick);
-  };
-
+  const storedWidth = Number(localStorage.getItem(RAIL_WIDTH_KEY));
+  if (Number.isFinite(storedWidth) && storedWidth > 0) applyRailWidth(storedWidth);
   const initialMode = localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
   localStorage.setItem(THEME_KEY, initialMode);
   syncTheme(initialMode);

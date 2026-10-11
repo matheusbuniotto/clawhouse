@@ -181,29 +181,13 @@ def _routes(app: FastAPI) -> None:
 def _page_routes(app: FastAPI) -> None:
     @app.get("/")
     @app.get("/chat")
-    async def chat_page(caller: Caller = _require_caller) -> FileResponse:
+    @app.get("/sessions")
+    @app.get("/new")
+    @app.get("/approvals")
+    @app.get("/status")
+    async def shell_page(caller: Caller = _require_caller) -> FileResponse:
         del caller
         return FileResponse(STATIC / "index.html")
-
-    @app.get("/sessions")
-    async def sessions_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "sessions.html")
-
-    @app.get("/new")
-    async def new_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "new.html")
-
-    @app.get("/approvals")
-    async def approvals_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "approvals.html")
-
-    @app.get("/status")
-    async def status_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "status.html")
 
 
 def _asset_routes(app: FastAPI) -> None:
@@ -230,6 +214,15 @@ def _style_routes(app: FastAPI) -> None:
 
 
 def _script_routes(app: FastAPI) -> None:
+    _core_script_routes(app)
+    _screen_script_routes(app)
+
+
+def _core_script_routes(app: FastAPI) -> None:
+    @app.get("/boot.js")
+    async def boot_script() -> FileResponse:
+        return FileResponse(STATIC / "boot.js", media_type="text/javascript")
+
     @app.get("/shell.js")
     async def shell_script() -> FileResponse:
         return FileResponse(STATIC / "shell.js", media_type="text/javascript")
@@ -238,6 +231,16 @@ def _script_routes(app: FastAPI) -> None:
     async def dom_script() -> FileResponse:
         return FileResponse(STATIC / "dom.js", media_type="text/javascript")
 
+    @app.get("/transcript.js")
+    async def transcript_script() -> FileResponse:
+        return FileResponse(STATIC / "transcript.js", media_type="text/javascript")
+
+    @app.get("/highlight.js")
+    async def highlight_script() -> FileResponse:
+        return FileResponse(STATIC / "highlight.js", media_type="text/javascript")
+
+
+def _screen_script_routes(app: FastAPI) -> None:
     @app.get("/chat.js")
     async def chat_script() -> FileResponse:
         return FileResponse(STATIC / "chat.js", media_type="text/javascript")
@@ -245,10 +248,6 @@ def _script_routes(app: FastAPI) -> None:
     @app.get("/sessions.js")
     async def sessions_script() -> FileResponse:
         return FileResponse(STATIC / "sessions.js", media_type="text/javascript")
-
-    @app.get("/transcript.js")
-    async def transcript_script() -> FileResponse:
-        return FileResponse(STATIC / "transcript.js", media_type="text/javascript")
 
     @app.get("/new.js")
     async def new_script() -> FileResponse:

@@ -1,4 +1,7 @@
 /** Shared DOM helpers for the shell and the screen modules. */
+export function isRunning(state) {
+    return state === "running";
+}
 export function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className)

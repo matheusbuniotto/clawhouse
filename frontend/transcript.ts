@@ -1,20 +1,19 @@
 /** Pure, side-effect-free transcript rendering: markdown and tool-activity rows. */
 
+import { el, type ActivityState } from "./dom.js";
+import { highlight } from "./highlight.js";
+
+export type ToolState = ActivityState;
+
 export function renderUserTurn(text: string): HTMLParagraphElement {
-  const node = document.createElement("p");
-  node.className = "bubble user";
-  node.textContent = text;
-  return node;
+  return el("p", "bubble user", text);
 }
 
 export function renderAssistantTurn(source: string): HTMLElement {
-  const node = document.createElement("article");
-  node.className = "assistant";
+  const node = el("article", "assistant");
   node.append(renderMarkdown(source));
   return node;
 }
-
-export type ToolState = "running" | "ok" | "error";
 
 export interface ToolFrame {
   event: "tool_call" | "tool_result";
@@ -23,10 +22,11 @@ export interface ToolFrame {
   content?: string;
 }
 
-const STATUS_LABEL: Record<ToolState, string> = {
+const STATUS_LABEL: Record<ActivityState, string> = {
   running: "Running",
   ok: "OK",
   error: "Error",
+  idle: "Idle",
 };
 
 /**
@@ -61,27 +61,24 @@ function lastRunningTool(container: HTMLElement): HTMLDetailsElement | null {
 }
 
 function createToolRow(name: string, args: string | undefined): HTMLDetailsElement {
-  const row = document.createElement("details");
-  row.className = "tool-row";
+  const row = el("details", "tool-row");
   row.dataset.state = "running";
 
-  const head = document.createElement("summary");
-  head.className = "tool-head";
-  head.append(element("span", name, "tool-name"));
-  const chip = element("span", STATUS_LABEL.running, "tool-status");
+  const head = el("summary", "tool-head");
+  head.append(el("span", "tool-name", name));
+  const chip = el("span", "tool-status", STATUS_LABEL.running);
   chip.dataset.state = "running";
   head.append(chip);
-  head.append(element("span", summarize(name, args), "tool-summary"));
+  head.append(el("span", "tool-summary", summarize(name, args)));
 
-  const body = document.createElement("div");
-  body.className = "tool-body";
+  const body = el("div", "tool-body");
   if (args) body.append(toolSection("Input", args, "tool-input"));
 
   row.append(head, body);
   return row;
 }
 
-function completeToolRow(row: HTMLDetailsElement, state: ToolState, output: string): void {
+function completeToolRow(row: HTMLDetailsElement, state: ActivityState, output: string): void {
   row.dataset.state = state;
   const chip = row.querySelector<HTMLElement>(".tool-status");
   if (chip) {
@@ -98,10 +95,9 @@ function completeToolRow(row: HTMLDetailsElement, state: ToolState, output: stri
 }
 
 function toolSection(label: string, text: string, className: string): HTMLElement {
-  const section = document.createElement("div");
-  section.className = "tool-section";
-  section.append(element("span", label, "tool-label"));
-  section.append(element("pre", text, `tool-io ${className}`));
+  const section = el("div", "tool-section");
+  section.append(el("span", "tool-label", label));
+  section.append(el("pre", `tool-io ${className}`, text));
   return section;
 }
 
@@ -223,20 +219,19 @@ function appendCodeBlock(
 }
 
 function codeBlock(code: string, language: string): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "code-block";
-  const head = document.createElement("div");
-  head.className = "code-head";
-  if (language) head.append(element("span", language, "code-lang"));
-  const button = document.createElement("button");
+  const wrap = el("div", "code-block");
+  const head = el("div", "code-head");
+  if (language) head.append(el("span", "code-lang", language));
+  const button = el("button", "code-copy", "Copy");
   button.type = "button";
-  button.className = "code-copy";
-  button.textContent = "Copy";
   button.addEventListener("click", () => void copyText(button, code));
   head.append(button);
   const pre = document.createElement("pre");
   const codeElement = document.createElement("code");
-  codeElement.textContent = code;
+  for (const token of highlight(code, language)) {
+    if (token.kind === "plain") codeElement.append(document.createTextNode(token.text));
+    else codeElement.append(el("span", `tok tok-${token.kind}`, token.text));
+  }
   pre.append(codeElement);
   wrap.append(head, pre);
   return wrap;
@@ -299,10 +294,10 @@ function appendInline(parent: Node, text: string): void {
 }
 
 function inlineNode(token: string): Node {
-  if (token.startsWith("`")) return element("code", token.slice(1, -1));
+  if (token.startsWith("`")) return el("code", undefined, token.slice(1, -1));
   if (token.startsWith("[")) return linkNode(token);
-  if (token.startsWith("**")) return element("strong", token.slice(2, -2));
-  return element("em", token.slice(1, -1));
+  if (token.startsWith("**")) return el("strong", undefined, token.slice(2, -2));
+  return el("em", undefined, token.slice(1, -1));
 }
 
 function linkNode(token: string): Node {
@@ -320,13 +315,6 @@ function isSafeUrl(url: string): boolean {
   if (!url) return false;
   if (SAFE_SCHEME.test(url)) return true;
   return !SCHEME.test(url);
-}
-
-function element(tag: string, text: string, className?: string): HTMLElement {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  node.textContent = text;
-  return node;
 }
 
 function isListItem(line: string): boolean {

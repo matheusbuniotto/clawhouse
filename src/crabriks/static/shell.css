@@ -39,6 +39,10 @@ body {
   display: none;
 }
 
+.shell[data-resizing] {
+  transition: none;
+}
+
 .rail {
   display: flex;
   min-width: 0;
@@ -258,6 +262,10 @@ body {
 .rail-handle {
   background: var(--border);
   cursor: col-resize;
+}
+
+.shell[data-resizing] .rail-handle {
+  background: var(--border-hover);
 }
 
 .rail-handle:hover {

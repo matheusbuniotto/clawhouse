@@ -48,6 +48,15 @@
   --info: #60a5fa;
   --info-subtle: rgb(96 165 250 / 8%);
 
+  /* syntax highlighting for fenced code */
+  --syntax-keyword: #c792ea;
+  --syntax-string: #c3e88d;
+  --syntax-number: #f78c6c;
+  --syntax-comment: #8b8b94;
+  --syntax-key: #82aaff;
+  --syntax-literal: #ffcb6b;
+  --syntax-variable: #89ddff;
+
   /* radius scale */
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -100,12 +109,12 @@
   --text-strong: #1f1a14;
   --muted: #6d645b;
 
-  --accent: #9a3412;
-  --accent-hover: #7c2d12;
-  --accent-subtle: rgb(154 52 18 / 10%);
+  --accent: #c1352f;
+  --accent-hover: #a02a26;
+  --accent-subtle: rgb(193 53 47 / 10%);
   --accent-ink: #fff7f2;
-  --primary: #9a3412;
-  --ring: #9a3412;
+  --primary: #c1352f;
+  --ring: #c1352f;
 
   --ok: #15803d;
   --ok-subtle: rgb(21 128 61 / 8%);
@@ -115,6 +124,14 @@
   --danger-subtle: rgb(185 28 28 / 8%);
   --info: #1d4ed8;
   --info-subtle: rgb(29 78 216 / 8%);
+
+  --syntax-keyword: #7c3aed;
+  --syntax-string: #15803d;
+  --syntax-number: #b45309;
+  --syntax-comment: #6d645b;
+  --syntax-key: #1d4ed8;
+  --syntax-literal: #b45309;
+  --syntax-variable: #0e7490;
 
   --shadow-sm: 0 1px 2px rgb(31 26 20 / 6%);
   --shadow: 0 8px 24px rgb(31 26 20 / 8%);

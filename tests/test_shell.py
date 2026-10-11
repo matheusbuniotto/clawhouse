@@ -1,6 +1,5 @@
 """The persistent shell: chrome on every route, deep links, and rail endpoints."""
 
-import re
 from collections.abc import AsyncIterator
 
 import pytest
@@ -17,7 +16,6 @@ from crabriks.store import MemorySessionStore
 OWNER = "ada@example.com"
 HEADERS = {"x-forwarded-email": OWNER, "x-forwarded-access-token": "tok_" + "ada"}
 PAGES = ("/chat", "/sessions", "/new", "/approvals", "/status")
-RAIL = re.compile(r'<aside class="rail".*?</aside>', re.DOTALL)
 
 
 def _reply(text: str):
@@ -55,13 +53,11 @@ async def _page(client: AsyncClient, path: str) -> str:
     return response.text
 
 
-async def test_every_route_serves_the_same_rail_markup() -> None:
+async def test_every_route_serves_the_same_shell_document() -> None:
     async with _client(_app()) as client:
-        rails = [RAIL.search(await _page(client, path)) for path in PAGES]
+        documents = [await _page(client, path) for path in PAGES]
 
-    bodies = [match.group(0) for match in rails if match is not None]
-    assert len(bodies) == len(PAGES)
-    assert len(set(bodies)) == 1
+    assert len(set(documents)) == 1
 
 
 async def test_shell_chrome_is_present_on_every_route() -> None:
@@ -74,7 +70,7 @@ async def test_shell_chrome_is_present_on_every_route() -> None:
             assert 'id="rail-user"' in text
             assert 'id="theme-toggle"' in text
             assert 'id="screen"' in text
-            assert 'src="/shell.js"' in text
+            assert 'src="/boot.js"' in text
 
 
 async def test_deep_links_serve_full_documents() -> None:

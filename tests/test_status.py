@@ -245,8 +245,7 @@ async def test_status_page_requires_auth_and_serves_html() -> None:
     assert unauth.status_code == 401
     assert auth.status_code == 200
     assert "Crabriks" in auth.text
-    assert "Status" in auth.text
-    assert 'src="/shell.js"' in auth.text
+    assert 'src="/boot.js"' in auth.text
     assert 'id="rail"' in auth.text
 
 
