@@ -185,7 +185,9 @@ export function mountShell(root = document) {
     function syncTheme(mode) {
         document.documentElement.dataset.themeMode = mode;
         themeToggle.setAttribute("aria-pressed", String(mode === "light"));
-        themeToggle.textContent = mode === "light" ? "Light" : "Dark";
+        const label = themeToggle.querySelector(".rail-theme-label");
+        if (label)
+            label.textContent = mode === "light" ? "Light" : "Dark";
     }
     function applyRailWidth(width) {
         const clamped = clampRailWidth(width);

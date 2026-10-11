@@ -52,7 +52,6 @@ function createToolRow(name, args) {
     const chip = el("span", "tool-status", STATUS_LABEL.running);
     chip.dataset.state = "running";
     head.append(chip);
-    head.append(el("span", "tool-summary", summarize(name, args)));
     const body = el("div", "tool-body");
     if (args)
         body.append(toolSection("Input", args, "tool-input"));
@@ -80,10 +79,6 @@ function toolSection(label, text, className) {
     section.append(el("span", "tool-label", label));
     section.append(el("pre", `tool-io ${className}`, text));
     return section;
-}
-function summarize(name, args) {
-    const compact = (args ?? "").replace(/\s+/g, " ").trim();
-    return compact ? `Called ${name} with ${compact}` : `Called ${name}`;
 }
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const UNORDERED_ITEM = /^\s*[-*+]\s+(.*)$/;

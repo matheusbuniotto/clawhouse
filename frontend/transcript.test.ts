@@ -129,7 +129,7 @@ test("a tool call becomes a collapsible row with a running chip and summary", ()
   const chip = row.querySelector(".tool-status") as HTMLElement;
   expect(chip.textContent).toBe("Running");
   expect(chip.dataset.state).toBe("running");
-  expect(row.querySelector(".tool-summary")?.textContent).toBe('Called lookup with {"q":"notes"}');
+  expect(row.querySelector(".tool-summary")).toBeNull();
   expect(row.querySelector(".tool-input")?.textContent).toBe('{"q":"notes"}');
   expect(row.querySelector(".tool-output")).toBeNull();
 

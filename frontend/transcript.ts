@@ -69,7 +69,6 @@ function createToolRow(name: string, args: string | undefined): HTMLDetailsEleme
   const chip = el("span", "tool-status", STATUS_LABEL.running);
   chip.dataset.state = "running";
   head.append(chip);
-  head.append(el("span", "tool-summary", summarize(name, args)));
 
   const body = el("div", "tool-body");
   if (args) body.append(toolSection("Input", args, "tool-input"));
@@ -99,11 +98,6 @@ function toolSection(label: string, text: string, className: string): HTMLElemen
   section.append(el("span", "tool-label", label));
   section.append(el("pre", `tool-io ${className}`, text));
   return section;
-}
-
-function summarize(name: string, args: string | undefined): string {
-  const compact = (args ?? "").replace(/\s+/g, " ").trim();
-  return compact ? `Called ${name} with ${compact}` : `Called ${name}`;
 }
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
