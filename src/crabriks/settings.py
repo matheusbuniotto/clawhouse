@@ -30,6 +30,7 @@ class Settings:
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     agent_root: Path = field(default_factory=default_agent_root)
     sensitive_tools: tuple[str, ...] = ()
+    log_tail_url: str | None = None
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -41,6 +42,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         models=models_from_env(env),
         mcp_servers=mcp_servers_from_env(env),
         sensitive_tools=sensitive_tools_from_env(env),
+        log_tail_url=env.get("CRABRIKS_LOG_TAIL_URL") or env.get("LOG_TAIL_URL") or None,
     )
 
 

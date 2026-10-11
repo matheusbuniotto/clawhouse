@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crabriks · Status</title>
+    <link rel="stylesheet" href="/chat.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <p class="mark">Crabriks</p>
+        <p class="who">Status</p>
+      </header>
+      <nav class="nav">
+        <a href="/chat">Chat</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/new">New session</a>
+        <a href="/approvals">Approvals</a>
+        <a href="/status">Status</a>
+      </nav>
+      <main class="log">
+        <section class="status-section">
+          <h2>Connection &amp; Identity</h2>
+          <div class="status-card">
+            <dl class="status-grid">
+              <dt>User</dt>
+              <dd id="stat-user">Loading…</dd>
+              <dt>Auth mode</dt>
+              <dd id="stat-auth">Loading…</dd>
+              <dt>Token</dt>
+              <dd id="stat-token">Loading…</dd>
+              <dt>Workspace</dt>
+              <dd id="stat-workspace">Loading…</dd>
+              <dt>Model endpoint</dt>
+              <dd id="stat-model">Loading…</dd>
+              <dt>Storage</dt>
+              <dd id="stat-store">Loading…</dd>
+            </dl>
+          </div>
+        </section>
+
+        <section class="status-section">
+          <h2>Session Runs</h2>
+          <ul id="sessions-list" class="sessions-list"></ul>
+        </section>
+
+        <section class="status-section">
+          <h2>Diagnostics &amp; Logs</h2>
+          <div class="status-card">
+            <p class="log-tail-row">
+              <a id="log-tail-link" class="btn-link" href="#" target="_blank" rel="noopener">Log tail</a>
+            </p>
+          </div>
+        </section>
+      </main>
+      <p id="status" class="status" role="status"></p>
+    </div>
+    <script type="module" src="/status.js"></script>
+  </body>
+</html>

@@ -24,6 +24,7 @@ from databricks.sdk import WorkspaceClient
 from crabriks.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
+    RunState,
     SessionSummary,
     TranscriptEntry,
     TurnStatus,
@@ -170,6 +171,7 @@ class _MemorySession:
     created_at: datetime
     entries: list[TranscriptEntry] = field(default_factory=list)
     running: str | None = None
+    last_status: TurnStatus | None = None
 
 
 class MemorySessionStore:
@@ -234,6 +236,7 @@ class MemorySessionStore:
             session = self._sessions[session_id]
             if session.running == run_id and status in ("ok", "error", "pending_approval"):
                 session.running = None
+                session.last_status = status
 
     async def transcript(self, session_id: str, owner_id: str) -> tuple[TranscriptEntry, ...]:
         async with self._lock:
@@ -370,7 +373,13 @@ class LakebaseSessionStore:
                     WHERE t.session_id = s.id AND t.role = 'user'
                     ORDER BY t.position
                     LIMIT 1
-                ) AS title
+                ) AS title,
+                (
+                    SELECT r.status FROM crabriks.runs AS r
+                    WHERE r.session_id = s.id
+                    ORDER BY (r.status = 'running') DESC, r.started_at DESC
+                    LIMIT 1
+                ) AS latest_run_status
             FROM crabriks.sessions AS s
             WHERE s.owner_id = $1
             ORDER BY s.created_at DESC
@@ -382,6 +391,10 @@ class LakebaseSessionStore:
                 id=str(row["id"]),
                 title=row["title"] or "",
                 created_at=row["created_at"],
+                run_state=run_state_for(
+                    is_running=False,
+                    status=row["latest_run_status"],
+                ),
             )
             for row in rows
         )
@@ -689,9 +702,25 @@ def _entry_from_row(row: asyncpg.Record) -> TranscriptEntry:
     )
 
 
+def run_state_for(*, is_running: bool, status: str | None) -> RunState:
+    if is_running or status == "running":
+        return "running"
+    if status == "error":
+        return "error"
+    return "idle"
+
+
 def _memory_summary(session_id: str, session: _MemorySession) -> SessionSummary:
     title = next((entry.content for entry in session.entries if entry.role == "user"), "")
-    return SessionSummary(id=session_id, title=title, created_at=session.created_at)
+    return SessionSummary(
+        id=session_id,
+        title=title,
+        created_at=session.created_at,
+        run_state=run_state_for(
+            is_running=session.running is not None,
+            status=session.last_status,
+        ),
+    )
 
 
 async def _insert_or_check_owner(conn: _Querier, session: UUID, owner_id: str) -> None:
