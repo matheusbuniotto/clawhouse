@@ -2,7 +2,7 @@
 
 Companion to [`SCREENSHOTS.md`](SCREENSHOTS.md), which describes OpenClaw's Control UI
 in text. That file explicitly recorded that **no PNGs were produced**. This file is the
-missing half: 25 real, published product screenshots of the shipped Control UI,
+missing half: 26 real, published product screenshots of the shipped Control UI,
 downloaded into [`shots/`](shots/).
 
 Status: reference material, not an ADR. Written to inform
@@ -22,7 +22,7 @@ OpenClaw's release notes and changelogs as markdown images served from
 | Releases covered | `2026.9.1`, `2026.9.2`, `2026.9.3`, `2026.9.4`, `2026.9.5`, `2026.10.1` |
 | Extracted from | `docs/releases/<version>.md`, `CHANGELOG/<version>.md` (and `docs/gateway/team-server.md` for one image) |
 | Extraction date | 2026-10-11 |
-| Corpus available | 59 image URLs; 25 curated here |
+| Corpus available | 59 image URLs; 26 curated here |
 
 Caveats to keep in mind while reading:
 
@@ -50,6 +50,7 @@ Caveats to keep in mind while reading:
 | Approvals | [9.3 share menu](#7-approvals--permissions) *(nearest evidence)*, [9.5 recommendation](#7-approvals--permissions) |
 | Status / settings / theme | [9.4 appearance](#8-status--settings--theme), [9.1 defaults](#8-status--settings--theme), [9.5 storage](#8-status--settings--theme), [10.1 mac setup](#8-status--settings--theme) |
 | Agents roster | [9.5 agents overview](#9-agents-roster) |
+| Agent picker / maker | [9.5 new-agent welcome](#10-agent-picker--maker) |
 
 ---
 
@@ -432,6 +433,54 @@ Source: `openclaw/openclaw` release 2026.9.5 · `CHANGELOG/2026.9.5.md`
 
 - Identity is carried by a small avatar + name + preview of recent work in a consistent
   card, reused everywhere the agent appears.
+
+---
+
+## 10. Agent picker / maker
+
+### `2026.9.5-agent-maker-new-agent-welcome.png`
+
+![The actual new-agent welcome offers a chief of staff, researcher, writer, reviewer, and small team.](shots/2026.9.5-agent-maker-new-agent-welcome.png)
+
+Source: `openclaw/openclaw` release 2026.9.5 · `CHANGELOG/2026.9.5.md` ·
+`https://github.com/user-attachments/assets/5a966710-3dae-408e-8a00-f422578e98ef`
+
+This is the **New agent** flow. Release copy: *"Start with a chief of staff, researcher,
+writer and reviewer, or choose a single specialist… **New agent** in the web UI offers the
+same roles through a proposal you approve before anything is created."*
+
+- **The agent maker is a conversation, not a wizard.** It reuses the chat shell with a
+different agent selected — here the system agent identifies itself as `OpenClaw` with the
+one-line purpose `System setup and care.`, and a `History` link sits top-right. There is
+**no separate create-agent form, no card grid, and no stepper**.
+- **The choice menu is assistant prose.** The assistant writes an ordered list where each
+option is `Name — description`:
+  1. Chief of staff — coordinates the others, single point of contact
+  2. Researcher — evidence, source comparison, cited brief
+  3. Writer — brief + verified sources → usable draft
+  4. Reviewer — checks artifacts against requirements, reports actionable findings
+  5. A small team (chief of staff + the three specialists)
+  6. Something custom (tell me the name and the kind of work)
+  You answer with a number or a sentence. **This only works because the transcript renders
+  real markdown** — the same capability missing from our frontend today.
+- **Identity block, reused**: circular avatar + bold agent name + muted one-line purpose,
+escaped by a hairline rule. The same avatar + name pattern appears in the rail's agent
+groups and in the Agents overview, so an agent looks the same everywhere it appears.
+- **Per-message identity attribution**: the assistant's avatar sits in the left margin
+aligned with its own reply, rather than only in the header.
+- **Creation is gated on explicit approval.** The assistant states the intent up front
+(*"I'll propose creation for your approval"*) and nothing is created until the user
+confirms. Failure handling is documented too: a partial creation is reported for repair
+rather than silently retried.
+- **Option 6 is the escape hatch.** A free-text "describe your own" path sits at the end of
+the enumeration, so the pre-baked roles never become a ceiling.
+
+> **Porting note:** Crabriks has no agent-creation surface; the platform agent is fixed and
+> built-in (`new.html` literally reads `Agent main · built-in, read-only`). This screenshot
+> is the reference for [issue #21](https://github.com/matheusbuniotto/crabriks/issues/21)
+> (agent first-hatch customization flow), not for the v1 five-screen refresh. The
+transferable insight regardless of scope: **a creation flow that is itself a conversation
+needs no bespoke chrome at all** — it is one more transcript, plus an approval gate.
 
 ---
 
