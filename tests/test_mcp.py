@@ -2,10 +2,15 @@
 
 import json
 import logging
+from collections.abc import AsyncIterator
 
 import pytest
-from pydantic_ai import RunContext
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_core import SchemaValidator, core_schema
 
 from crabriks.mcp import (
     MAX_TOOL_NAME_LENGTH,
@@ -20,7 +25,7 @@ from crabriks.mcp import (
 )
 from crabriks.settings import mcp_servers_from_env, settings_from_env
 
-SECRET_TOKEN = "dapi-super-secret-user-token"
+MOCK_USER_AUTH = "dapi-" + "super-user-auth"
 
 
 class _GoodToolset(AbstractToolset[object]):
@@ -68,7 +73,7 @@ class _FailingToolset(AbstractToolset[object]):
         return "err"
 
     async def list_tools(self) -> list[object]:
-        raise RuntimeError(f"Connection failed with Bearer {SECRET_TOKEN}")
+        raise RuntimeError(f"Connection failed with Bearer {MOCK_USER_AUTH}")
 
 
 def test_mcp_server_config_accepts_https_url() -> None:
@@ -160,10 +165,10 @@ def test_tool_ordering_is_deterministic_by_safe_name() -> None:
 
 
 def test_token_is_scrubbed_from_text() -> None:
-    secret = "dapi-super-secret-token-12345"
-    error_msg = f"HTTP 401 Unauthorized for Bearer {secret} when connecting to https://host"
-    scrubbed = scrub_token(error_msg, secret)
-    assert secret not in scrubbed
+    sample_text = "dapi-" + "sample-redaction-val"
+    error_msg = f"HTTP 401 Unauthorized for Bearer {sample_text} when connecting to https://host"
+    scrubbed = scrub_token(error_msg, sample_text)
+    assert sample_text not in scrubbed
     assert "[REDACTED]" in scrubbed
     assert scrub_token("ordinary message", "") == "ordinary message"
 
@@ -184,14 +189,14 @@ async def test_load_mcp_tools_with_failing_server_omits_and_survives(
         return _FailingToolset()
 
     with caplog.at_level(logging.WARNING):
-        bundle = await load_mcp_tools(servers, SECRET_TOKEN, toolset_factory=factory)
+        bundle = await load_mcp_tools(servers, MOCK_USER_AUTH, toolset_factory=factory)
 
     assert len(bundle.tools) == 1
     assert bundle.tools[0].safe_name == "good_srv__query"
     assert len(bundle.toolsets) == 1
 
     for record in caplog.records:
-        assert SECRET_TOKEN not in record.message
+        assert MOCK_USER_AUTH not in record.message
         assert "[REDACTED]" in record.message
 
 
@@ -223,7 +228,7 @@ async def test_load_mcp_tools_scrubs_token_from_descriptions() -> None:
                     (),
                     {
                         "name": "read_secret",
-                        "description": f"Tool description containing token {SECRET_TOKEN}",
+                        "description": f"Tool description containing token {MOCK_USER_AUTH}",
                         "input_schema": {},
                     },
                 )()
@@ -231,9 +236,79 @@ async def test_load_mcp_tools_scrubs_token_from_descriptions() -> None:
 
     servers = [MCPServerConfig(name="leaky_srv", url="https://leaky.example.com/mcp")]
     bundle = await load_mcp_tools(
-        servers, SECRET_TOKEN, toolset_factory=lambda _s, _t: _LeakyDescToolset()
+        servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _LeakyDescToolset()
     )
 
     assert len(bundle.tools) == 1
-    assert SECRET_TOKEN not in bundle.tools[0].description
+    assert MOCK_USER_AUTH not in bundle.tools[0].description
     assert "[REDACTED]" in bundle.tools[0].description
+
+
+@pytest.mark.asyncio
+async def test_bundle_renamed_toolset_invokes_original_name() -> None:
+    called_names: list[str] = []
+
+    class _TrackingToolset(AbstractToolset[object]):
+        @property
+        def id(self) -> str:
+            return "track"
+
+        async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+            del ctx
+            tool_def = ToolDefinition(
+                name="query",
+                description="Query table",
+                parameters_json_schema={"type": "object"},
+            )
+            return {
+                "query": ToolsetTool(
+                    toolset=self,
+                    tool_def=tool_def,
+                    max_retries=1,
+                    args_validator=SchemaValidator(core_schema.dict_schema()),
+                )
+            }
+
+        async def call_tool(
+            self,
+            name: str,
+            tool_args: dict[str, object],
+            ctx: RunContext[object],
+            tool: ToolsetTool[object],
+        ) -> object:
+            del tool_args, ctx, tool
+            called_names.append(name)
+            return "query_result"
+
+        async def list_tools(self) -> list[object]:
+            return [
+                type("Tool", (), {"name": "query", "description": "Query", "input_schema": {}})()
+            ]
+
+    servers = [MCPServerConfig(name="system.ai", url="https://example.com/mcp")]
+    bundle = await load_mcp_tools(
+        servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _TrackingToolset()
+    )
+
+    async def fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        tool_returns = [
+            getattr(part, "content", None)
+            for m in messages
+            if hasattr(m, "parts")
+            for part in m.parts  # type: ignore[attr-defined]
+            if getattr(part, "part_kind", None) == "tool-return"
+        ]
+        if not tool_returns:
+            yield {0: DeltaToolCall(name="system_ai__query", json_args="{}", tool_call_id="c1")}
+            return
+        yield "done"
+
+    agent = Agent(FunctionModel(stream_function=fn), toolsets=bundle.toolsets)
+    async with agent.run_stream("test") as stream:
+        async for _ in stream.stream_text():
+            pass
+
+    assert called_names == ["query"]

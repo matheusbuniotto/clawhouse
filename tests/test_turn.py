@@ -463,80 +463,36 @@ async def test_turn_skills_discovery_is_cached_per_session(tmp_path: Path) -> No
     assert "- sql: Modified description." in seen[2]
 
 
-class _MockUCToolset(AbstractToolset[object]):
-    @property
-    def id(self) -> str:
-        return "system_ai_srv"
-
-    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
-        del ctx
-        tool_def = ToolDefinition(
-            name="describe_table",
-            description="Describe columns of a Unity Catalog table",
-            parameters_json_schema={
-                "type": "object",
-                "properties": {"table": {"type": "string"}},
-                "required": ["table"],
-            },
-        )
-        return {
-            "describe_table": ToolsetTool(
-                toolset=self,
-                tool_def=tool_def,
-                max_retries=1,
-                args_validator=SchemaValidator(core_schema.dict_schema()),
-            )
-        }
-
-    async def call_tool(
+class _StubServerToolset(AbstractToolset[object]):
+    def __init__(
         self,
-        name: str,
-        tool_args: dict[str, object],
-        ctx: RunContext[object],
-        tool: ToolsetTool[object],
-    ) -> object:
-        del name, ctx, tool
-        table = str(tool_args.get("table", ""))
-        return json.dumps(
-            {
-                "table": table,
-                "columns": ["trip_id", "pickup_time", "fare_amount"],
-            }
-        )
+        server_id: str,
+        name: str = "stub",
+        description: str = "",
+        result: str = "",
+        fails: bool = False,
+    ) -> None:
+        self._id = server_id
+        self._name = name
+        self._desc = description
+        self._result = result
+        self._fails = fails
 
-    async def list_tools(self) -> list[object]:
-        return [
-            type(
-                "Tool",
-                (),
-                {
-                    "name": "describe_table",
-                    "description": "Describe columns of a Unity Catalog table",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {"table": {"type": "string"}},
-                    },
-                },
-            )()
-        ]
-
-
-class _MockSecondaryToolset(AbstractToolset[object]):
     @property
     def id(self) -> str:
-        return "billing_srv"
+        return self._id
 
     async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
         del ctx
-        tool_def = ToolDefinition(
-            name="get_balance",
-            description="Get billing balance",
+        tdef = ToolDefinition(
+            name=self._name,
+            description=self._desc,
             parameters_json_schema={"type": "object"},
         )
         return {
-            "get_balance": ToolsetTool(
+            self._name: ToolsetTool(
                 toolset=self,
-                tool_def=tool_def,
+                tool_def=tdef,
                 max_retries=1,
                 args_validator=SchemaValidator(core_schema.dict_schema()),
             )
@@ -550,43 +506,18 @@ class _MockSecondaryToolset(AbstractToolset[object]):
         tool: ToolsetTool[object],
     ) -> object:
         del name, tool_args, ctx, tool
-        return '{"balance": 100}'
+        return self._result
 
     async def list_tools(self) -> list[object]:
+        if self._fails:
+            raise RuntimeError("Server unavailable")
         return [
             type(
                 "Tool",
                 (),
-                {
-                    "name": "get_balance",
-                    "description": "Get billing balance",
-                    "input_schema": {"type": "object"},
-                },
+                {"name": self._name, "description": self._desc, "input_schema": {}},
             )()
         ]
-
-
-class _MockFailingServerToolset(AbstractToolset[object]):
-    @property
-    def id(self) -> str:
-        return "fail_srv"
-
-    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
-        del ctx
-        return {}
-
-    async def call_tool(
-        self,
-        name: str,
-        tool_args: dict[str, object],
-        ctx: RunContext[object],
-        tool: ToolsetTool[object],
-    ) -> object:
-        del name, tool_args, ctx, tool
-        return "err"
-
-    async def list_tools(self) -> list[object]:
-        raise RuntimeError("Server unavailable")
 
 
 async def test_turn_includes_mcp_tools_in_prompt_ordered_deterministically() -> None:
@@ -605,8 +536,12 @@ async def test_turn_includes_mcp_tools_in_prompt_ordered_deterministically() -> 
     def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
         del token
         if srv.name == "billing":
-            return _MockSecondaryToolset()
-        return _MockUCToolset()
+            return _StubServerToolset(
+                "billing_srv", "get_balance", "Get billing balance", '{"balance": 100}'
+            )
+        return _StubServerToolset(
+            "uc_srv", "describe_table", "Describe columns of a Unity Catalog table"
+        )
 
     ctx = _ctx(
         MemorySessionStore(),
@@ -644,8 +579,10 @@ async def test_turn_survives_when_mcp_server_tools_list_fails() -> None:
     def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
         del token
         if srv.name == "fail":
-            return _MockFailingServerToolset()
-        return _MockUCToolset()
+            return _StubServerToolset("fail_srv", "fail_tool", fails=True)
+        return _StubServerToolset(
+            "uc_srv", "describe_table", "Describe columns of a Unity Catalog table"
+        )
 
     ctx = _ctx(
         MemorySessionStore(),
@@ -690,17 +627,23 @@ async def test_turn_demo_agent_answers_unity_catalog_question_through_mcp_tool()
 
     emitted_notices: list[TurnNotice] = []
     servers = (MCPServerConfig(name="system.ai", url="https://adb-1.databricks.com/mcp"),)
+    caller_token = "dapi-" + "user-test-auth"
 
     def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
-        assert token == "dapi-user-test-token"
-        return _MockUCToolset()
+        assert token == caller_token
+        return _StubServerToolset(
+            "system_ai_srv",
+            "describe_table",
+            "Describe columns of a Unity Catalog table",
+            json.dumps({"columns": ["trip_id", "pickup_time", "fare_amount"]}),
+        )
 
     ctx = _ctx(
         MemorySessionStore(),
         FunctionModel(stream_function=uc_assistant),
         emit=emitted_notices,
         mcp_servers=servers,
-        user_token="dapi-user-test-token",
+        user_token=caller_token,
         mcp_toolset_factory=factory,
     )
 

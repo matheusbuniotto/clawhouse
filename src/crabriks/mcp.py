@@ -198,6 +198,9 @@ async def load_mcp_tools(
     active_toolsets: list[AbstractToolset[object]] = []
 
     for server_name, toolset in server_toolsets.items():
+        # RenamedToolset(name_map) maps exposed (safe) names to underlying original names.
+        # In call_tool, RenamedToolset uses `self.name_map.get(name, name)` to recover
+        # and invoke the underlying server's original tool name.
         name_map = {
             t.safe_name: t.original_name for t in disambiguated if t.server_name == server_name
         }

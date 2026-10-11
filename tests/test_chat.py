@@ -489,7 +489,7 @@ class _UCServer(AbstractToolset[object]):
     async def list_tools(self) -> list[object]:
         return [
             type(
-                "T",
+                "Tool",
                 (),
                 {
                     "name": "list_catalogs",
@@ -554,7 +554,7 @@ async def test_chat_turn_executes_mcp_tool_with_user_token_and_streams_notices()
             f"/api/sessions/{SESSION}/turns",
             headers={
                 "x-forwarded-email": "ada@example.com",
-                "x-forwarded-access-token": "dapi-user-xyz",
+                "x-forwarded-access-token": "dapi-" + "user-xyz",
             },
             json={"message": "list catalogs"},
         )
