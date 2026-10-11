@@ -75,6 +75,10 @@ sync:
 		--exclude "tests/**" \
 		--exclude "docs/**" \
 		--exclude "frontend/**" \
+		--exclude "package.json" \
+		--exclude "package-lock.json" \
+		--exclude "vitest.config.ts" \
+		--exclude "node_modules/**" \
 		--exclude ".agents/**" \
 		--exclude ".claude/**" \
 		--exclude ".grok/**" \
