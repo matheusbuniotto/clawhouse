@@ -1,17 +1,12 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
+import type { ScreenContext } from "./shell.js";
+
 const SESSION = "11111111-1111-4111-8111-111111111111";
 
-const PAGE = `
-  <p id="who">Checking sign-in…</p>
-  <main id="log" class="log"></main>
-  <form id="composer" class="composer">
-    <select id="model"></select>
-    <textarea id="message"></textarea>
-    <button type="submit">Send</button>
-    <p id="status" class="status" role="status"></p>
-  </form>
-`;
+function context(search = `?session=${SESSION}`): ScreenContext {
+  return { url: new URL(`http://localhost/chat${search}`), navigate: vi.fn() };
+}
 
 function jsonResponse(payload: unknown): Response {
   return { ok: true, json: async () => payload } as unknown as Response;
@@ -33,14 +28,12 @@ function streamResponse(frames: string): Response {
 }
 
 beforeEach(() => {
-  vi.resetModules();
   vi.unstubAllGlobals();
   sessionStorage.clear();
-  document.body.innerHTML = PAGE;
+  document.body.innerHTML = "";
 });
 
 test("renders a loaded transcript as markdown and one merged tool row", async () => {
-  sessionStorage.setItem("crabriks.session", SESSION);
   const entries = [
     { role: "user", content: "What is `pandas`?", tool_name: null },
     { role: "tool_call", content: '{"q":"pandas"}', tool_name: "lookup" },
@@ -54,18 +47,16 @@ test("renders a loaded transcript as markdown and one merged tool row", async ()
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.endsWith("/transcript")) return jsonResponse({ entries });
-    if (url === "/api/me") return jsonResponse({ user_id: "ada@example.com" });
     if (url === "/api/models") {
       return jsonResponse({ models: [{ id: "m", label: "M", default: true }] });
     }
     return jsonResponse({});
   });
 
-  await import("./chat");
+  await import("./chat").then((module) => module.mount(document.body, context()));
   await vi.waitFor(() => expect(document.querySelector(".assistant")).not.toBeNull());
 
   const log = document.querySelector("#log") as HTMLElement;
-  expect(document.querySelector("#who")?.textContent).toBe("ada@example.com");
   expect(log.querySelector(".bubble.user")?.textContent).toBe("What is `pandas`?");
   expect(log.querySelector(".bubble.assistant")).toBeNull();
   expect(log.querySelectorAll(".tool-row")).toHaveLength(1);
@@ -76,7 +67,6 @@ test("renders a loaded transcript as markdown and one merged tool row", async ()
 });
 
 test("streams a turn into markdown and a shared tool row", async () => {
-  sessionStorage.setItem("crabriks.session", SESSION);
   const frames = [
     'event: token\ndata: {"text":"# Hi"}\n\n',
     'event: tool_call\ndata: {"name":"lookup","arguments":"{}"}\n\n',
@@ -87,12 +77,11 @@ test("streams a turn into markdown and a shared tool row", async () => {
     const url = String(input);
     if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
     if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
-    if (url === "/api/me") return jsonResponse({ user_id: "ada@example.com" });
     if (url === "/api/models") return jsonResponse({ models: [] });
     return jsonResponse({});
   });
 
-  await import("./chat");
+  await import("./chat").then((module) => module.mount(document.body, context()));
   await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
 
   const input = document.querySelector("#message") as HTMLTextAreaElement;
@@ -112,7 +101,6 @@ test("streams a turn into markdown and a shared tool row", async () => {
 });
 
 test("a failed turn marks the running tool row and reports inline", async () => {
-  sessionStorage.setItem("crabriks.session", SESSION);
   const frames =
     'event: tool_call\ndata: {"name":"lookup","arguments":"{}"}\n\n' +
     'event: error\ndata: {"status":"error","reply":"","error":"The turn failed."}\n\n';
@@ -120,11 +108,10 @@ test("a failed turn marks the running tool row and reports inline", async () => 
     const url = String(input);
     if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
     if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
-    if (url === "/api/me") return jsonResponse({ user_id: "ada@example.com" });
     return jsonResponse({ models: [] });
   });
 
-  await import("./chat");
+  await import("./chat").then((module) => module.mount(document.body, context()));
   await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
 
   (document.querySelector("#message") as HTMLTextAreaElement).value = "hello";
@@ -139,4 +126,51 @@ test("a failed turn marks the running tool row and reports inline", async () => 
   const row = document.querySelector(".tool-row") as HTMLElement;
   expect(row.dataset.state).toBe("error");
   expect(row.querySelector(".tool-output")?.textContent).toBe("The turn failed.");
+});
+
+test("the composer grows, keeps the model pill inline, and exposes abort only while running", async () => {
+  let release: (() => void) | undefined;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") {
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: () =>
+              new Promise((resolve) => {
+                release = () => resolve({ done: true, value: undefined });
+              }),
+          }),
+        },
+      } as unknown as Response;
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({ models: [] });
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+
+  const composer = document.querySelector("#composer") as HTMLFormElement;
+  const model = document.querySelector("#model") as HTMLSelectElement;
+  const abort = document.querySelector("#abort") as HTMLButtonElement;
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  expect(model.className).toBe("model-pill");
+  expect(composer.contains(model)).toBe(true);
+  expect(abort.hidden).toBe(true);
+
+  Object.defineProperty(message, "scrollHeight", { value: 96, configurable: true });
+  message.value = "line\nline";
+  message.dispatchEvent(new Event("input"));
+  expect(message.style.height).toBe("96px");
+
+  message.value = "hello";
+  composer.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+  await vi.waitFor(() => expect(abort.hidden).toBe(false));
+
+  abort.click();
+  expect(abort.hidden).toBe(true);
+  release?.();
 });

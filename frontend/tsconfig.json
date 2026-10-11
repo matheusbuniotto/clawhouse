@@ -11,5 +11,14 @@
     "outDir": "../src/crabriks/static",
     "rootDir": "."
   },
-  "files": ["chat.ts", "transcript.ts", "sessions.ts", "new.ts", "approvals.ts", "status.ts"]
+  "files": [
+    "shell.ts",
+    "dom.ts",
+    "chat.ts",
+    "transcript.ts",
+    "sessions.ts",
+    "new.ts",
+    "approvals.ts",
+    "status.ts"
+  ]
 }

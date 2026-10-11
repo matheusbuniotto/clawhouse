@@ -9,13 +9,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 APP_SOURCE = ROOT / "src" / "crabriks" / "api" / "app.py"
 FRONTEND = ROOT / "frontend"
+STATIC = ROOT / "src" / "crabriks" / "static"
 STATIC_PREFIX = "crabriks/static/"
+IMPORT_SPECIFIER = re.compile(r"""(?:\bfrom\s+|\bimport\s*\(|\bimport\s+)["'](\./[^"']+)["']""")
 
 
 def _served_static_files() -> set[str]:
     """Every static filename `app.py` hands to a FileResponse, in serve order."""
     source = APP_SOURCE.read_text(encoding="utf-8")
     return set(re.findall(r'STATIC / "([^"]+)"', source))
+
+
+def _force_include_declared() -> set[str]:
+    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return set(manifest["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"])
 
 
 def _wheel_static_entries(tmp_path: Path) -> set[str]:
@@ -45,10 +52,29 @@ def test_the_wheel_ships_every_served_static_file(tmp_path: Path) -> None:
 
 
 def test_force_include_declares_every_served_static_file() -> None:
-    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    declared = set(manifest["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"])
+    assert _force_include_declared() == {
+        f"src/crabriks/static/{name}" for name in _served_static_files()
+    }
 
-    assert declared == {f"src/crabriks/static/{name}" for name in _served_static_files()}
+
+def test_every_imported_module_is_served_and_shipped() -> None:
+    served = _served_static_files()
+    declared = _force_include_declared()
+    imports = 0
+
+    for name in sorted(served):
+        if not name.endswith(".js"):
+            continue
+        source = (STATIC / name).read_text(encoding="utf-8")
+        for specifier in IMPORT_SPECIFIER.findall(source):
+            imports += 1
+            target = specifier.removeprefix("./")
+            assert target in served, f"{name} imports {specifier}, which is not served"
+            assert f"src/crabriks/static/{target}" in declared, (
+                f"{name} imports {specifier}, which is not in the wheel force-include"
+            )
+
+    assert imports > 0, "no relative imports found in served scripts"
 
 
 def test_every_served_script_has_a_typescript_source() -> None:

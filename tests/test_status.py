@@ -246,8 +246,8 @@ async def test_status_page_requires_auth_and_serves_html() -> None:
     assert auth.status_code == 200
     assert "Crabriks" in auth.text
     assert "Status" in auth.text
-    assert 'src="/status.js"' in auth.text
-    assert 'id="log-tail-link"' in auth.text
+    assert 'src="/shell.js"' in auth.text
+    assert 'id="rail"' in auth.text
 
 
 async def test_status_asset_route() -> None:
@@ -268,5 +268,6 @@ async def test_navigation_parity_across_all_five_screens(path: str) -> None:
         resp = await client.get(path, headers=HEADERS)
 
     assert resp.status_code == 200
-    for target in ["/chat", "/sessions", "/new", "/approvals", "/status"]:
+    for target in ["/chat", "/sessions", "/approvals", "/status"]:
         assert f'href="{target}"' in resp.text
+    assert 'id="rail-new"' in resp.text

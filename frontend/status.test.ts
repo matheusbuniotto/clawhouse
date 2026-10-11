@@ -1,19 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-const PAGE = `
-  <dl class="status-grid">
-    <dd id="stat-user">Loading…</dd>
-    <dd id="stat-auth">Loading…</dd>
-    <dd id="stat-token">Loading…</dd>
-    <dd id="stat-workspace">Loading…</dd>
-    <dd id="stat-model">Loading…</dd>
-    <dd id="stat-store">Loading…</dd>
-  </dl>
-  <ul id="sessions-list" class="sessions-list"></ul>
-  <a id="log-tail-link" class="btn-link" href="#" target="_blank" rel="noopener">Log tail</a>
-  <p id="status" class="status" role="status"></p>
-`;
-
 const DATA = {
   auth: { user_id: "ada@example.com", token_present: true, auth_type: "forwarded" },
   connection: {
@@ -37,15 +23,14 @@ function jsonResponse(payload: unknown): Response {
 }
 
 beforeEach(() => {
-  vi.resetModules();
   vi.unstubAllGlobals();
-  document.body.innerHTML = PAGE;
+  document.body.innerHTML = "";
 });
 
 test("renders the connection snapshot, run-state badges, and log tail link", async () => {
   vi.stubGlobal("fetch", async () => jsonResponse(DATA));
 
-  await import("./status");
+  await import("./status").then((module) => module.mount(document.body));
   await vi.waitFor(() => {
     expect(document.querySelector("#stat-user")?.textContent).toBe("ada@example.com");
   });
@@ -70,7 +55,7 @@ test("renders the connection snapshot, run-state badges, and log tail link", asy
 test("renders an empty state when there are no sessions", async () => {
   vi.stubGlobal("fetch", async () => jsonResponse({ ...DATA, sessions: [] }));
 
-  await import("./status");
+  await import("./status").then((module) => module.mount(document.body));
   await vi.waitFor(() => {
     expect(document.querySelectorAll(".empty")).toHaveLength(1);
   });
@@ -81,7 +66,7 @@ test("renders an empty state when there are no sessions", async () => {
 test("reports a failed status request inline", async () => {
   vi.stubGlobal("fetch", async () => ({ ok: false, json: async () => ({}) }) as unknown as Response);
 
-  await import("./status");
+  await import("./status").then((module) => module.mount(document.body));
   await vi.waitFor(() => {
     expect(document.querySelector("#status")?.textContent).toBe("The status could not be loaded.");
   });
