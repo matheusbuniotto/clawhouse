@@ -1,6 +1,7 @@
 """Process configuration. Resource ids come from the environment, never from source."""
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -114,10 +115,20 @@ def mcp_servers_from_env(env: Mapping[str, str]) -> tuple[MCPServerConfig, ...]:
 
 
 def _mcp_server_entry(item: Mapping[str, object]) -> MCPServerConfig:
-    timeout = item.get("timeout_seconds")
-    timeout_val = float(timeout) if isinstance(timeout, int | float | str) else 30.0
+    timeout_val = _parse_timeout(item.get("timeout_seconds"))
     return MCPServerConfig(
         name=str(item["name"]),
         url=str(item["url"]),
         timeout_seconds=timeout_val,
     )
+
+
+def _parse_timeout(timeout: object) -> float:
+    if isinstance(timeout, int | float | str):
+        try:
+            val = float(timeout)
+            if math.isfinite(val) and val > 0:
+                return val
+        except (ValueError, TypeError):
+            pass
+    return 30.0

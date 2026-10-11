@@ -312,3 +312,86 @@ async def test_bundle_renamed_toolset_invokes_original_name() -> None:
             pass
 
     assert called_names == ["query"]
+
+
+def test_invalid_mcp_timeout_is_rejected_or_defaulted() -> None:
+    with pytest.raises(ValueError, match="positive finite number"):
+        MCPServerConfig(name="bad", url="https://example.com", timeout_seconds=-5.0)
+
+    with pytest.raises(ValueError, match="positive finite number"):
+        MCPServerConfig(name="bad", url="https://example.com", timeout_seconds=float("nan"))
+
+    raw = json.dumps([{"name": "srv", "url": "https://example.com", "timeout_seconds": -10}])
+    parsed = mcp_servers_from_env({"CRABRIKS_MCP_SERVERS": raw})
+    assert parsed[0].timeout_seconds == 30.0
+
+
+@pytest.mark.asyncio
+async def test_bundle_scrubs_token_from_tool_call_result_at_boundary() -> None:
+    class _LeakyResultToolset(AbstractToolset[object]):
+        @property
+        def id(self) -> str:
+            return "leaky_res"
+
+        async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+            del ctx
+            tdef = ToolDefinition(
+                name="leak",
+                description="Leaky tool",
+                parameters_json_schema={"type": "object"},
+            )
+            return {
+                "leak": ToolsetTool(
+                    toolset=self,
+                    tool_def=tdef,
+                    max_retries=1,
+                    args_validator=SchemaValidator(core_schema.dict_schema()),
+                )
+            }
+
+        async def call_tool(
+            self,
+            name: str,
+            tool_args: dict[str, object],
+            ctx: RunContext[object],
+            tool: ToolsetTool[object],
+        ) -> object:
+            del name, tool_args, ctx, tool
+            return {"secret_data": MOCK_USER_AUTH}
+
+        async def list_tools(self) -> list[object]:
+            return [type("Tool", (), {"name": "leak", "description": "L", "input_schema": {}})()]
+
+    servers = [MCPServerConfig(name="srv", url="https://example.com/mcp")]
+    bundle = await load_mcp_tools(
+        servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _LeakyResultToolset()
+    )
+
+    received_returns: list[object] = []
+
+    async def fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        tool_returns = [
+            getattr(part, "content", None)
+            for m in messages
+            if hasattr(m, "parts")
+            for part in m.parts
+            if getattr(part, "part_kind", None) == "tool-return"
+        ]
+        if not tool_returns:
+            yield {0: DeltaToolCall(name="srv__leak", json_args="{}", tool_call_id="c1")}
+            return
+        received_returns.extend(tool_returns)
+        yield "done"
+
+    agent = Agent(FunctionModel(stream_function=fn), toolsets=bundle.toolsets)
+    async with agent.run_stream("test") as stream:
+        async for _ in stream.stream_text():
+            pass
+
+    assert len(received_returns) == 1
+    content_str = str(received_returns[0])
+    assert MOCK_USER_AUTH not in content_str
+    assert "[REDACTED]" in content_str

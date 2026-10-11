@@ -1,12 +1,15 @@
 import logging
+import math
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from fastmcp.client.transports import StreamableHttpTransport
+from pydantic_ai import RunContext
 from pydantic_ai.mcp import MCPToolset
-from pydantic_ai.toolsets import AbstractToolset
+from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_ai.toolsets.wrapper import WrapperToolset
 
 logger = logging.getLogger("crabriks.mcp")
 
@@ -29,6 +32,10 @@ class MCPServerConfig:
 
     def __post_init__(self) -> None:
         validate_mcp_url(self.url)
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError(
+                f"timeout_seconds must be a positive finite number, got {self.timeout_seconds}"
+            )
 
 
 MAX_TOOL_NAME_LENGTH = 64
@@ -106,6 +113,38 @@ def scrub_token(text: str, token: str) -> str:
     if not token or not text:
         return text
     return text.replace(token, "[REDACTED]")
+
+
+def _scrub_object(obj: object, token: str) -> object:
+    if not token:
+        return obj
+    if isinstance(obj, str):
+        return scrub_token(obj, token)
+    if isinstance(obj, dict):
+        return {k: _scrub_object(v, token) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_object(v, token) for v in obj]
+    return obj
+
+
+@dataclass
+class ScrubbingToolset(WrapperToolset[object]):
+    token: str
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, object],
+        ctx: RunContext[object],
+        tool: ToolsetTool[object],
+    ) -> object:
+        try:
+            res = await self.wrapped.call_tool(name, tool_args, ctx, tool)
+        except Exception as exc:
+            if self.token:
+                raise RuntimeError(scrub_token(str(exc), self.token)) from None
+            raise
+        return _scrub_object(res, self.token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +244,8 @@ async def load_mcp_tools(
             t.safe_name: t.original_name for t in disambiguated if t.server_name == server_name
         }
         if name_map:
-            active_toolsets.append(toolset.renamed(name_map))
+            renamed = toolset.renamed(name_map)
+            active_toolsets.append(ScrubbingToolset(renamed, token=token) if token else renamed)
 
     return MCPBundle(
         tools=tuple(disambiguated),
