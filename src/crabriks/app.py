@@ -37,6 +37,7 @@ from crabriks.turn import (
     BUSY_TURN,
     FAILED_TURN,
     InvalidSessionId,
+    MCPToolsetFactory,
     Token,
     ToolCallNotice,
     ToolResultNotice,
@@ -88,6 +89,7 @@ def create_app(
     model_for: ModelFor,
     store: SessionStore | None = None,
     open_store_fn: OpenStore = open_store,
+    mcp_toolset_factory: MCPToolsetFactory | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -107,6 +109,7 @@ def create_app(
     app.state.model_for = model_for
     app.state.workspace = resolve_agent_workspace(settings.agent_root, AGENT_NAME)
     app.state.skills_cache = SkillsCache()
+    app.state.mcp_toolset_factory = mcp_toolset_factory
     _routes(app)
     return app
 
@@ -242,6 +245,16 @@ async def _stream_turn(
     model_id: str | None,
 ) -> Response:
     model = _model_for_caller(request, caller, model_id)
+    settings: Settings = request.app.state.settings
+    # The forwarded caller token wins. Dev token fallback applies strictly to dev_user.
+    dev_user = settings.dev_user
+    dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
+    token = request_token(
+        forwarded=caller.access_token,
+        user_id=caller.user_id,
+        dev_user=dev_user,
+        dev_token=dev_token,
+    )
     ctx = TurnContext(
         owner_id=caller.user_id,
         store=request.app.state.store,
@@ -249,6 +262,9 @@ async def _stream_turn(
         now=lambda: datetime.now(UTC),
         workspace=request.app.state.workspace,
         skills_cache=request.app.state.skills_cache,
+        mcp_servers=settings.mcp_servers,
+        user_token=token,
+        mcp_toolset_factory=getattr(request.app.state, "mcp_toolset_factory", None),
     )
     iterator = iter_turn(session_id, message, ctx=ctx)
     first = await _first_item(iterator)

@@ -1,13 +1,16 @@
 """Process configuration. Resource ids come from the environment, never from source."""
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from crabriks.mcp import DuplicateMCPServerName, MCPServerConfig
 from crabriks.model import ModelEntry
 
 MODELS_ENV = "CRABRIKS_MODELS"
+MCP_SERVERS_ENV = "CRABRIKS_MCP_SERVERS"
 DEFAULT_MODEL_ID = "databricks"
 
 
@@ -23,6 +26,7 @@ class Settings:
     serving_endpoint: str | None
     workspace_host: str | None
     models: tuple[ModelEntry, ...] = ()
+    mcp_servers: tuple[MCPServerConfig, ...] = ()
     agent_root: Path = field(default_factory=default_agent_root)
 
 
@@ -33,6 +37,7 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         serving_endpoint=env.get("SERVING_ENDPOINT") or env.get("DATABRICKS_MODEL") or None,
         workspace_host=env.get("DATABRICKS_HOST") or None,
         models=models_from_env(env),
+        mcp_servers=mcp_servers_from_env(env),
     )
 
 
@@ -99,3 +104,37 @@ def _mark_default(entries: list[ModelEntry]) -> tuple[ModelEntry, ...]:
     if not entries or any(entry.is_default for entry in entries):
         return tuple(entries)
     return (replace(entries[0], is_default=True), *entries[1:])
+
+
+def mcp_servers_from_env(env: Mapping[str, str]) -> tuple[MCPServerConfig, ...]:
+    raw = env.get(MCP_SERVERS_ENV) or env.get("MCP_SERVERS")
+    if not raw:
+        return ()
+    items: list[dict[str, object]] = json.loads(raw)
+    servers = tuple(_mcp_server_entry(item) for item in items)
+    seen: set[str] = set()
+    for s in servers:
+        if s.name in seen:
+            raise DuplicateMCPServerName(f"Duplicate MCP server name: {s.name!r}")
+        seen.add(s.name)
+    return servers
+
+
+def _mcp_server_entry(item: Mapping[str, object]) -> MCPServerConfig:
+    timeout_val = _parse_timeout(item.get("timeout_seconds"))
+    return MCPServerConfig(
+        name=str(item["name"]),
+        url=str(item["url"]),
+        timeout_seconds=timeout_val,
+    )
+
+
+def _parse_timeout(timeout: object) -> float:
+    if isinstance(timeout, int | float | str):
+        try:
+            val = float(timeout)
+            if math.isfinite(val) and val > 0:
+                return val
+        except (ValueError, TypeError):
+            pass
+    return 30.0
