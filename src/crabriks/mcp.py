@@ -2,11 +2,13 @@ import logging
 import math
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from contextlib import suppress
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import cast
 from urllib.parse import urlparse
 
 from fastmcp.client.transports import StreamableHttpTransport
+from pydantic import BaseModel, ValidationError
 from pydantic_ai import RunContext
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.tools import ToolDefinition
@@ -121,20 +123,54 @@ def scrub_token(text: str, token: str) -> str:
     return text.replace(token, "[REDACTED]")
 
 
-def _scrub_object(obj: object, token: str) -> object:
-    if not token:
+def _scrub_pydantic(obj: BaseModel, token: str) -> object:
+    dumped = scrub_object(obj.model_dump(), token)
+    with suppress(ValidationError, TypeError, ValueError):
+        return type(obj).model_validate(dumped)
+    return dumped
+
+
+def _scrub_dataclass(obj: object, token: str) -> object:
+    dumped = scrub_object(asdict(obj), token)  # type: ignore[arg-type]
+    with suppress(TypeError, ValueError):
+        return type(obj)(**dumped)  # type: ignore[call-arg]
+    return dumped
+
+
+def _scrub_dict_object(obj: object, token: str) -> object:
+    with suppress(AttributeError, TypeError):
+        for k, v in list(vars(obj).items()):
+            if not k.startswith("_"):
+                scrubbed_v = scrub_object(v, token)
+                if scrubbed_v != v:
+                    setattr(obj, k, scrubbed_v)
+    return obj
+
+
+def _scrub_typed_object(obj: object, token: str) -> object:
+    if isinstance(obj, BaseModel):
+        return _scrub_pydantic(obj, token)
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return _scrub_dataclass(obj, token)
+    if hasattr(obj, "__dict__"):
+        return _scrub_dict_object(obj, token)
+    return obj
+
+
+def scrub_object(obj: object, token: str) -> object:
+    if not token or obj is None:
         return obj
     if isinstance(obj, str):
         return scrub_token(obj, token)
     if isinstance(obj, dict):
         return {
-            (scrub_token(k, token) if isinstance(k, str) else k): _scrub_object(v, token)
+            (scrub_token(k, token) if isinstance(k, str) else k): scrub_object(v, token)
             for k, v in obj.items()
         }
     if isinstance(obj, list | tuple):
-        items = [_scrub_object(v, token) for v in obj]
+        items = [scrub_object(v, token) for v in obj]
         return tuple(items) if isinstance(obj, tuple) else items
-    return obj
+    return _scrub_typed_object(obj, token)
 
 
 def _scrub_tool_def(tool_def: ToolDefinition, token: str) -> ToolDefinition:
@@ -145,7 +181,7 @@ def _scrub_tool_def(tool_def: ToolDefinition, token: str) -> ToolDefinition:
     )
     raw_schema = tool_def.parameters_json_schema
     scrubbed_schema = (
-        cast(dict[str, object], _scrub_object(raw_schema, token))
+        cast(dict[str, object], scrub_object(raw_schema, token))
         if isinstance(raw_schema, dict)
         else raw_schema
     )
@@ -182,7 +218,7 @@ class ScrubbingToolset(WrapperToolset[object]):
             if self.token:
                 raise RuntimeError(scrub_token(str(exc), self.token)) from None
             raise
-        return _scrub_object(res, self.token)
+        return scrub_object(res, self.token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,7 +272,7 @@ def _raw_tool_from_item(item: object, server_name: str, token: str = "") -> RawM
     if schema is None and tool_def is not None:
         schema = getattr(tool_def, "parameters_json_schema", None)
     scrubbed_schema = (
-        cast(dict[str, object], _scrub_object(schema, token)) if isinstance(schema, dict) else None
+        cast(dict[str, object], scrub_object(schema, token)) if isinstance(schema, dict) else None
     )
     return RawMCPTool(
         server_name=server_name,

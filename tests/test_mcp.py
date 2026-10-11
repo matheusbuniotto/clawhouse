@@ -22,6 +22,7 @@ from crabriks.mcp import (
     disambiguate_tool_names,
     load_mcp_tools,
     safe_tool_name,
+    scrub_object,
     scrub_token,
     validate_mcp_url,
 )
@@ -476,3 +477,94 @@ def test_duplicate_mcp_server_names_rejected_in_settings() -> None:
     )
     with pytest.raises(DuplicateMCPServerName, match="Duplicate MCP server name: 'dupe'"):
         mcp_servers_from_env({"CRABRIKS_MCP_SERVERS": raw})
+
+
+@pytest.mark.asyncio
+async def test_bundle_scrubs_token_from_typed_tool_call_result() -> None:
+    from dataclasses import dataclass
+
+    import mcp.types as mcp_t
+
+    @dataclass
+    class _CustomPayload:
+        payload_text: str
+
+    class _TypedResultToolset(AbstractToolset[object]):
+        @property
+        def id(self) -> str:
+            return "typed_res"
+
+        async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+            del ctx
+            tdef = ToolDefinition(
+                name="typed_tool",
+                description="Typed tool",
+                parameters_json_schema={"type": "object"},
+            )
+            return {
+                "typed_tool": ToolsetTool(
+                    toolset=self,
+                    tool_def=tdef,
+                    max_retries=1,
+                    args_validator=SchemaValidator(core_schema.dict_schema()),
+                )
+            }
+
+        async def call_tool(
+            self,
+            name: str,
+            tool_args: dict[str, object],
+            ctx: RunContext[object],
+            tool: ToolsetTool[object],
+        ) -> object:
+            del name, tool_args, ctx, tool
+            return mcp_t.CallToolResult(
+                content=[mcp_t.TextContent(type="text", text=f"bearer {MOCK_USER_AUTH}")]
+            )
+
+        async def list_tools(self) -> list[object]:
+            return [
+                type("Tool", (), {"name": "typed_tool", "description": "T", "input_schema": {}})()
+            ]
+
+    servers = [MCPServerConfig(name="srv", url="https://example.com/mcp")]
+    bundle = await load_mcp_tools(
+        servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _TypedResultToolset()
+    )
+
+    received_returns: list[object] = []
+
+    async def fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        tool_returns = [
+            getattr(part, "content", None)
+            for m in messages
+            if hasattr(m, "parts")
+            for part in m.parts
+            if getattr(part, "part_kind", None) == "tool-return"
+        ]
+        if not tool_returns:
+            yield {0: DeltaToolCall(name="srv__typed_tool", json_args="{}", tool_call_id="c1")}
+            return
+        received_returns.extend(tool_returns)
+        yield "done"
+
+    agent = Agent(FunctionModel(stream_function=fn), toolsets=bundle.toolsets)
+    async with agent.run_stream("test") as stream:
+        async for _ in stream.stream_text():
+            pass
+
+    assert len(received_returns) == 1
+    content_item = received_returns[0]
+    content_str = str(content_item)
+    assert MOCK_USER_AUTH not in content_str
+    assert "[REDACTED]" in content_str
+
+    dc_scrubbed = scrub_object(
+        _CustomPayload(payload_text=f"bearer {MOCK_USER_AUTH}"), MOCK_USER_AUTH
+    )
+    assert isinstance(dc_scrubbed, _CustomPayload)
+    assert MOCK_USER_AUTH not in dc_scrubbed.payload_text
+    assert "[REDACTED]" in dc_scrubbed.payload_text
