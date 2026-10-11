@@ -52,7 +52,7 @@ def _ctx(  # noqa: PLR0913
     emit: list[TurnNotice] | None = None,
     workspace: WorkspacePaths | None = None,
     mcp_servers: tuple[MCPServerConfig, ...] = (),
-    user_token: str = "",
+    user_token: str = "dapi-" + "turn-user-token",
     mcp_toolset_factory: object = None,
 ) -> TurnContext:
     async def capture(notice: TurnNotice) -> None:
@@ -672,3 +672,36 @@ async def test_turn_demo_agent_answers_unity_catalog_question_through_mcp_tool()
     assert len(result_notices) == 1
     assert result_notices[0].name == "system_ai__describe_table"
     assert "trip_id" in result_notices[0].content
+
+
+@pytest.mark.asyncio
+async def test_error_path_scrubs_token_from_transcript_and_notices() -> None:
+    caller_token = "dapi-" + "leak-err-auth"
+
+    async def failing_stream(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del messages, info
+        raise RuntimeError(f"Model backend exploded with auth {caller_token}")
+        yield ""  # pragma: no cover
+
+    emitted: list[TurnNotice] = []
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=failing_stream),
+        emit=emitted,
+        user_token=caller_token,
+    )
+
+    result = await run_turn(SESSION, f"query with token {caller_token}", ctx=ctx)
+
+    assert result.status == "error"
+    assert result.error is not None
+    assert caller_token not in result.error
+    for entry in result.transcript:
+        assert caller_token not in entry.content
+        if entry.tool_name:
+            assert caller_token not in entry.tool_name
+    for notice in emitted:
+        if isinstance(notice, Token):
+            assert caller_token not in notice.text

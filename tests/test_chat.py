@@ -568,3 +568,45 @@ async def test_chat_turn_executes_mcp_tool_with_user_token_and_streams_notices()
 
     assert captured_tokens == ["dapi-user-xyz"]
     assert "dapi-user-xyz" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_user_cannot_use_dev_token_for_mcp() -> None:
+    store = MemorySessionStore()
+    captured_tokens: list[str] = []
+
+    def factory(srv: MCPServerConfig, tok: str) -> AbstractToolset[object]:
+        del srv
+        captured_tokens.append(tok)
+        return _UCServer()
+
+    async def model_stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages, info
+        yield "hello"
+
+    dev_auth = "dapi-" + "dev-secret-xyz"
+    settings = Settings(
+        dev_user="ada@example.com",
+        dev_token=dev_auth,
+        serving_endpoint=None,
+        workspace_host=None,
+        mcp_servers=(MCPServerConfig(name="system.ai", url="https://adb-1.databricks.com/mcp"),),
+    )
+
+    app = create_app(
+        settings=settings,
+        model_for=lambda _c, _m: FunctionModel(stream_function=model_stream),
+        store=store,
+        mcp_toolset_factory=factory,
+    )
+
+    async with _client(app) as client:
+        resp = await client.post(
+            f"/api/sessions/{SESSION}/turns",
+            headers={"x-forwarded-email": "grace@example.com"},
+            json={"message": "hello"},
+        )
+
+    assert resp.status_code == 200
+    assert captured_tokens == []
+    assert dev_auth not in resp.text

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from uuid import UUID
 
@@ -132,7 +132,11 @@ async def iter_turn(
         await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
     if not holder:
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
-    yield holder[0]
+    res = holder[0]
+    token = claimed.ctx.user_token
+    if token and res.error and token in res.error:
+        res = replace(res, error=scrub_token(res.error, token))
+    yield res
 
 
 async def _claim(session_id: str, user_message: str, ctx: TurnContext) -> _Claimed:
@@ -238,8 +242,22 @@ async def _append_user(claimed: _Claimed) -> None:
     await _append(claimed, TranscriptEntry(role="user", content=claimed.user_message))
 
 
+def _scrub_entry(entry: TranscriptEntry, token: str) -> TranscriptEntry:
+    if not token:
+        return entry
+    has_token = token in entry.content or (entry.tool_name is not None and token in entry.tool_name)
+    if not has_token:
+        return entry
+    return replace(
+        entry,
+        content=scrub_token(entry.content, token),
+        tool_name=scrub_token(entry.tool_name, token) if entry.tool_name else None,
+    )
+
+
 async def _append(claimed: _Claimed, entry: TranscriptEntry) -> None:
-    await claimed.ctx.store.append_entry(claimed.session_id, claimed.run_id, entry)
+    scrubbed = _scrub_entry(entry, claimed.ctx.user_token)
+    await claimed.ctx.store.append_entry(claimed.session_id, claimed.run_id, scrubbed)
 
 
 def _scrub_notice(notice: TurnNotice, token: str) -> TurnNotice:
@@ -288,18 +306,24 @@ async def _record(claimed: _Claimed, notice: TurnNotice) -> None:
 
 
 async def _publish(ctx: TurnContext, queue: _Queue, notice: TurnNotice) -> None:
-    await queue.put(notice)
+    scrubbed = _scrub_notice(notice, ctx.user_token)
+    await queue.put(scrubbed)
     if ctx.emit is not None:
-        await ctx.emit(notice)
+        await ctx.emit(scrubbed)
 
 
-async def _error_result(session_id: str, ctx: TurnContext) -> TurnResult:
+async def _error_result(
+    session_id: str,
+    ctx: TurnContext,
+    error: str = FAILED_TURN,
+) -> TurnResult:
     transcript = await ctx.store.transcript(session_id, ctx.owner_id)
+    scrubbed = scrub_token(error, ctx.user_token) if ctx.user_token else error
     return TurnResult(
         session_id=session_id,
         status="error",
         reply="",
-        error=FAILED_TURN,
+        error=scrubbed,
         transcript=transcript,
     )
 

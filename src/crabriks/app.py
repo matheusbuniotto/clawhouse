@@ -245,11 +245,15 @@ async def _stream_turn(
     model_id: str | None,
 ) -> Response:
     model = _model_for_caller(request, caller, model_id)
+    settings: Settings = request.app.state.settings
+    # The forwarded caller token wins. Dev token fallback applies strictly to dev_user.
+    dev_user = settings.dev_user
+    dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
     token = request_token(
         forwarded=caller.access_token,
         user_id=caller.user_id,
-        dev_user=request.app.state.settings.dev_user,
-        dev_token=request.app.state.settings.dev_token,
+        dev_user=dev_user,
+        dev_token=dev_token,
     )
     ctx = TurnContext(
         owner_id=caller.user_id,
@@ -258,7 +262,7 @@ async def _stream_turn(
         now=lambda: datetime.now(UTC),
         workspace=request.app.state.workspace,
         skills_cache=request.app.state.skills_cache,
-        mcp_servers=request.app.state.settings.mcp_servers,
+        mcp_servers=settings.mcp_servers,
         user_token=token,
         mcp_toolset_factory=getattr(request.app.state, "mcp_toolset_factory", None),
     )

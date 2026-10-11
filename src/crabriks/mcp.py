@@ -279,6 +279,10 @@ async def load_mcp_tools(
     *,
     toolset_factory: Callable[[MCPServerConfig, str], AbstractToolset[object]] | None = None,
 ) -> MCPBundle:
+    if not servers or not token:
+        if not token and servers:
+            logger.warning("No user token provided; omitting MCP servers for turn")
+        return MCPBundle(tools=(), toolsets=())
     _validate_unique_servers(servers)
     raw_tools: list[RawMCPTool] = []
     server_toolsets: dict[str, AbstractToolset[object]] = {}
