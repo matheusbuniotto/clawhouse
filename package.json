@@ -1,0 +1,18 @@
+{
+  "name": "crabriks-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend build and component tests for the Crabriks Databricks App.",
+  "scripts": {
+    "build": "tsc -p frontend/tsconfig.json",
+    "typecheck": "tsc --noEmit -p frontend/tsconfig.json && tsc --noEmit -p frontend/tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "jsdom": "^26.1.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
