@@ -2,6 +2,7 @@
 
 :root {
   --rail-width: 280px;
+  --rail-collapsed-width: 48px;
   --rail-header-height: 48px;
   --rail-action-size: 28px;
   --rail-header-action-gap: 2px;
@@ -28,12 +29,11 @@ body {
   display: grid;
   grid-template-columns: var(--rail-width) var(--resize-handle-size) minmax(0, 1fr);
   height: 100vh;
-  position: relative;
   transition: grid-template-columns var(--duration) var(--ease);
 }
 
 .shell[data-collapsed] {
-  grid-template-columns: 0 0 minmax(0, 1fr);
+  grid-template-columns: var(--rail-collapsed-width) 0 minmax(0, 1fr);
 }
 
 .shell[data-collapsed] .rail {
@@ -305,35 +305,40 @@ body {
   background: var(--border-hover);
 }
 
+.rail-collapsed {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 10px;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--bg-accent);
+}
+
+.shell[data-collapsed] .rail-collapsed {
+  display: flex;
+}
+
 .rail-expand {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border: 1px solid var(--border-strong);
+  border: 0;
   border-radius: var(--radius-md);
-  background: var(--card);
+  background: transparent;
   color: var(--muted);
-  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition:
-    color var(--duration-fast) var(--ease),
-    border-color var(--duration-fast) var(--ease);
-}
-
-.rail-expand[hidden] {
-  display: none;
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
 }
 
 .rail-expand:hover {
+  background: var(--bg-hover);
   color: var(--text-strong);
-  border-color: var(--border-hover);
 }
 
 .rail-expand:focus-visible {
@@ -479,7 +484,8 @@ body {
     grid-template-columns: 0 0 minmax(0, 1fr);
   }
 
-  .rail {
+  .rail,
+  .rail-collapsed {
     display: none;
   }
 }

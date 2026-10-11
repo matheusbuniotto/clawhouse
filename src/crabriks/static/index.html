@@ -119,6 +119,30 @@
           </button>
         </footer>
       </aside>
+      <aside class="rail-collapsed" id="rail-collapsed" aria-label="Expand navigation">
+        <button
+          class="rail-expand"
+          id="rail-expand"
+          type="button"
+          aria-label="Expand navigation"
+          title="Expand navigation"
+          aria-expanded="false"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 18l6-6-6-6"></path>
+          </svg>
+        </button>
+      </aside>
       <div
         class="rail-handle"
         id="rail-handle"
@@ -126,29 +150,6 @@
         aria-orientation="vertical"
         aria-label="Resize navigation"
       ></div>
-      <button
-        class="rail-expand"
-        id="rail-expand"
-        type="button"
-        aria-label="Expand navigation"
-        title="Expand navigation"
-        aria-expanded="false"
-        hidden
-      >
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M9 18l6-6-6-6"></path>
-        </svg>
-      </button>
       <main class="screen" id="screen" aria-live="polite"></main>
     </div>
     <script type="module" src="/boot.js"></script>

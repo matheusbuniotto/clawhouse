@@ -252,7 +252,7 @@ export function mountShell(root: ParentNode = document): void {
     if (collapsed) shell.setAttribute("data-collapsed", "");
     else shell.removeAttribute("data-collapsed");
     collapse.setAttribute("aria-expanded", String(!collapsed));
-    expand.hidden = !collapsed;
+    expand.setAttribute("aria-expanded", String(collapsed));
   }
 
   collapse.addEventListener("click", () => setCollapsed(!shell.hasAttribute("data-collapsed")));

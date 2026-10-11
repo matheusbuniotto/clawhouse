@@ -188,14 +188,16 @@ test("a collapsed rail exposes an expand affordance that restores it", async () 
   const collapse = document.querySelector("#rail-collapse") as HTMLButtonElement;
   const expand = document.querySelector("#rail-expand") as HTMLButtonElement;
 
-  expect(expand.hidden).toBe(true);
+  expect(shell.hasAttribute("data-collapsed")).toBe(false);
+  expect(expand.getAttribute("aria-expanded")).toBe("false");
+
   collapse.click();
   expect(shell.hasAttribute("data-collapsed")).toBe(true);
-  expect(expand.hidden).toBe(false);
+  expect(expand.getAttribute("aria-expanded")).toBe("true");
 
   expand.click();
   expect(shell.hasAttribute("data-collapsed")).toBe(false);
-  expect(expand.hidden).toBe(true);
+  expect(expand.getAttribute("aria-expanded")).toBe("false");
   expect(collapse.getAttribute("aria-expanded")).toBe("true");
 });
 

@@ -232,7 +232,7 @@ export function mountShell(root = document) {
         else
             shell.removeAttribute("data-collapsed");
         collapse.setAttribute("aria-expanded", String(!collapsed));
-        expand.hidden = !collapsed;
+        expand.setAttribute("aria-expanded", String(collapsed));
     }
     collapse.addEventListener("click", () => setCollapsed(!shell.hasAttribute("data-collapsed")));
     expand.addEventListener("click", () => setCollapsed(false));
