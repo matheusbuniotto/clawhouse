@@ -448,7 +448,18 @@ async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) ->
     assert page.status_code == 200
 
 
-@pytest.mark.parametrize("path", ["/chat.js", "/chat.css", "/sessions.js", "/new.js"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/chat.js",
+        "/sessions.js",
+        "/new.js",
+        "/tokens.css",
+        "/shell.css",
+        "/transcript.css",
+        "/screens.css",
+    ],
+)
 async def test_static_assets_are_served(path: str) -> None:
     app = _app(MemorySessionStore(), FunctionModel(stream_function=_reply("ok")))
     async with _client(app) as client:

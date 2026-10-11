@@ -1,0 +1,50 @@
+/* transcript.css — chat transcript, message bubbles, and tool activity. Owner: #46. */
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 0 16px;
+}
+
+.empty {
+  margin: 18vh 0 0;
+  color: var(--muted);
+  font-size: var(--font-size-lg);
+  font-style: italic;
+}
+
+.bubble {
+  max-width: 38rem;
+  margin: 0 0 14px;
+  font-family: var(--font-chat);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.bubble.user {
+  margin-left: auto;
+  width: fit-content;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm);
+  background: var(--accent-subtle);
+  color: var(--text-strong);
+}
+
+.bubble.assistant {
+  margin-right: auto;
+}
+
+.bubble.draft {
+  color: var(--muted);
+}
+
+.tool {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
