@@ -14,7 +14,7 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from crabriks.mcp import MCPServerConfig
+from crabriks.mcp import InsecureMCPEndpoint, MCPServerConfig
 from crabriks.prompt import CLOCK_DESCRIPTION
 from crabriks.shapes import TranscriptEntry
 from crabriks.skills import loaded_skill_text
@@ -795,3 +795,66 @@ async def test_error_path_scrubs_token_from_transcript_and_notices() -> None:
     for notice in emitted:
         if isinstance(notice, Token):
             assert caller_token not in notice.text
+
+
+async def test_turn_colliding_mcp_tool_names_produce_same_suffixed_names_across_turns() -> None:
+    seen_prompts: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen_prompts.append(info.instructions or "")
+        yield "ok"
+
+    servers = (
+        MCPServerConfig(name="system.ai", url="https://srv1.example.com/mcp"),
+        MCPServerConfig(name="system_ai", url="https://srv2.example.com/mcp"),
+    )
+
+    def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        del token
+        if srv.name == "system.ai":
+            return _StubServerToolset("srv1", "query", "First query")
+        return _StubServerToolset("srv2", "query", "Second query")
+
+    store = MemorySessionStore()
+    ctx = _ctx(
+        store,
+        FunctionModel(stream_function=capture),
+        mcp_servers=servers,
+        mcp_toolset_factory=factory,
+    )
+
+    res1 = await run_turn(SESSION, "turn 1", ctx=ctx)
+    assert res1.status == "ok"
+    assert len(seen_prompts) == 1
+    prompt1 = seen_prompts[0]
+    assert "- system_ai__query: First query" in prompt1
+    assert "- system_ai__query_1: Second query" in prompt1
+
+    res2 = await run_turn(SESSION, "turn 2", ctx=ctx)
+    assert res2.status == "ok"
+    assert len(seen_prompts) == 2
+    prompt2 = seen_prompts[1]
+    assert "- system_ai__query: First query" in prompt2
+    assert "- system_ai__query_1: Second query" in prompt2
+
+
+async def test_turn_fails_when_duplicate_mcp_server_names_configured() -> None:
+    servers = (
+        MCPServerConfig(name="dupe", url="https://a.example.com/mcp"),
+        MCPServerConfig(name="dupe", url="https://b.example.com/mcp"),
+    )
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=_reply("should not reply")),
+        mcp_servers=servers,
+    )
+    result = await run_turn(SESSION, "hello", ctx=ctx)
+    assert result.status == "error"
+    assert result.reply == ""
+    assert result.error == FAILED_TURN
+
+
+def test_turn_fails_when_insecure_mcp_endpoint_configured() -> None:
+    with pytest.raises(InsecureMCPEndpoint, match="must use https"):
+        MCPServerConfig(name="insecure", url="http://insecure.example.com/mcp")

@@ -37,7 +37,7 @@ from crabriks.agent.prompt import (
     build_system_prompt,
 )
 from crabriks.capabilities.bootstrap import BootstrapContext, load_bootstrap
-from crabriks.capabilities.mcp import MCPServerConfig, load_mcp_tools, scrub_token
+from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import ApprovalEntry, TranscriptEntry, TurnResult, TurnStatus
@@ -317,8 +317,13 @@ class SensitiveToolGate(AbstractCapability[TurnDeps]):
         return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)
 
 
-def _capabilities_for_turn(claimed: _Claimed) -> list[AgentCapability[TurnDeps]] | None:
+def _capabilities_for_turn(
+    claimed: _Claimed,
+    mcp: MCPCapability | None,
+) -> list[AgentCapability[TurnDeps]] | None:
     capabilities: list[AgentCapability[TurnDeps]] = []
+    if mcp is not None:
+        capabilities.append(mcp)
     skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
     skills = skills_capability(skills_dir)
     if skills is not None:
@@ -328,9 +333,9 @@ def _capabilities_for_turn(claimed: _Claimed) -> list[AgentCapability[TurnDeps]]
     return capabilities or None
 
 
-def _prompt_for(claimed: _Claimed, mcp_bundle: object) -> SystemPrompt:
+def _prompt_for(claimed: _Claimed, mcp: MCPCapability | None) -> SystemPrompt:
     ctx = claimed.ctx
-    tools_list = getattr(mcp_bundle, "tools", ())
+    tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
     return build_system_prompt(
         tools=(*BUILTIN_TOOLS, *mcp_cards),
@@ -344,12 +349,12 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     await _append_user(claimed)
-    mcp_bundle = await load_mcp_tools(
+    mcp = await mcp_capability(
         ctx.mcp_servers,
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
-    prompt = _prompt_for(claimed, mcp_bundle)
+    prompt = _prompt_for(claimed, mcp)
     result = await crabriks_agent().run(
         claimed.user_message,
         message_history=to_model_messages(prior) or None,
@@ -357,8 +362,7 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         instructions=prompt.text,
         deps=TurnDeps(now=ctx.now),
         event_stream_handler=_persist_and_emit(claimed, queue),
-        toolsets=mcp_bundle.toolsets or None,
-        capabilities=_capabilities_for_turn(claimed),
+        capabilities=_capabilities_for_turn(claimed, mcp),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
@@ -383,12 +387,12 @@ async def _run_model_resume(
 ) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
-    mcp_bundle = await load_mcp_tools(
+    mcp = await mcp_capability(
         ctx.mcp_servers,
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
-    prompt = _prompt_for(claimed, mcp_bundle)
+    prompt = _prompt_for(claimed, mcp)
     history = to_model_messages(prior)
     call_args = approval.arguments
     if ctx.user_token and "[REDACTED]" in call_args:
@@ -414,8 +418,7 @@ async def _run_model_resume(
         event_stream_handler=_persist_and_emit(
             claimed, queue, skip_tool_call_id=approval.tool_call_id
         ),
-        toolsets=mcp_bundle.toolsets or None,
-        capabilities=_capabilities_for_turn(claimed),
+        capabilities=_capabilities_for_turn(claimed, mcp),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)

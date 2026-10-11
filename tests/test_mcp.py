@@ -9,6 +9,7 @@ from typing import cast
 import mcp.types as mcp_t
 import pytest
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.tools import ToolDefinition
@@ -19,10 +20,12 @@ from crabriks.mcp import (
     MAX_TOOL_NAME_LENGTH,
     DuplicateMCPServerName,
     InsecureMCPEndpoint,
+    MCPCapability,
     MCPServerConfig,
     RawMCPTool,
     disambiguate_tool_names,
     load_mcp_tools,
+    mcp_capability,
     safe_tool_name,
     scrub_object,
     scrub_token,
@@ -575,3 +578,22 @@ async def test_bundle_scrubs_token_from_typed_tool_call_result() -> None:
     assert isinstance(dc_scrubbed, _CustomPayload)
     assert MOCK_USER_AUTH not in dc_scrubbed.payload_text
     assert "[REDACTED]" in dc_scrubbed.payload_text
+
+
+@pytest.mark.asyncio
+async def test_mcp_capability_attaches_toolset_as_agent_capability() -> None:
+    servers = [MCPServerConfig(name="good_srv", url="https://good.example.com/mcp")]
+    cap = await mcp_capability(
+        servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _GoodToolset()
+    )
+    assert cap is not None
+    assert isinstance(cap, AbstractCapability)
+    assert isinstance(cap, MCPCapability)
+    assert len(cap.tools) == 1
+    assert cap.tools[0].safe_name == "good_srv__query"
+    ts = cap.get_toolset()
+    assert ts is not None
+
+    # Empty servers or empty token returns None
+    assert await mcp_capability((), MOCK_USER_AUTH) is None
+    assert await mcp_capability(servers, "") is None

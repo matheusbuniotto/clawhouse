@@ -4,15 +4,16 @@ import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass, is_dataclass, replace
-from typing import cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from fastmcp.client.transports import StreamableHttpTransport
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import RunContext
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.tools import ToolDefinition
-from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_ai.toolsets import AbstractToolset, AgentToolset, CombinedToolset, ToolsetTool
 from pydantic_ai.toolsets.wrapper import WrapperToolset
 
 logger = logging.getLogger("crabriks.mcp")
@@ -285,6 +286,7 @@ def _raw_tool_from_item(item: object, server_name: str, token: str = "") -> RawM
 def _validate_unique_servers(servers: Sequence[MCPServerConfig]) -> None:
     seen_names: set[str] = set()
     for server in servers:
+        validate_mcp_url(server.url)
         if server.name in seen_names:
             raise DuplicateMCPServerName(f"Duplicate MCP server name: {server.name!r}")
         seen_names.add(server.name)
@@ -317,11 +319,12 @@ async def load_mcp_tools(
     *,
     toolset_factory: Callable[[MCPServerConfig, str], AbstractToolset[object]] | None = None,
 ) -> MCPBundle:
-    if not servers or not token:
-        if not token and servers:
-            logger.warning("No user token provided; omitting MCP servers for turn")
+    if not servers:
         return MCPBundle(tools=(), toolsets=())
     _validate_unique_servers(servers)
+    if not token:
+        logger.warning("No user token provided; omitting MCP servers for turn")
+        return MCPBundle(tools=(), toolsets=())
     raw_tools: list[RawMCPTool] = []
     server_toolsets: dict[str, AbstractToolset[object]] = {}
 
@@ -350,3 +353,32 @@ async def load_mcp_tools(
         tools=tuple(disambiguated),
         toolsets=active_toolsets,
     )
+
+
+@dataclass
+class MCPCapability(AbstractCapability[Any]):
+    """Attached per-turn caller MCP tools as a capability."""
+
+    tools: tuple[DisambiguatedTool, ...] = ()
+    toolsets: tuple[AbstractToolset[object], ...] = ()
+    id: str | None = "mcp"
+
+    def get_toolset(self) -> AgentToolset[Any] | None:
+        if not self.toolsets:
+            return None
+        if len(self.toolsets) == 1:
+            return self.toolsets[0]
+        return CombinedToolset(self.toolsets)
+
+
+async def mcp_capability(
+    servers: Sequence[MCPServerConfig],
+    token: str,
+    *,
+    toolset_factory: Callable[[MCPServerConfig, str], AbstractToolset[object]] | None = None,
+) -> MCPCapability | None:
+    """Attach the caller's MCP tools for this turn, or nothing when absent."""
+    bundle = await load_mcp_tools(servers, token, toolset_factory=toolset_factory)
+    if not bundle.tools and not bundle.toolsets:
+        return None
+    return MCPCapability(tools=bundle.tools, toolsets=bundle.toolsets)
