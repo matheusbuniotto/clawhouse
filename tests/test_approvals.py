@@ -26,11 +26,11 @@ SESSION_ID = "55555555-5555-4555-8555-555555555555"
 
 HEADERS = {
     "x-forwarded-email": "ada@example.com",
-    "x-forwarded-access-token": "dapi-secret",
+    "x-forwarded-access-token": "mock-token-ada",
 }
 OTHER_HEADERS = {
     "x-forwarded-email": "grace@example.com",
-    "x-forwarded-access-token": "dapi-other",
+    "x-forwarded-access-token": "mock-token-grace",
 }
 
 
@@ -298,7 +298,7 @@ async def test_deny_resumes_run_without_executing_tool() -> None:
 
 async def test_secrets_scrubbed_from_approval_arguments() -> None:
     store = MemorySessionStore()
-    user_token = "dapi-very-secret-token-12345"
+    user_token = "mock-secret-user-token-12345"
 
     async def call_sensitive(
         messages: list[ModelMessage], info: AgentInfo

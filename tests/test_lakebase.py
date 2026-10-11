@@ -117,3 +117,27 @@ async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg
         TranscriptEntry(role="assistant", content="saved"),
     )
     assert await store.transcript(SESSION, OWNER) == result.transcript
+
+
+async def test_migration_upgrades_existing_runs_status_constraint() -> None:
+    pool = await _pool()
+    store = LakebaseSessionStore(pool)
+    try:
+        await store.migrate()
+        # Simulate an existing database with the old 3-status constraint
+        await pool.execute(
+            """
+            ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+            ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+                CHECK (status IN ('running', 'ok', 'error'));
+            """
+        )
+        # Re-running migrate upgrades the constraint to include pending_approval
+        await store.migrate()
+        session = await store.create_session(OWNER)
+        run_id = await store.claim_run(session.id)
+        await store.finish_run(session.id, run_id, "pending_approval")
+        status = await pool.fetchval("SELECT status FROM crabriks.runs WHERE id = $1", UUID(run_id))
+        assert status == "pending_approval"
+    finally:
+        await store.close()
