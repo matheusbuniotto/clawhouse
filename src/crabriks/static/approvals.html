@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crabriks · Approvals</title>
+    <link rel="stylesheet" href="/chat.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="top">
+        <p class="mark">Crabriks</p>
+        <p class="who">Approvals</p>
+      </header>
+      <nav class="nav">
+        <a href="/chat">Chat</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/new">New session</a>
+        <a href="/approvals">Approvals</a>
+      </nav>
+      <main class="log">
+        <section class="approvals-section">
+          <h2>Pending Approvals</h2>
+          <ul id="pending-list" class="approvals-list"></ul>
+        </section>
+        <section class="approvals-section">
+          <h2>History</h2>
+          <ul id="history-list" class="approvals-list"></ul>
+        </section>
+      </main>
+      <p id="status" class="status" role="status"></p>
+    </div>
+    <script type="module" src="/approvals.js"></script>
+  </body>
+</html>
