@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS crabriks.runs (
     CONSTRAINT runs_status_known CHECK (status IN ('running', 'ok', 'error', 'pending_approval'))
 );
 
+ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+
 CREATE UNIQUE INDEX IF NOT EXISTS runs_one_running_per_session
     ON crabriks.runs (session_id)
     WHERE status = 'running';
