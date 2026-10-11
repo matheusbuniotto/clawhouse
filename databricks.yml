@@ -33,11 +33,13 @@ variables:
     default: databricks-meta-llama-3-3-70b-instruct
   postgres_branch:
     description: Lakebase Autoscaling branch that stores sessions and transcripts.
+    default: projects/crabriks/branches/production
   postgres_database:
     description: Lakebase database that stores sessions and transcripts.
+    default: projects/crabriks/branches/production/databases/databricks-postgres
   provider_secret_scope:
     description: Secret scope holding the extra-provider API key.
-    default: crabriks
+    default: claw
   provider_secret_key:
     description: Secret key holding the extra-provider API key.
     default: openrouter-api-key
