@@ -47,8 +47,8 @@ exclude = [
     "__pycache__",
     "build",
     "dist",
-    # Vendored upstream skills (databricks-agent-skills v0.2.10): lint upstream, not here
-    ".agents/skills/databricks-*",
+    # Vendored upstream skills: lint upstream, not here
+    ".agents/skills/**",
 ]
 
 [tool.ruff.format]
