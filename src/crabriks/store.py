@@ -13,15 +13,21 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 import asyncpg
 from databricks.sdk import WorkspaceClient
 
-from crabriks.shapes import SessionSummary, TranscriptEntry, TurnStatus
+from crabriks.shapes import (
+    ApprovalEntry,
+    ApprovalStatus,
+    SessionSummary,
+    TranscriptEntry,
+    TurnStatus,
+)
 
 logger = logging.getLogger(__name__)
 _CONNECT_ATTEMPTS = 5
@@ -44,8 +50,12 @@ CREATE TABLE IF NOT EXISTS crabriks.runs (
     status text NOT NULL,
     started_at timestamptz NOT NULL DEFAULT now(),
     finished_at timestamptz,
-    CONSTRAINT runs_status_known CHECK (status IN ('running', 'ok', 'error'))
+    CONSTRAINT runs_status_known CHECK (status IN ('running', 'ok', 'error', 'pending_approval'))
 );
+
+ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS runs_one_running_per_session
     ON crabriks.runs (session_id)
@@ -65,6 +75,23 @@ CREATE TABLE IF NOT EXISTS crabriks.transcript_entries (
     ),
     CONSTRAINT transcript_position_unique UNIQUE (session_id, position)
 );
+
+CREATE TABLE IF NOT EXISTS crabriks.approvals (
+    id uuid PRIMARY KEY,
+    session_id uuid NOT NULL REFERENCES crabriks.sessions (id),
+    run_id uuid NOT NULL REFERENCES crabriks.runs (id),
+    tool_name text NOT NULL,
+    tool_call_id text NOT NULL,
+    arguments text NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    resolved_at timestamptz,
+    resolved_by text,
+    CONSTRAINT approvals_status_known CHECK (status IN ('pending', 'approved', 'denied'))
+);
+
+CREATE INDEX IF NOT EXISTS approvals_session_status
+    ON crabriks.approvals (session_id, status);
 """
 
 _RUNNING_INDEX = "runs_one_running_per_session"
@@ -86,11 +113,55 @@ class SessionStore(Protocol):
 
     async def transcript(self, session_id: str, owner_id: str) -> tuple[TranscriptEntry, ...]: ...
 
+    async def create_approval(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: str,
+    ) -> ApprovalEntry: ...
+
+    async def get_approval(self, approval_id: str) -> ApprovalEntry: ...
+
+    async def list_approvals(
+        self,
+        owner_id: str,
+        status: ApprovalStatus | None = None,
+    ) -> tuple[ApprovalEntry, ...]: ...
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        status: Literal["approved", "denied"],
+        resolver_id: str,
+        resolved_at: datetime | None = None,
+    ) -> ApprovalEntry: ...
+
+    async def has_pending_approval(self, session_id: str) -> bool: ...
+
     async def close(self) -> None: ...
 
 
 class RunNotActive(Exception):
     """The run is not the session's current running claim."""
+
+
+class ApprovalPending(Exception):
+    """A tool call is pending approval for this session."""
+
+
+class ApprovalNotFound(Exception):
+    """No approval with this id."""
+
+
+class ApprovalAlreadyResolved(Exception):
+    """This approval has already been resolved."""
+
+
+class ApprovalForbidden(Exception):
+    """The caller does not own this approval."""
 
 
 @dataclass
@@ -106,6 +177,7 @@ class MemorySessionStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, _MemorySession] = {}
+        self._approvals: dict[str, ApprovalEntry] = {}
         self._lock = asyncio.Lock()
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
@@ -138,6 +210,11 @@ class MemorySessionStore:
 
     async def claim_run(self, session_id: str) -> str:
         async with self._lock:
+            if any(
+                a.session_id == session_id and a.status == "pending"
+                for a in self._approvals.values()
+            ):
+                raise ApprovalPending(session_id)
             session = self._sessions[session_id]
             if session.running is not None:
                 raise RunInProgress(session_id)
@@ -155,7 +232,7 @@ class MemorySessionStore:
     async def finish_run(self, session_id: str, run_id: str, status: TurnStatus) -> None:
         async with self._lock:
             session = self._sessions[session_id]
-            if session.running == run_id and status in ("ok", "error"):
+            if session.running == run_id and status in ("ok", "error", "pending_approval"):
                 session.running = None
 
     async def transcript(self, session_id: str, owner_id: str) -> tuple[TranscriptEntry, ...]:
@@ -166,6 +243,81 @@ class MemorySessionStore:
             if session.owner_id != owner_id:
                 raise SessionForbidden(session_id)
             return tuple(session.entries)
+
+    async def create_approval(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: str,
+    ) -> ApprovalEntry:
+        async with self._lock:
+            approval_id = str(uuid4())
+            entry = ApprovalEntry(
+                id=approval_id,
+                session_id=session_id,
+                run_id=run_id,
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                status="pending",
+                created_at=datetime.now(UTC),
+            )
+            self._approvals[approval_id] = entry
+            return entry
+
+    async def get_approval(self, approval_id: str) -> ApprovalEntry:
+        async with self._lock:
+            entry = self._approvals.get(approval_id)
+            if entry is None:
+                raise ApprovalNotFound(approval_id)
+            return entry
+
+    async def list_approvals(
+        self,
+        owner_id: str,
+        status: ApprovalStatus | None = None,
+    ) -> tuple[ApprovalEntry, ...]:
+        async with self._lock:
+            owned = {s_id for s_id, s in self._sessions.items() if s.owner_id == owner_id}
+            matching = [
+                a
+                for a in self._approvals.values()
+                if a.session_id in owned and (status is None or a.status == status)
+            ]
+        matching.sort(key=lambda a: a.created_at, reverse=True)
+        return tuple(matching)
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        status: Literal["approved", "denied"],
+        resolver_id: str,
+        resolved_at: datetime | None = None,
+    ) -> ApprovalEntry:
+        async with self._lock:
+            entry = self._approvals.get(approval_id)
+            if entry is None:
+                raise ApprovalNotFound(approval_id)
+            if entry.status != "pending":
+                raise ApprovalAlreadyResolved(approval_id)
+            resolved = replace(
+                entry,
+                status=status,
+                resolved_by=resolver_id,
+                resolved_at=resolved_at or datetime.now(UTC),
+            )
+            self._approvals[approval_id] = resolved
+            return resolved
+
+    async def has_pending_approval(self, session_id: str) -> bool:
+        async with self._lock:
+            return any(
+                a.session_id == session_id and a.status == "pending"
+                for a in self._approvals.values()
+            )
 
     async def close(self) -> None:
         return None
@@ -179,6 +331,18 @@ class LakebaseSessionStore:
 
     async def migrate(self) -> None:
         await self._pool.execute(SCHEMA)
+        await self._pool.execute(
+            """
+            DO $$
+            BEGIN
+                ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+                ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+                    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+            EXCEPTION
+                WHEN undefined_table THEN NULL;
+            END $$;
+            """
+        )
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
         session = _uuid(session_id)
@@ -223,6 +387,8 @@ class LakebaseSessionStore:
         )
 
     async def claim_run(self, session_id: str) -> str:
+        if await self.has_pending_approval(session_id):
+            raise ApprovalPending(session_id)
         first = await self._insert_or_reclaim(session_id)
         if first is not None:
             return first
@@ -351,6 +517,133 @@ class LakebaseSessionStore:
             raise SessionNotFound(session_id)
         if owner != owner_id:
             raise SessionForbidden(session_id)
+
+    async def create_approval(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: str,
+    ) -> ApprovalEntry:
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO crabriks.approvals (
+                id, session_id, run_id, tool_name, tool_call_id, arguments, status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+            RETURNING
+                id, session_id, run_id, tool_name, tool_call_id,
+                arguments, status, created_at, resolved_at, resolved_by
+            """,
+            uuid4(),
+            _uuid(session_id),
+            _uuid(run_id),
+            tool_name,
+            tool_call_id,
+            arguments,
+        )
+        if row is None:
+            raise RuntimeError("approval row was not returned")
+        return _approval_from_row(row)
+
+    async def get_approval(self, approval_id: str) -> ApprovalEntry:
+        row = await self._pool.fetchrow(
+            """
+            SELECT
+                id, session_id, run_id, tool_name, tool_call_id,
+                arguments, status, created_at, resolved_at, resolved_by
+            FROM crabriks.approvals
+            WHERE id = $1
+            """,
+            _uuid(approval_id),
+        )
+        if row is None:
+            raise ApprovalNotFound(approval_id)
+        return _approval_from_row(row)
+
+    async def list_approvals(
+        self,
+        owner_id: str,
+        status: ApprovalStatus | None = None,
+    ) -> tuple[ApprovalEntry, ...]:
+        query = """
+            SELECT
+                a.id, a.session_id, a.run_id, a.tool_name, a.tool_call_id,
+                a.arguments, a.status, a.created_at, a.resolved_at, a.resolved_by
+            FROM crabriks.approvals AS a
+            JOIN crabriks.sessions AS s ON s.id = a.session_id
+            WHERE s.owner_id = $1
+        """
+        if status is not None:
+            query += " AND a.status = $2 ORDER BY a.created_at DESC"
+            rows = await self._pool.fetch(query, owner_id, status)
+        else:
+            query += " ORDER BY a.created_at DESC"
+            rows = await self._pool.fetch(query, owner_id)
+        return tuple(_approval_from_row(row) for row in rows)
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        status: Literal["approved", "denied"],
+        resolver_id: str,
+        resolved_at: datetime | None = None,
+    ) -> ApprovalEntry:
+        app_id = _uuid(approval_id)
+        when = resolved_at or datetime.now(UTC)
+        async with self._pool.acquire() as conn, conn.transaction():
+            current_status = await conn.fetchval(
+                "SELECT status FROM crabriks.approvals WHERE id = $1 FOR UPDATE", app_id
+            )
+            if current_status is None:
+                raise ApprovalNotFound(approval_id)
+            if current_status != "pending":
+                raise ApprovalAlreadyResolved(approval_id)
+            row = await conn.fetchrow(
+                """
+                UPDATE crabriks.approvals
+                SET status = $2, resolved_at = $3, resolved_by = $4
+                WHERE id = $1
+                RETURNING
+                    id, session_id, run_id, tool_name, tool_call_id,
+                    arguments, status, created_at, resolved_at, resolved_by
+                """,
+                app_id,
+                status,
+                when,
+                resolver_id,
+            )
+            if row is None:
+                raise RuntimeError("updated approval row was not returned")
+            return _approval_from_row(row)
+
+    async def has_pending_approval(self, session_id: str) -> bool:
+        val = await self._pool.fetchval(
+            """
+            SELECT 1 FROM crabriks.approvals
+            WHERE session_id = $1 AND status = 'pending'
+            LIMIT 1
+            """,
+            _uuid(session_id),
+        )
+        return val is not None
+
+
+def _approval_from_row(row: asyncpg.Record) -> ApprovalEntry:
+    return ApprovalEntry(
+        id=str(row["id"]),
+        session_id=str(row["session_id"]),
+        run_id=str(row["run_id"]),
+        tool_name=row["tool_name"],
+        tool_call_id=row["tool_call_id"],
+        arguments=row["arguments"],
+        status=row["status"],
+        created_at=row["created_at"],
+        resolved_at=row["resolved_at"],
+        resolved_by=row["resolved_by"],
+    )
 
 
 class RunInProgress(Exception):

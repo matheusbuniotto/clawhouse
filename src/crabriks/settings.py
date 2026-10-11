@@ -28,6 +28,7 @@ class Settings:
     models: tuple[ModelEntry, ...] = ()
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     agent_root: Path = field(default_factory=default_agent_root)
+    sensitive_tools: tuple[str, ...] = ()
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -38,7 +39,21 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         workspace_host=env.get("DATABRICKS_HOST") or None,
         models=models_from_env(env),
         mcp_servers=mcp_servers_from_env(env),
+        sensitive_tools=sensitive_tools_from_env(env),
     )
+
+
+def sensitive_tools_from_env(env: Mapping[str, str]) -> tuple[str, ...]:
+    raw = env.get("CRABRIKS_SENSITIVE_TOOLS")
+    if not raw:
+        return ()
+    stripped = raw.strip()
+    if stripped.startswith(("[", "{")):
+        loaded = json.loads(stripped)
+        if not isinstance(loaded, list):
+            raise ValueError("CRABRIKS_SENSITIVE_TOOLS JSON must be a list of tool names")
+        return tuple(str(x) for x in loaded)
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 def models_from_env(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:

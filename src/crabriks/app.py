@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -24,9 +25,17 @@ from crabriks.model import (
 )
 from crabriks.prompt import AGENT_NAME
 from crabriks.settings import Settings, request_token, settings_from_env
-from crabriks.shapes import SessionSummary, TranscriptEntry
+from crabriks.shapes import (
+    ApprovalEntry,
+    SessionSummary,
+    TranscriptEntry,
+)
 from crabriks.skills import SkillsCache
 from crabriks.store import (
+    ApprovalAlreadyResolved,
+    ApprovalForbidden,
+    ApprovalNotFound,
+    ApprovalPending,
     RunInProgress,
     SessionForbidden,
     SessionNotFound,
@@ -36,6 +45,7 @@ from crabriks.store import (
 from crabriks.turn import (
     BUSY_TURN,
     FAILED_TURN,
+    ApprovalNotice,
     InvalidSessionId,
     MCPToolsetFactory,
     Token,
@@ -46,6 +56,7 @@ from crabriks.turn import (
     TurnResult,
     canonical_session_id,
     iter_turn,
+    resume_turn,
 )
 from crabriks.workspace import resolve_agent_workspace
 
@@ -83,6 +94,31 @@ class TranscriptOut(BaseModel):
     entries: list[EntryOut]
 
 
+class ApprovalOut(BaseModel):
+    id: str
+    session_id: str
+    run_id: str
+    tool_name: str
+    tool_call_id: str
+    arguments: str
+    status: str
+    created_at: str
+    resolved_at: str | None = None
+    resolved_by: str | None = None
+
+
+class ApprovalsListOut(BaseModel):
+    approvals: list[ApprovalOut]
+    pending: list[ApprovalOut]
+    history: list[ApprovalOut]
+
+
+class ApprovalActionOut(BaseModel):
+    status: str
+    reply: str
+    approval: ApprovalOut
+
+
 def create_app(
     *,
     settings: Settings,
@@ -116,7 +152,9 @@ def create_app(
 
 def _routes(app: FastAPI) -> None:
     _page_routes(app)
-    _api_routes(app)
+    _asset_routes(app)
+    _session_routes(app)
+    _approval_routes(app)
 
 
 def _page_routes(app: FastAPI) -> None:
@@ -125,14 +163,6 @@ def _page_routes(app: FastAPI) -> None:
     async def chat_page(caller: Caller = _require_caller) -> FileResponse:
         del caller
         return FileResponse(STATIC / "index.html")
-
-    @app.get("/chat.js")
-    async def chat_script() -> FileResponse:
-        return FileResponse(STATIC / "chat.js", media_type="text/javascript")
-
-    @app.get("/chat.css")
-    async def chat_style() -> FileResponse:
-        return FileResponse(STATIC / "chat.css", media_type="text/css")
 
     @app.get("/sessions")
     async def sessions_page(caller: Caller = _require_caller) -> FileResponse:
@@ -144,6 +174,21 @@ def _page_routes(app: FastAPI) -> None:
         del caller
         return FileResponse(STATIC / "new.html")
 
+    @app.get("/approvals")
+    async def approvals_page(caller: Caller = _require_caller) -> FileResponse:
+        del caller
+        return FileResponse(STATIC / "approvals.html")
+
+
+def _asset_routes(app: FastAPI) -> None:
+    @app.get("/chat.js")
+    async def chat_script() -> FileResponse:
+        return FileResponse(STATIC / "chat.js", media_type="text/javascript")
+
+    @app.get("/chat.css")
+    async def chat_style() -> FileResponse:
+        return FileResponse(STATIC / "chat.css", media_type="text/css")
+
     @app.get("/sessions.js")
     async def sessions_script() -> FileResponse:
         return FileResponse(STATIC / "sessions.js", media_type="text/javascript")
@@ -152,8 +197,12 @@ def _page_routes(app: FastAPI) -> None:
     async def new_script() -> FileResponse:
         return FileResponse(STATIC / "new.js", media_type="text/javascript")
 
+    @app.get("/approvals.js")
+    async def approvals_script() -> FileResponse:
+        return FileResponse(STATIC / "approvals.js", media_type="text/javascript")
 
-def _api_routes(app: FastAPI) -> None:
+
+def _session_routes(app: FastAPI) -> None:
     @app.get("/api/me")
     async def me(caller: Caller = _require_caller) -> dict[str, str]:
         return {"user_id": caller.user_id}
@@ -210,6 +259,35 @@ def _api_routes(app: FastAPI) -> None:
         return await _stream_turn(request, session_id, message, caller, model_id=body.model)
 
 
+def _approval_routes(app: FastAPI) -> None:
+    @app.get("/api/approvals")
+    async def list_approvals(
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> ApprovalsListOut:
+        entries = await request.app.state.store.list_approvals(caller.user_id)
+        out = [_approval_out(entry) for entry in entries]
+        pending = [a for a in out if a.status == "pending"]
+        history = [a for a in out if a.status != "pending"]
+        return ApprovalsListOut(approvals=out, pending=pending, history=history)
+
+    @app.post("/api/approvals/{approval_id}/approve")
+    async def approve_tool(
+        approval_id: str,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> ApprovalActionOut:
+        return await _resolve_and_resume(request, approval_id, "approved", caller)
+
+    @app.post("/api/approvals/{approval_id}/deny")
+    async def deny_tool(
+        approval_id: str,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> ApprovalActionOut:
+        return await _resolve_and_resume(request, approval_id, "denied", caller)
+
+
 def _caller(request: Request) -> Caller:
     settings: Settings = request.app.state.settings
     try:
@@ -236,14 +314,11 @@ async def _read_entries(
         raise HTTPException(status_code=403, detail="You do not own this session.") from exc
 
 
-async def _stream_turn(
+def _build_turn_context(
     request: Request,
-    session_id: str,
-    message: str,
     caller: Caller,
-    *,
-    model_id: str | None,
-) -> Response:
+    model_id: str | None = None,
+) -> TurnContext:
     model = _model_for_caller(request, caller, model_id)
     settings: Settings = request.app.state.settings
     # The forwarded caller token wins. Dev token fallback applies strictly to dev_user.
@@ -255,7 +330,7 @@ async def _stream_turn(
         dev_user=dev_user,
         dev_token=dev_token,
     )
-    ctx = TurnContext(
+    return TurnContext(
         owner_id=caller.user_id,
         store=request.app.state.store,
         model=model,
@@ -264,8 +339,20 @@ async def _stream_turn(
         skills_cache=request.app.state.skills_cache,
         mcp_servers=settings.mcp_servers,
         user_token=token,
+        sensitive_tools=settings.sensitive_tools,
         mcp_toolset_factory=getattr(request.app.state, "mcp_toolset_factory", None),
     )
+
+
+async def _stream_turn(
+    request: Request,
+    session_id: str,
+    message: str,
+    caller: Caller,
+    *,
+    model_id: str | None,
+) -> Response:
+    ctx = _build_turn_context(request, caller, model_id)
     iterator = iter_turn(session_id, message, ctx=ctx)
     first = await _first_item(iterator)
     if isinstance(first, JSONResponse):
@@ -274,6 +361,44 @@ async def _stream_turn(
         _frames(iterator, first),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
+    )
+
+
+async def _resolve_and_resume(
+    request: Request,
+    approval_id: str,
+    decision: Literal["approved", "denied"],
+    caller: Caller,
+) -> ApprovalActionOut:
+    store: SessionStore = request.app.state.store
+    try:
+        approval = await store.get_approval(approval_id)
+    except ApprovalNotFound as exc:
+        raise HTTPException(status_code=404, detail="Approval not found.") from exc
+
+    if approval.status != "pending":
+        raise HTTPException(status_code=409, detail="Approval already resolved.")
+
+    ctx = _build_turn_context(request, caller)
+    try:
+        resumed = await resume_turn(
+            session_id=approval.session_id,
+            approval_id=approval_id,
+            decision=decision,
+            ctx=ctx,
+        )
+    except (SessionForbidden, ApprovalForbidden) as exc:
+        raise HTTPException(status_code=403, detail="You do not own this session.") from exc
+    except ApprovalAlreadyResolved as exc:
+        raise HTTPException(status_code=409, detail="Approval already resolved.") from exc
+    except RunInProgress as exc:
+        raise HTTPException(status_code=409, detail=BUSY_TURN) from exc
+
+    updated = await store.get_approval(approval_id)
+    return ApprovalActionOut(
+        status=resumed.status,
+        reply=resumed.reply,
+        approval=_approval_out(updated),
     )
 
 
@@ -299,6 +424,12 @@ async def _first_item(
 ) -> TurnNotice | TurnResult | JSONResponse:
     try:
         return await anext(iterator)
+    except ApprovalPending:
+        await iterator.aclose()
+        return JSONResponse(
+            status_code=409,
+            content={"error": "A tool call is pending approval for this session."},
+        )
     except RunInProgress:
         await iterator.aclose()
         return JSONResponse(status_code=409, content={"error": BUSY_TURN})
@@ -328,16 +459,49 @@ def _encode(item: TurnNotice | TurnResult) -> bytes:
     return f"event: {event}\ndata: {data}\n\n".encode()
 
 
-def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, str]]:
+def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, str]]:
     if isinstance(item, Token):
         return "token", {"text": item.text}
     if isinstance(item, ToolCallNotice):
         return "tool_call", {"name": item.name, "arguments": item.arguments}
     if isinstance(item, ToolResultNotice):
         return "tool_result", {"name": item.name, "content": item.content}
+    if isinstance(item, ApprovalNotice):
+        return "approval_required", {
+            "approval_id": item.approval_id,
+            "name": item.name,
+            "arguments": item.arguments,
+        }
+    return "error", {"status": "error", "reply": "", "error": FAILED_TURN}
+
+
+def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, str]]:
+    if isinstance(item, TurnNotice):
+        return _notice_frame(item)
     if item.status == "ok":
         return "done", {"status": "ok", "reply": item.reply}
+    if item.status == "pending_approval":
+        return "done", {
+            "status": "pending_approval",
+            "reply": item.reply,
+            "approval_id": item.approval_id or "",
+        }
     return "error", {"status": "error", "reply": "", "error": item.error or FAILED_TURN}
+
+
+def _approval_out(entry: ApprovalEntry) -> ApprovalOut:
+    return ApprovalOut(
+        id=entry.id,
+        session_id=entry.session_id,
+        run_id=entry.run_id,
+        tool_name=entry.tool_name,
+        tool_call_id=entry.tool_call_id,
+        arguments=entry.arguments,
+        status=entry.status,
+        created_at=entry.created_at.isoformat(),
+        resolved_at=entry.resolved_at.isoformat() if entry.resolved_at else None,
+        resolved_by=entry.resolved_by,
+    )
 
 
 def _entry_out(entry: TranscriptEntry) -> EntryOut:

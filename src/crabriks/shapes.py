@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Literal
 
 Role = Literal["user", "assistant", "tool_call", "tool_result"]
-TurnStatus = Literal["ok", "error"]
+TurnStatus = Literal["ok", "error", "pending_approval"]
+ApprovalStatus = Literal["pending", "approved", "denied"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,9 +27,24 @@ class SessionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ApprovalEntry:
+    id: str
+    session_id: str
+    run_id: str
+    tool_name: str
+    tool_call_id: str
+    arguments: str
+    status: ApprovalStatus
+    created_at: datetime
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TurnResult:
     session_id: str
     status: TurnStatus
     reply: str
     error: str | None
     transcript: tuple[TranscriptEntry, ...]
+    approval_id: str | None = None
