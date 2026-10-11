@@ -1,13 +1,25 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "moduleDetection": "force",
     "noEmitOnError": true,
+    "types": [],
     "outDir": "../src/crabriks/static",
     "rootDir": "."
   },
-  "files": ["chat.ts", "sessions.ts", "new.ts"]
+  "files": [
+    "shell.ts",
+    "boot.ts",
+    "dom.ts",
+    "chat.ts",
+    "transcript.ts",
+    "sessions.ts",
+    "new.ts",
+    "approvals.ts",
+    "status.ts"
+  ]
 }

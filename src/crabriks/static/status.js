@@ -1,86 +1,98 @@
-const statUser = document.querySelector("#stat-user");
-const statAuth = document.querySelector("#stat-auth");
-const statToken = document.querySelector("#stat-token");
-const statWorkspace = document.querySelector("#stat-workspace");
-const statModel = document.querySelector("#stat-model");
-const statStore = document.querySelector("#stat-store");
-const sessionsList = document.querySelector("#sessions-list");
-const logTailLink = document.querySelector("#log-tail-link");
-const statusLine = document.querySelector("#status");
-
-if (
-  !statUser ||
-  !statAuth ||
-  !statToken ||
-  !statWorkspace ||
-  !statModel ||
-  !statStore ||
-  !sessionsList ||
-  !logTailLink ||
-  !statusLine
-) {
-  throw new Error("status page is missing a required element");
-}
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function renderAuthAndConnection(auth, connection) {
-  statUser.textContent = auth.user_id || "Anonymous";
-  statAuth.textContent = auth.auth_type.toUpperCase();
-  statToken.textContent = auth.token_present
-    ? auth.auth_type === "dev"
-      ? "Present (dev)"
-      : "Present (forwarded)"
-    : "Not present";
-  statWorkspace.textContent = connection.workspace_host || "Local environment";
-  statModel.textContent = connection.serving_endpoint || "Default endpoint";
-  statStore.textContent = connection.store_type === "memory" ? "In-Memory Store" : "Lakebase Postgres";
-}
-
-function renderSessions(items) {
-  sessionsList.replaceChildren();
-  if (items.length === 0) {
-    sessionsList.append(el("li", "empty", "No sessions yet."));
-    return;
-  }
-  for (const item of items) {
-    const row = el("li", "session-status-row");
-
-    const link = document.createElement("a");
-    link.className = "session-link";
-    link.href = `/chat?session=${item.id}`;
-    link.textContent = item.title || "Untitled session";
-
-    const badge = el("span", `status-badge ${item.run_state}`, item.run_state);
-    const when = el("span", "when", new Date(item.created_at).toLocaleString());
-
-    row.append(link, badge, when);
-    sessionsList.append(row);
-  }
-}
-
-async function load() {
-  try {
-    const resp = await fetch("/api/status");
-    if (!resp.ok) {
-      statusLine.textContent = "The status could not be loaded.";
-      return;
+import { el, relativeTime } from "./dom.js";
+const FIELDS = [
+    ["User", "stat-user"],
+    ["Auth mode", "stat-auth"],
+    ["Token", "stat-token"],
+    ["Workspace", "stat-workspace"],
+    ["Model endpoint", "stat-model"],
+    ["Storage", "stat-store"],
+];
+export function mount(root) {
+    const connection = el("section", "status-section");
+    connection.append(el("h2", "", "Connection & Identity"));
+    const card = el("div", "status-card");
+    const grid = el("dl", "status-grid");
+    const values = new Map();
+    for (const [label, id] of FIELDS) {
+        grid.append(el("dt", "", label));
+        const value = el("dd", "", "Loading…");
+        value.id = id;
+        values.set(id, value);
+        grid.append(value);
     }
-    const data = await resp.json();
-    renderAuthAndConnection(data.auth, data.connection);
-    renderSessions(data.sessions);
-    if (data.log_tail_url) {
-      logTailLink.href = data.log_tail_url;
+    card.append(grid);
+    connection.append(card);
+    const runs = el("section", "status-section");
+    runs.append(el("h2", "", "Session Runs"));
+    const sessionsList = el("ul", "sessions-list");
+    sessionsList.id = "sessions-list";
+    runs.append(sessionsList);
+    const diagnostics = el("section", "status-section");
+    diagnostics.append(el("h2", "", "Diagnostics & Logs"));
+    const logCard = el("div", "status-card");
+    const logRow = el("p", "log-tail-row");
+    const logTailLink = el("a", "btn-link", "Log tail");
+    logTailLink.id = "log-tail-link";
+    logTailLink.href = "#";
+    logTailLink.target = "_blank";
+    logTailLink.rel = "noopener";
+    logRow.append(logTailLink);
+    logCard.append(logRow);
+    diagnostics.append(logCard);
+    const statusLine = el("p", "status");
+    statusLine.id = "status";
+    statusLine.setAttribute("role", "status");
+    root.append(connection, runs, diagnostics, statusLine);
+    function set(id, text) {
+        const node = values.get(id);
+        if (node)
+            node.textContent = text;
     }
-  } catch (_err) {
-    statusLine.textContent = "Network error while loading status.";
-  }
+    function renderAuthAndConnection(auth, conn) {
+        set("stat-user", auth.user_id || "Anonymous");
+        set("stat-auth", auth.auth_type.toUpperCase());
+        set("stat-token", auth.token_present
+            ? auth.auth_type === "dev"
+                ? "Present (dev)"
+                : "Present (forwarded)"
+            : "Not present");
+        set("stat-workspace", conn.workspace_host || "Local environment");
+        set("stat-model", conn.serving_endpoint || "Default endpoint");
+        set("stat-store", conn.store_type === "memory" ? "In-Memory Store" : "Lakebase Postgres");
+    }
+    function renderSessions(items) {
+        sessionsList.replaceChildren();
+        if (items.length === 0) {
+            sessionsList.append(el("li", "empty", "No sessions yet."));
+            return;
+        }
+        for (const item of items) {
+            const row = el("li", "session-status-row");
+            const link = el("a", "session-link", item.title || "Untitled session");
+            link.setAttribute("data-nav", "");
+            link.href = `/chat?session=${item.id}`;
+            row.append(link);
+            row.append(el("span", `status-badge ${item.run_state}`, item.run_state));
+            row.append(el("span", "when", relativeTime(item.created_at)));
+            sessionsList.append(row);
+        }
+    }
+    async function load() {
+        try {
+            const resp = await fetch("/api/status");
+            if (!resp.ok) {
+                statusLine.textContent = "The status could not be loaded.";
+                return;
+            }
+            const data = (await resp.json());
+            renderAuthAndConnection(data.auth, data.connection);
+            renderSessions(data.sessions);
+            if (data.log_tail_url)
+                logTailLink.href = data.log_tail_url;
+        }
+        catch {
+            statusLine.textContent = "Network error while loading status.";
+        }
+    }
+    void load();
 }
-
-void load();
-export {};

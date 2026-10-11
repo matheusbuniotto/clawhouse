@@ -1,4 +1,4 @@
-.PHONY: all help check lint format test sync deploy logs status
+.PHONY: all help check lint format test frontend-install frontend-check sync deploy logs status
 
 APP_NAME ?= crabriks
 WORKSPACE_PATH ?= $(shell databricks apps get $(APP_NAME) -o json 2>/dev/null | jq -r '.default_source_code_path // empty' 2>/dev/null)
@@ -13,10 +13,12 @@ help:
 	@echo "Crabriks Management Makefile"
 	@echo ""
 	@echo "Quality targets:"
-	@echo "  make check      - Run all prek quality gates and pytest"
+	@echo "  make check      - Run all prek quality gates, pytest, and the frontend checks"
 	@echo "  make lint       - Run ruff, complexipy, pyright"
 	@echo "  make format     - Run ruff fix and format"
 	@echo "  make test       - Run test suite with uv run pytest"
+	@echo "  make frontend-install - npm ci for the frontend toolchain"
+	@echo "  make frontend-check   - Type-check (tsc) and run component tests (vitest)"
 	@echo ""
 	@echo "Deployment targets:"
 	@echo "  make deploy     - Run quality checks, sync code, and deploy to Databricks Apps"
@@ -37,6 +39,18 @@ lint:
 test:
 	uv run pytest
 
+frontend-install:
+	npm ci
+
+frontend-check:
+	@echo "==> Type-checking frontend (tsc)..."
+	npm run typecheck
+	@echo "==> Building frontend and checking committed output is current..."
+	npm run build
+	git diff --exit-code -- src/crabriks/static
+	@echo "==> Running frontend component tests (vitest)..."
+	npm test
+
 check:
 	@echo "==> Running quality gates (prek)..."
 	@if command -v prek >/dev/null 2>&1; then \
@@ -47,6 +61,7 @@ check:
 	fi
 	@echo "==> Running pytest test suite..."
 	uv run pytest
+	@$(MAKE) frontend-check
 
 sync:
 	@echo "==> Syncing files to Databricks workspace $(WORKSPACE_PATH)..."
@@ -60,6 +75,10 @@ sync:
 		--exclude "tests/**" \
 		--exclude "docs/**" \
 		--exclude "frontend/**" \
+		--exclude "package.json" \
+		--exclude "package-lock.json" \
+		--exclude "vitest.config.ts" \
+		--exclude "node_modules/**" \
 		--exclude ".agents/**" \
 		--exclude ".claude/**" \
 		--exclude ".grok/**" \

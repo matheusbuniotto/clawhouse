@@ -1,0 +1,176 @@
+import { beforeEach, expect, test, vi } from "vitest";
+
+import type { ScreenContext } from "./shell.js";
+
+const SESSION = "11111111-1111-4111-8111-111111111111";
+
+function context(search = `?session=${SESSION}`): ScreenContext {
+  return { url: new URL(`http://localhost/chat${search}`), navigate: vi.fn() };
+}
+
+function jsonResponse(payload: unknown): Response {
+  return { ok: true, json: async () => payload } as unknown as Response;
+}
+
+function streamResponse(frames: string): Response {
+  const bytes = new TextEncoder().encode(frames);
+  let sent = false;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () =>
+          sent ? { done: true, value: undefined } : ((sent = true), { done: false, value: bytes }),
+      }),
+    },
+  } as unknown as Response;
+}
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  sessionStorage.clear();
+  document.body.innerHTML = "";
+});
+
+test("renders a loaded transcript as markdown and one merged tool row", async () => {
+  const entries = [
+    { role: "user", content: "What is `pandas`?", tool_name: null },
+    { role: "tool_call", content: '{"q":"pandas"}', tool_name: "lookup" },
+    { role: "tool_result", content: "a dataframe library", tool_name: "lookup" },
+    {
+      role: "assistant",
+      content: "# Answer\n\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+      tool_name: null,
+    },
+  ];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries });
+    if (url === "/api/models") {
+      return jsonResponse({ models: [{ id: "m", label: "M", default: true }] });
+    }
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".assistant")).not.toBeNull());
+
+  const log = document.querySelector("#log") as HTMLElement;
+  expect(log.querySelector(".bubble.user")?.textContent).toBe("What is `pandas`?");
+  expect(log.querySelector(".bubble.assistant")).toBeNull();
+  expect(log.querySelectorAll(".tool-row")).toHaveLength(1);
+  expect((log.querySelector(".tool-row") as HTMLElement).dataset.state).toBe("ok");
+  expect(log.querySelector(".tool-output")?.textContent).toBe("a dataframe library");
+  expect(log.querySelector(".assistant h1")?.textContent).toBe("Answer");
+  expect(log.querySelector(".assistant table")).not.toBeNull();
+});
+
+test("streams a turn into markdown and a shared tool row", async () => {
+  const frames = [
+    'event: token\ndata: {"text":"# Hi"}\n\n',
+    'event: tool_call\ndata: {"name":"lookup","arguments":"{}"}\n\n',
+    'event: tool_result\ndata: {"name":"lookup","content":"ok"}\n\n',
+    'event: done\ndata: {"status":"ok","reply":"# Hi\\n\\nAll done."}\n\n',
+  ].join("");
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
+
+  const input = document.querySelector("#message") as HTMLTextAreaElement;
+  input.value = "hello";
+  document
+    .querySelector("#composer")
+    ?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  await vi.waitFor(() => expect(document.querySelector(".assistant h1")).not.toBeNull());
+
+  const log = document.querySelector("#log") as HTMLElement;
+  expect(log.querySelector(".bubble.user")?.textContent).toBe("hello");
+  expect(log.querySelectorAll(".tool-row")).toHaveLength(1);
+  expect(log.querySelector(".assistant h1")?.textContent).toBe("Hi");
+  expect(log.querySelector(".assistant p")?.textContent).toBe("All done.");
+  expect(document.querySelector("#status")?.textContent).toBe("");
+});
+
+test("a failed turn marks the running tool row and reports inline", async () => {
+  const frames =
+    'event: tool_call\ndata: {"name":"lookup","arguments":"{}"}\n\n' +
+    'event: error\ndata: {"status":"error","reply":"","error":"The turn failed."}\n\n';
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({ models: [] });
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
+
+  (document.querySelector("#message") as HTMLTextAreaElement).value = "hello";
+  document
+    .querySelector("#composer")
+    ?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  await vi.waitFor(() =>
+    expect(document.querySelector("#status")?.textContent).toBe("The turn failed."),
+  );
+
+  const row = document.querySelector(".tool-row") as HTMLElement;
+  expect(row.dataset.state).toBe("error");
+  expect(row.querySelector(".tool-output")?.textContent).toBe("The turn failed.");
+});
+
+test("the composer grows, keeps the model pill inline, and exposes abort only while running", async () => {
+  let release: (() => void) | undefined;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") {
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: () =>
+              new Promise((resolve) => {
+                release = () => resolve({ done: true, value: undefined });
+              }),
+          }),
+        },
+      } as unknown as Response;
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({ models: [] });
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+
+  const composer = document.querySelector("#composer") as HTMLFormElement;
+  const model = document.querySelector("#model") as HTMLSelectElement;
+  const abort = document.querySelector("#abort") as HTMLButtonElement;
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  expect(model.className).toBe("model-pill");
+  expect(composer.contains(model)).toBe(true);
+  expect(abort.hidden).toBe(true);
+
+  Object.defineProperty(message, "scrollHeight", { value: 96, configurable: true });
+  message.value = "line\nline";
+  message.dispatchEvent(new Event("input"));
+  expect(message.style.height).toBe("96px");
+
+  message.value = "hello";
+  composer.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+  await vi.waitFor(() => expect(abort.hidden).toBe(false));
+
+  abort.click();
+  expect(abort.hidden).toBe(true);
+  release?.();
+});

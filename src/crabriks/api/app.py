@@ -171,6 +171,7 @@ def create_app(
 
 
 def _routes(app: FastAPI) -> None:
+    _cache_headers(app)
     _page_routes(app)
     _asset_routes(app)
     _session_routes(app)
@@ -178,42 +179,86 @@ def _routes(app: FastAPI) -> None:
     _status_routes(app)
 
 
+def _cache_headers(app: FastAPI) -> None:
+    """Revalidate on every load so redeploys reach browsers holding stale assets."""
+
+    @app.middleware("http")
+    async def disable_http_cache(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        if "cache-control" not in response.headers:
+            response.headers["cache-control"] = "no-cache"
+        return response
+
+
 def _page_routes(app: FastAPI) -> None:
     @app.get("/")
     @app.get("/chat")
-    async def chat_page(caller: Caller = _require_caller) -> FileResponse:
+    @app.get("/sessions")
+    @app.get("/new")
+    @app.get("/approvals")
+    @app.get("/status")
+    async def shell_page(caller: Caller = _require_caller) -> FileResponse:
         del caller
         return FileResponse(STATIC / "index.html")
 
-    @app.get("/sessions")
-    async def sessions_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "sessions.html")
-
-    @app.get("/new")
-    async def new_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "new.html")
-
-    @app.get("/approvals")
-    async def approvals_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "approvals.html")
-
-    @app.get("/status")
-    async def status_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "status.html")
-
 
 def _asset_routes(app: FastAPI) -> None:
+    _style_routes(app)
+    _script_routes(app)
+
+
+def _style_routes(app: FastAPI) -> None:
+    @app.get("/tokens.css")
+    async def tokens_style() -> FileResponse:
+        return FileResponse(STATIC / "tokens.css", media_type="text/css")
+
+    @app.get("/shell.css")
+    async def shell_style() -> FileResponse:
+        return FileResponse(STATIC / "shell.css", media_type="text/css")
+
+    @app.get("/transcript.css")
+    async def transcript_style() -> FileResponse:
+        return FileResponse(STATIC / "transcript.css", media_type="text/css")
+
+    @app.get("/screens.css")
+    async def screens_style() -> FileResponse:
+        return FileResponse(STATIC / "screens.css", media_type="text/css")
+
+
+def _script_routes(app: FastAPI) -> None:
+    _core_script_routes(app)
+    _screen_script_routes(app)
+
+
+def _core_script_routes(app: FastAPI) -> None:
+    @app.get("/boot.js")
+    async def boot_script() -> FileResponse:
+        return FileResponse(STATIC / "boot.js", media_type="text/javascript")
+
+    @app.get("/shell.js")
+    async def shell_script() -> FileResponse:
+        return FileResponse(STATIC / "shell.js", media_type="text/javascript")
+
+    @app.get("/dom.js")
+    async def dom_script() -> FileResponse:
+        return FileResponse(STATIC / "dom.js", media_type="text/javascript")
+
+    @app.get("/transcript.js")
+    async def transcript_script() -> FileResponse:
+        return FileResponse(STATIC / "transcript.js", media_type="text/javascript")
+
+    @app.get("/highlight.js")
+    async def highlight_script() -> FileResponse:
+        return FileResponse(STATIC / "highlight.js", media_type="text/javascript")
+
+
+def _screen_script_routes(app: FastAPI) -> None:
     @app.get("/chat.js")
     async def chat_script() -> FileResponse:
         return FileResponse(STATIC / "chat.js", media_type="text/javascript")
-
-    @app.get("/chat.css")
-    async def chat_style() -> FileResponse:
-        return FileResponse(STATIC / "chat.css", media_type="text/css")
 
     @app.get("/sessions.js")
     async def sessions_script() -> FileResponse:

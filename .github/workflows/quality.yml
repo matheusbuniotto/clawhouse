@@ -37,6 +37,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
       - name: Ruff Lint & Format Check
         run: |
           uv run ruff check .
@@ -50,6 +59,17 @@ jobs:
 
       - name: Dead Code Audit (Vulture)
         run: uv run vulture src --min-confidence 80
+
+      - name: Frontend Type Check (tsc)
+        run: npm run typecheck
+
+      - name: Frontend Compiled Output Drift Check
+        run: |
+          npm run build
+          git diff --exit-code -- src/crabriks/static
+
+      - name: Frontend Component Tests (vitest)
+        run: npm test
 
       - name: Duplicate Code Check (jscpd)
         run: |
