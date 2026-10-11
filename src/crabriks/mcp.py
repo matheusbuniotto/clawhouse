@@ -297,14 +297,16 @@ def _build_active_toolsets(
 ) -> tuple[AbstractToolset[object], ...]:
     active: list[AbstractToolset[object]] = []
     for server_name, toolset in server_toolsets.items():
-        # RenamedToolset(name_map) maps exposed (safe) names to underlying original names.
-        # In call_tool, RenamedToolset uses `self.name_map.get(name, name)` to recover
-        # and invoke the underlying server's original tool name.
-        name_map = {
+        # Pydantic AI RenamedToolset contract:
+        # RenamedToolset(name_map) expects `dict[str, str]` mapping new safe names to
+        # original tool names:
+        #   - get_tools() flips it ({v: k for k, v in name_map.items()}) to expose safe names.
+        #   - call_tool(name) resolves `self.name_map.get(name, name)` to invoke original names.
+        new_to_original_name_map = {
             t.safe_name: t.original_name for t in disambiguated if t.server_name == server_name
         }
-        if name_map:
-            renamed = toolset.renamed(name_map)
+        if new_to_original_name_map:
+            renamed = toolset.renamed(new_to_original_name_map)
             active.append(ScrubbingToolset(renamed, token=token) if token else renamed)
     return tuple(active)
 

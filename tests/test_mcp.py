@@ -306,7 +306,8 @@ async def test_token_scrubbed_from_tool_parameter_schema() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bundle_renamed_toolset_invokes_original_name() -> None:
+async def test_invoke_renamed_mcp_tool_maps_safe_name_to_original_server_name() -> None:
+    """Verify that RenamedToolset exposes safe_name and invokes original tool name on call."""
     called_names: list[str] = []
 
     class _TrackingToolset(AbstractToolset[object]):
@@ -351,6 +352,12 @@ async def test_bundle_renamed_toolset_invokes_original_name() -> None:
         servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _TrackingToolset()
     )
 
+    # 1. Verify get_tools exposes safe_name to the model
+    exposed_tools = await bundle.toolsets[0].get_tools(cast(RunContext[object], None))
+    assert "system_ai__query" in exposed_tools
+    assert "query" not in exposed_tools
+
+    # 2. Verify model calling safe_name invokes the original tool name on the server
     async def fn(
         messages: list[ModelMessage], info: AgentInfo
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
@@ -365,6 +372,8 @@ async def test_bundle_renamed_toolset_invokes_original_name() -> None:
         if not tool_returns:
             yield {0: DeltaToolCall(name="system_ai__query", json_args="{}", tool_call_id="c1")}
             return
+        received_returns = tool_returns
+        assert len(received_returns) == 1
         yield "done"
 
     agent = Agent(FunctionModel(stream_function=fn), toolsets=bundle.toolsets)
