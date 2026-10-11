@@ -257,8 +257,10 @@ async def test_a_turn_includes_discovered_skills_in_prompt(tmp_path: Path) -> No
         )
 
     assert response.status_code == 200
-    assert "# Skills\n- sql: Run a warehouse query." in seen[0]
+    assert seen[0].count("- sql: Run a warehouse query.") == 1
+    assert "# Skills" not in seen[0]
     assert "Secret Body" not in seen[0]
+    assert "load_capability" in seen[0]
 
 
 async def test_a_turn_streams_over_sse_and_survives_reload() -> None:

@@ -10,6 +10,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic_ai import DeferredToolRequests, RunContext
+from pydantic_ai.capabilities import AgentCapability
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -36,7 +37,7 @@ from crabriks.agent.prompt import (
 )
 from crabriks.capabilities.bootstrap import BootstrapContext, load_bootstrap
 from crabriks.capabilities.mcp import MCPServerConfig, load_mcp_tools, scrub_token
-from crabriks.capabilities.skills import SkillsCache, SkillsCatalog, load_skills
+from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import ApprovalEntry, TranscriptEntry, TurnResult, TurnStatus
 from crabriks.store.store import (
@@ -105,7 +106,6 @@ class TurnContext:
     now: Callable[[], datetime]
     emit: Emit | None = None
     workspace: WorkspacePaths | None = None
-    skills_cache: SkillsCache | None = None
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     user_token: str = ""
     mcp_toolset_factory: MCPToolsetFactory | None = None
@@ -293,11 +293,12 @@ def _status(holder: list[TurnResult]) -> TurnStatus:
     return holder[0].status
 
 
-def _skills_for_session(claimed: _Claimed) -> SkillsCatalog:
-    if claimed.ctx.skills_cache is not None:
-        return claimed.ctx.skills_cache.get_or_discover(claimed.session_id, claimed.ctx.workspace)
+def _skills_for_turn(claimed: _Claimed) -> list[AgentCapability[TurnDeps]] | None:
     skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
-    return load_skills(skills_dir)
+    skills = skills_capability(skills_dir)
+    if skills is None:
+        return None
+    return [skills]
 
 
 def _wrap_toolsets(
@@ -315,7 +316,7 @@ def _wrap_toolsets(
     )
 
 
-def _prompt_for(claimed: _Claimed, skills: SkillsCatalog, mcp_bundle: object) -> SystemPrompt:
+def _prompt_for(claimed: _Claimed, mcp_bundle: object) -> SystemPrompt:
     ctx = claimed.ctx
     tools_list = getattr(mcp_bundle, "tools", ())
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
@@ -324,7 +325,6 @@ def _prompt_for(claimed: _Claimed, skills: SkillsCatalog, mcp_bundle: object) ->
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
         bootstrap=_bootstrap(ctx),
         workspace=ctx.workspace,
-        skills=skills.cards(),
     )
 
 
@@ -332,22 +332,22 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     await _append_user(claimed)
-    skills = _skills_for_session(claimed)
     mcp_bundle = await load_mcp_tools(
         ctx.mcp_servers,
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
-    prompt = _prompt_for(claimed, skills, mcp_bundle)
+    prompt = _prompt_for(claimed, mcp_bundle)
     toolsets = _wrap_toolsets(mcp_bundle.toolsets, ctx.sensitive_tools)
     result = await crabriks_agent().run(
         claimed.user_message,
         message_history=to_model_messages(prior) or None,
         model=ctx.model,
         instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now, skills=skills, sensitive_tools=ctx.sensitive_tools),
+        deps=TurnDeps(now=ctx.now, sensitive_tools=ctx.sensitive_tools),
         event_stream_handler=_persist_and_emit(claimed, queue),
         toolsets=toolsets or None,
+        capabilities=_skills_for_turn(claimed),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
@@ -372,13 +372,12 @@ async def _run_model_resume(
 ) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
-    skills = _skills_for_session(claimed)
     mcp_bundle = await load_mcp_tools(
         ctx.mcp_servers,
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
-    prompt = _prompt_for(claimed, skills, mcp_bundle)
+    prompt = _prompt_for(claimed, mcp_bundle)
     toolsets = _wrap_toolsets(mcp_bundle.toolsets, ctx.sensitive_tools)
     history = to_model_messages(prior)
     call_args = approval.arguments
@@ -401,11 +400,12 @@ async def _run_model_resume(
         deferred_tool_results=deferred_results,
         model=ctx.model,
         instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now, skills=skills, sensitive_tools=ctx.sensitive_tools),
+        deps=TurnDeps(now=ctx.now, sensitive_tools=ctx.sensitive_tools),
         event_stream_handler=_persist_and_emit(
             claimed, queue, skip_tool_call_id=approval.tool_call_id
         ),
         toolsets=toolsets or None,
+        capabilities=_skills_for_turn(claimed),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
@@ -636,6 +636,9 @@ def _text_delta(event: object) -> str | None:
 def _as_text(content: object) -> str:
     if isinstance(content, str):
         return content
+    loaded = loaded_skill_text(content)
+    if loaded is not None:
+        return loaded
     return str(content)
 
 

@@ -4,11 +4,16 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_core import SchemaValidator, core_schema
 
 from crabriks.app import create_app
 from crabriks.identity import Caller
+from crabriks.mcp import MCPServerConfig
 from crabriks.model import MissingAccessToken
 from crabriks.settings import Settings, sensitive_tools_from_env
 from crabriks.shapes import TranscriptEntry
@@ -33,6 +38,44 @@ OTHER_HEADERS = {
     "x-forwarded-email": "grace@example.com",
     "x-forwarded-access-token": "auth_header_grace",
 }
+
+
+class _QueryToolset(AbstractToolset[object]):
+    """One argument-bearing tool, so an approval can carry a secret in its arguments."""
+
+    @property
+    def id(self) -> str:
+        return "notes"
+
+    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+        del ctx
+        name = "lookup"
+        definition = ToolDefinition(
+            name=name,
+            description="Look up a note.",
+            parameters_json_schema={"type": "object"},
+        )
+        return {
+            name: ToolsetTool(
+                toolset=self,
+                tool_def=definition,
+                max_retries=1,
+                args_validator=SchemaValidator(core_schema.dict_schema()),
+            )
+        }
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, object],
+        ctx: RunContext[object],
+        tool: ToolsetTool[object],
+    ) -> str:
+        del name, tool_args, ctx, tool
+        return "ok"
+
+    async def list_tools(self) -> list[object]:
+        return [type("Tool", (), {"name": "lookup", "description": "Look up a note."})()]
 
 
 def _reply(text: str):
@@ -307,19 +350,25 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
         del messages, info
         yield {
             0: DeltaToolCall(
-                name="skills_search",
+                name="notes__lookup",
                 json_args=f'{{"query": "{user_token}"}}',
                 tool_call_id="call-skill",
             )
         }
+
+    def factory(server: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        del server, token
+        return _QueryToolset()
 
     ctx = TurnContext(
         owner_id=OWNER,
         store=store,
         model=FunctionModel(stream_function=call_sensitive),
         now=lambda: NOW,
-        sensitive_tools=("skills_search",),
+        sensitive_tools=("notes__lookup",),
         user_token=user_token,
+        mcp_servers=(MCPServerConfig(name="notes", url="https://notes.example/mcp"),),
+        mcp_toolset_factory=factory,
     )
 
     result = await run_turn(SESSION_ID, "run sensitive tool", ctx=ctx)
@@ -348,8 +397,10 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
         store=store,
         model=FunctionModel(stream_function=reply_after_approval),
         now=lambda: NOW,
-        sensitive_tools=("skills_search",),
+        sensitive_tools=("notes__lookup",),
         user_token=user_token,
+        mcp_servers=(MCPServerConfig(name="notes", url="https://notes.example/mcp"),),
+        mcp_toolset_factory=factory,
     )
     resumed = await resume_turn(SESSION_ID, approval_id, "approved", ctx=resume_ctx)
     assert resumed.status == "ok"

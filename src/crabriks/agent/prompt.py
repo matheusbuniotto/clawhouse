@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from crabriks.capabilities.bootstrap import BootstrapContext
-from crabriks.capabilities.skills import SkillCard
 from crabriks.capabilities.workspace import WorkspacePaths
 
 AGENT_NAME = "main"
@@ -22,15 +21,7 @@ class ToolCard:
 
 CLOCK = ToolCard(name=CLOCK_NAME, description=CLOCK_DESCRIPTION)
 
-SKILLS_SEARCH_NAME = "skills_search"
-SKILLS_SEARCH_DESCRIPTION = "Find relevant skills by matching name/description/goal."
-SKILLS_SEARCH = ToolCard(name=SKILLS_SEARCH_NAME, description=SKILLS_SEARCH_DESCRIPTION)
-
-SKILLS_READ_NAME = "skills_read"
-SKILLS_READ_DESCRIPTION = "Load the full skill body for an exact skill name."
-SKILLS_READ = ToolCard(name=SKILLS_READ_NAME, description=SKILLS_READ_DESCRIPTION)
-
-BUILTIN_TOOLS: tuple[ToolCard, ...] = (CLOCK, SKILLS_SEARCH, SKILLS_READ)
+BUILTIN_TOOLS: tuple[ToolCard, ...] = (CLOCK,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,19 +50,18 @@ def build_system_prompt(
     runtime: RuntimeMeta,
     bootstrap: BootstrapContext | None = None,
     workspace: WorkspacePaths | None = None,
-    skills: Sequence[SkillCard] = (),
 ) -> SystemPrompt:
     """Compose the platform agent's prompt. An agent with no tools is refused.
 
-    The prefix depends only on tools, skills, bootstrap context, and workspace.
+    The prefix depends only on tools, bootstrap context, and workspace.
     The suffix carries the session and, when given, the turn time.
+    Skill names are not repeated here; the harness catalog is the only list.
     """
     if not tools:
         raise ValueError("an agent must expose at least one tool")
     sections = (
         _identity(bootstrap),
         _tools(tools),
-        _skills(skills),
         _project(bootstrap),
         _workspace(workspace),
     )
@@ -95,13 +85,6 @@ def _identity(bootstrap: BootstrapContext | None) -> str:
 def _tools(tools: Sequence[ToolCard]) -> str:
     lines = "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
     return f"# Tools\n{lines}"
-
-
-def _skills(skills: Sequence[SkillCard]) -> str | None:
-    if not skills:
-        return None
-    lines = "\n".join(f"- {skill.name}: {skill.description}" for skill in skills)
-    return f"# Skills\n{lines}"
 
 
 def _project(bootstrap: BootstrapContext | None) -> str | None:
