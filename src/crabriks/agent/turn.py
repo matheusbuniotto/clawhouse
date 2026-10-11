@@ -319,7 +319,7 @@ class SensitiveToolGate(AbstractCapability[TurnDeps]):
 
 def _capabilities_for_turn(
     claimed: _Claimed,
-    mcp: MCPCapability | None = None,
+    mcp: MCPCapability | None,
 ) -> list[AgentCapability[TurnDeps]] | None:
     capabilities: list[AgentCapability[TurnDeps]] = []
     if mcp is not None:
@@ -333,7 +333,7 @@ def _capabilities_for_turn(
     return capabilities or None
 
 
-def _prompt_for(claimed: _Claimed, mcp: MCPCapability | None = None) -> SystemPrompt:
+def _prompt_for(claimed: _Claimed, mcp: MCPCapability | None) -> SystemPrompt:
     ctx = claimed.ctx
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)

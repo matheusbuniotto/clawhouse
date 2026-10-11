@@ -286,6 +286,7 @@ def _raw_tool_from_item(item: object, server_name: str, token: str = "") -> RawM
 def _validate_unique_servers(servers: Sequence[MCPServerConfig]) -> None:
     seen_names: set[str] = set()
     for server in servers:
+        validate_mcp_url(server.url)
         if server.name in seen_names:
             raise DuplicateMCPServerName(f"Duplicate MCP server name: {server.name!r}")
         seen_names.add(server.name)

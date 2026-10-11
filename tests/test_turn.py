@@ -14,7 +14,7 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from crabriks.mcp import MCPServerConfig
+from crabriks.mcp import InsecureMCPEndpoint, MCPServerConfig
 from crabriks.prompt import CLOCK_DESCRIPTION
 from crabriks.shapes import TranscriptEntry
 from crabriks.skills import loaded_skill_text
@@ -837,3 +837,24 @@ async def test_turn_colliding_mcp_tool_names_produce_same_suffixed_names_across_
     prompt2 = seen_prompts[1]
     assert "- system_ai__query: First query" in prompt2
     assert "- system_ai__query_1: Second query" in prompt2
+
+
+async def test_turn_fails_when_duplicate_mcp_server_names_configured() -> None:
+    servers = (
+        MCPServerConfig(name="dupe", url="https://a.example.com/mcp"),
+        MCPServerConfig(name="dupe", url="https://b.example.com/mcp"),
+    )
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=_reply("should not reply")),
+        mcp_servers=servers,
+    )
+    result = await run_turn(SESSION, "hello", ctx=ctx)
+    assert result.status == "error"
+    assert result.reply == ""
+    assert result.error == FAILED_TURN
+
+
+def test_turn_fails_when_insecure_mcp_endpoint_configured() -> None:
+    with pytest.raises(InsecureMCPEndpoint, match="must use https"):
+        MCPServerConfig(name="insecure", url="http://insecure.example.com/mcp")
