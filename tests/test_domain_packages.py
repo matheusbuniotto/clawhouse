@@ -15,8 +15,7 @@ def test_domain_agent_exports() -> None:
 
 
 def test_domain_capabilities_exports() -> None:
-    assert hasattr(cap_pkg, "load_skills")
-    assert hasattr(cap_pkg, "SkillsCatalog")
+    assert hasattr(cap_pkg, "skills_capability")
     assert hasattr(cap_pkg, "load_mcp_tools")
     assert hasattr(cap_pkg, "resolve_agent_workspace")
     assert hasattr(cap_pkg, "load_bootstrap")

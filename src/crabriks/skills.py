@@ -1,31 +1,5 @@
 """Backward-compatible facade for crabriks.capabilities.skills."""
 
-from crabriks.capabilities.skills import (
-    MAX_SKILL_SIZE,
-    DuplicateSkillName,
-    InvalidSkillFrontmatter,
-    MissingSkillField,
-    SkillError,
-    SkillFrontmatter,
-    SkillNotFoundError,
-    SkillOversizeError,
-    SkillsCache,
-    SkillsCatalog,
-    load_skills,
-    parse_skill_markdown,
-)
+from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 
-__all__ = [
-    "MAX_SKILL_SIZE",
-    "DuplicateSkillName",
-    "InvalidSkillFrontmatter",
-    "MissingSkillField",
-    "SkillError",
-    "SkillFrontmatter",
-    "SkillNotFoundError",
-    "SkillOversizeError",
-    "SkillsCache",
-    "SkillsCatalog",
-    "load_skills",
-    "parse_skill_markdown",
-]
+__all__ = ["loaded_skill_text", "skills_capability"]

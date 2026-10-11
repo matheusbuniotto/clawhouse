@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from crabriks.bootstrap import BootstrapContext, BootstrapFile
-from crabriks.prompt import CLOCK, RuntimeMeta, SkillCard, ToolCard, build_system_prompt
+from crabriks.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
 from crabriks.workspace import resolve_agent_workspace
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
@@ -62,9 +62,6 @@ Name: Crabriks.
 # Tools
 - clock: Return the current UTC time as an ISO-8601 timestamp.
 
-# Skills
-- sql: Run a warehouse query.
-
 # Project Context
 ## AGENTS.md
 Follow the agreement.
@@ -83,14 +80,12 @@ Lakebase holds sessions.
         runtime=RuntimeMeta(session_id=SESSION_A),
         bootstrap=bootstrap,
         workspace=workspace,
-        skills=(SkillCard(name="sql", description="Run a warehouse query."),),
     )
     second = build_system_prompt(
         tools=(CLOCK,),
         runtime=RuntimeMeta(session_id=SESSION_B),
         bootstrap=bootstrap,
         workspace=workspace,
-        skills=(SkillCard(name="sql", description="Run a warehouse query."),),
     )
 
     assert first.prefix == expected_prefix

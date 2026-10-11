@@ -609,7 +609,7 @@ dependencies = [
     { name = "databricks-sdk" },
     { name = "fastapi" },
     { name = "pydantic-ai" },
-    { name = "pyyaml" },
+    { name = "pydantic-ai-harness", extra = ["skills"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -631,7 +631,7 @@ requires-dist = [
     { name = "databricks-sdk", specifier = ">=0.151.0" },
     { name = "fastapi", specifier = ">=0.143.0" },
     { name = "pydantic-ai", specifier = ">=2.55.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pydantic-ai-harness", extras = ["skills"], specifier = "==0.55.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
 
@@ -1315,6 +1315,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.64.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/85/bf69dc15a066728bf477b3a3cc16a49f8712acf5a6f9271bf6494f51bb91/json_repair-0.64.0.tar.gz", hash = "sha256:2890be942a7ef20626e4eda4bd91b37485bc5271ac122efe7bb924232fef60ea", size = 53703, upload-time = "2026-10-09T09:10:33.109Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/10/98f7c8a5039b791e4801f1307f5571688b4fffa2e589eea9e16be6dcf37f/json_repair-0.64.0-py3-none-any.whl", hash = "sha256:3bf14cf14d8ae96f7bc467e6964d8accd52aaad084f973e38ebe4e43f9d051e4", size = 51984, upload-time = "2026-10-09T09:10:31.708Z" },
+]
+
+[[package]]
 name = "jsonschema"
 version = "4.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1761,6 +1770,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/52/a1/fe269bcb0ed07c00c549128095ccc62ccff6ec4eed36e68b6f7a164c57e7/pydantic_ai-2.55.0.tar.gz", hash = "sha256:b57057025a49392096821dccb6df5261880f558c9a99c470bcb0e946de10f47e", size = 28022, upload-time = "2026-10-09T19:40:48.347Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/14/eb55fb2a85072f7e7a730a285364d3648b12d6d8fa35ec924fa1084972cf/pydantic_ai-2.55.0-py3-none-any.whl", hash = "sha256:4b836463c5cb7ec462b7a8dc9d60715527bee3b11ff0136994c94d04ab5d1830", size = 10150, upload-time = "2026-10-09T19:40:32.292Z" },
+]
+
+[[package]]
+name = "pydantic-ai-harness"
+version = "0.55.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "genai-prices" },
+    { name = "httpx" },
+    { name = "json-repair" },
+    { name = "pydantic-ai-slim" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e6/90/fb4e5935ff61de52f7c420fed6112f565987da4367eadba3c766abe27077/pydantic_ai_harness-0.55.0.tar.gz", hash = "sha256:f360d5b1aa0d285e304bc3f4fc6d816ed47fdbfc0b1e0dbf4c34cc87b6f6547a", size = 1007331, upload-time = "2026-10-09T19:40:51.044Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/f4/41a2c082c43a69d5772159ba92880d027e5538a37ed7b2bcd151077b216e/pydantic_ai_harness-0.55.0-py3-none-any.whl", hash = "sha256:3212a7c2dd53642d88f39bf28d94ef6ace72439e96468992352cd67ba7d5ee25", size = 1253318, upload-time = "2026-10-09T19:40:36.51Z" },
+]
+
+[package.optional-dependencies]
+skills = [
+    { name = "pyyaml" },
 ]
 
 [[package]]

@@ -40,7 +40,6 @@ from crabriks.agent.turn import (
     resume_turn,
 )
 from crabriks.api.identity import Caller, Unauthenticated, resolve_caller
-from crabriks.capabilities.skills import SkillsCache
 from crabriks.capabilities.workspace import resolve_agent_workspace
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.store.shapes import (
@@ -144,7 +143,6 @@ def create_app(
     app.state.settings = settings
     app.state.model_for = model_for
     app.state.workspace = resolve_agent_workspace(settings.agent_root, AGENT_NAME)
-    app.state.skills_cache = SkillsCache()
     app.state.mcp_toolset_factory = mcp_toolset_factory
     _routes(app)
     return app
@@ -336,7 +334,6 @@ def _build_turn_context(
         model=model,
         now=lambda: datetime.now(UTC),
         workspace=request.app.state.workspace,
-        skills_cache=request.app.state.skills_cache,
         mcp_servers=settings.mcp_servers,
         user_token=token,
         sensitive_tools=settings.sensitive_tools,
