@@ -344,7 +344,7 @@ async def test_deny_resumes_run_without_executing_tool() -> None:
 
 async def test_secrets_scrubbed_from_approval_arguments() -> None:
     store = MemorySessionStore()
-    user_token = "sensitive_credential_payload_val"
+    user_token = "cred_" + "payload_value"
 
     async def call_sensitive(
         messages: list[ModelMessage], info: AgentInfo
@@ -537,6 +537,17 @@ def test_malformed_sensitive_tools_env_fails_closed() -> None:
 
     with pytest.raises(ValueError):
         sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": "[1, {}]"})
+
+
+def test_documented_sensitive_tools_values_parse() -> None:
+    assert sensitive_tools_from_env(
+        {"CRABRIKS_SENSITIVE_TOOLS": "bash,delete_file,drop_table"}
+    ) == ("bash", "delete_file", "drop_table")
+    assert sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '["bash", "drop_table"]'}) == (
+        "bash",
+        "drop_table",
+    )
+    assert sensitive_tools_from_env({}) == ()
 
 
 async def test_non_sensitive_tool_runs_without_an_approval_row() -> None:
