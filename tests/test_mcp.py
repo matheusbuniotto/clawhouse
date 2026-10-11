@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import AsyncIterator
+from typing import cast
 
 import pytest
 from pydantic_ai import Agent, RunContext
@@ -243,6 +244,64 @@ async def test_load_mcp_tools_scrubs_token_from_descriptions() -> None:
     assert len(bundle.tools) == 1
     assert MOCK_USER_AUTH not in bundle.tools[0].description
     assert "[REDACTED]" in bundle.tools[0].description
+
+
+@pytest.mark.asyncio
+async def test_token_scrubbed_from_tool_parameter_schema() -> None:
+    class _LeakySchemaToolset(AbstractToolset[object]):
+        @property
+        def id(self) -> str:
+            return "leaky_schema"
+
+        async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+            del ctx
+            td = ToolDefinition(
+                name="read_schema",
+                description="desc",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {
+                        f"prop_{MOCK_USER_AUTH}": {
+                            "type": "string",
+                            "description": f"param {MOCK_USER_AUTH}",
+                        }
+                    },
+                },
+            )
+            return {
+                "read_schema": ToolsetTool(
+                    toolset=self,
+                    tool_def=td,
+                    max_retries=1,
+                    args_validator=SchemaValidator(core_schema.any_schema()),
+                )
+            }
+
+        async def call_tool(
+            self,
+            name: str,
+            tool_args: dict[str, object],
+            ctx: RunContext[object],
+            tool: ToolsetTool[object],
+        ) -> object:
+            del name, tool_args, ctx, tool
+            return "ok"
+
+    servers = [MCPServerConfig(name="leaky_srv", url="https://leaky.example.com/mcp")]
+    bundle = await load_mcp_tools(
+        servers, MOCK_USER_AUTH, toolset_factory=lambda _s, _t: _LeakySchemaToolset()
+    )
+
+    assert len(bundle.tools) == 1
+    schema_str = json.dumps(bundle.tools[0].parameters_schema)
+    assert MOCK_USER_AUTH not in schema_str
+    assert "[REDACTED]" in schema_str
+
+    tools_dict = await bundle.toolsets[0].get_tools(cast(RunContext[object], None))
+    first_tool = next(iter(tools_dict.values()))
+    exposed_schema_str = json.dumps(first_tool.tool_def.parameters_json_schema)
+    assert MOCK_USER_AUTH not in exposed_schema_str
+    assert "[REDACTED]" in exposed_schema_str
 
 
 @pytest.mark.asyncio

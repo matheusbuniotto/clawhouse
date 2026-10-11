@@ -2,12 +2,14 @@ import logging
 import math
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import cast
 from urllib.parse import urlparse
 
 from fastmcp.client.transports import StreamableHttpTransport
 from pydantic_ai import RunContext
 from pydantic_ai.mcp import MCPToolset
+from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_ai.toolsets.wrapper import WrapperToolset
 
@@ -125,15 +127,47 @@ def _scrub_object(obj: object, token: str) -> object:
     if isinstance(obj, str):
         return scrub_token(obj, token)
     if isinstance(obj, dict):
-        return {k: _scrub_object(v, token) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_scrub_object(v, token) for v in obj]
+        return {
+            (scrub_token(k, token) if isinstance(k, str) else k): _scrub_object(v, token)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list | tuple):
+        items = [_scrub_object(v, token) for v in obj]
+        return tuple(items) if isinstance(obj, tuple) else items
     return obj
+
+
+def _scrub_tool_def(tool_def: ToolDefinition, token: str) -> ToolDefinition:
+    if not token:
+        return tool_def
+    desc = (
+        scrub_token(tool_def.description, token) if tool_def.description else tool_def.description
+    )
+    raw_schema = tool_def.parameters_json_schema
+    scrubbed_schema = (
+        cast(dict[str, object], _scrub_object(raw_schema, token))
+        if isinstance(raw_schema, dict)
+        else raw_schema
+    )
+    return replace(
+        tool_def,
+        description=desc,
+        parameters_json_schema=scrubbed_schema,
+    )
 
 
 @dataclass
 class ScrubbingToolset(WrapperToolset[object]):
     token: str
+
+    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+        tools = await self.wrapped.get_tools(ctx)
+        if not self.token:
+            return tools
+        return {
+            name: replace(t, tool_def=_scrub_tool_def(t.tool_def, self.token))
+            for name, t in tools.items()
+        }
 
     async def call_tool(
         self,
@@ -201,11 +235,14 @@ def _raw_tool_from_item(item: object, server_name: str, token: str = "") -> RawM
         desc = getattr(tool_def, "description", "") or ""
     if schema is None and tool_def is not None:
         schema = getattr(tool_def, "parameters_json_schema", None)
+    scrubbed_schema = (
+        cast(dict[str, object], _scrub_object(schema, token)) if isinstance(schema, dict) else None
+    )
     return RawMCPTool(
         server_name=server_name,
         tool_name=name,
         description=scrub_token(desc, token),
-        parameters_schema=schema,
+        parameters_schema=scrubbed_schema,
     )
 
 
