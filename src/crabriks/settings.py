@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from crabriks.mcp import DuplicateMCPServerName, MCPServerConfig
-from crabriks.model import ModelEntry
+from crabriks.agent.model import ModelEntry
+from crabriks.capabilities.mcp import DuplicateMCPServerName, MCPServerConfig
 
 MODELS_ENV = "CRABRIKS_MODELS"
 MCP_SERVERS_ENV = "CRABRIKS_MCP_SERVERS"

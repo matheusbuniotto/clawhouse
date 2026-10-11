@@ -1,88 +1,113 @@
-# Crabriks
+# Crabriks 🦀
 
-## Development Setup
+> Databricks-native agent runtime & chat app powered by **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
 
-This project uses [uv](https://github.com/astral-sh/uv) and [prek](https://github.com/j178/prek) (Rust-powered Git hook manager).
+---
 
-### 1. Environment Setup
+## Architecture
 
+Crabriks is organized into clean domain boundaries with zero circular dependencies:
+
+```
+src/crabriks/
+├── agent/         # Reasoning engine, prompt composition, turn execution, models
+├── capabilities/  # Tools, skill catalogs (SKILL.md), Model Context Protocol (MCP)
+├── api/           # FastAPI chat endpoints, SSE streaming, Databricks SSO identity
+├── store/         # Lakebase Postgres (OAuth-authenticated) & in-memory session store
+└── settings.py    # Environment configuration & typed settings
+```
+
+---
+
+## Quickstart
+
+### 1. Install dependencies
 ```bash
-# Pin and install Python 3.11 with all dev dependencies
 uv sync
 ```
 
-### 2. Git Hooks & Quality Gate (`prek`)
-
-Git hook shims are installed using `prek`:
-
+### 2. Run locally
 ```bash
-# Install git hooks into .git/hooks/pre-commit
-prek install
-
-# Run checks against staged files (runs automatically on git commit)
-prek run
-
-# Run checks on all files
-prek run -a
+CRABRIKS_DEV_USER=you@example.com \
+CRABRIKS_STORE=memory \
+uv run uvicorn crabriks.app:app --reload
 ```
+Open **`http://localhost:8000/chat`**.
 
-> **Fallback:** If `prek` is not installed globally, you can also run `uv run pre-commit run -a`.
+> **Note**: To execute turns locally, provide `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and `SERVING_ENDPOINT`.
 
-### 3. Manual Checks
+---
 
-```bash
-# Fast lint & format auto-fix
-uv run ruff check --fix .
-uv run ruff format .
+## Features
 
-# Cognitive complexity gate
-uv run complexipy src --max-complexity-allowed 15
+- **Databricks Native**: Deploys as a Databricks App with SSO reverse-proxy header auth (`X-Forwarded-Access-Token`).
+- **Lakebase Storage**: Sessions, transcripts, and run locks persist in managed Lakebase Postgres with auto-minted OAuth tokens.
+- **Multi-Model Picker**: Defaults to Databricks Model Serving; supports any OpenAI-compatible provider (OpenRouter, local gateways).
+- **Tool Capabilities**:
+  - **Skills**: Discover and run markdown-based skills (`claw/agents/main/skills/*/SKILL.md`).
+  - **MCP**: Connect to Model Context Protocol HTTP endpoints with automatic secret scrubbing.
+  - **Approvals & Guardrails**: Pause sensitive tool calls for interactive approval before execution.
 
-# Type check
-uv run pyright
-```
+---
 
-### 4. Run the chat page
+## Model Providers
 
-```bash
-CRABRIKS_DEV_USER=you@example.com CRABRIKS_STORE=memory \
-  uv run uvicorn crabriks.app:app --reload
-```
-
-The page is at <http://localhost:8000/chat>. A turn needs a Databricks user token and a serving endpoint. Forward the token as `X-Forwarded-Access-Token`, or set `DATABRICKS_TOKEN` when the caller is `CRABRIKS_DEV_USER`. Also set `SERVING_ENDPOINT` and `DATABRICKS_HOST`. Without them the page loads, and a turn returns 401 or 503.
-
-On Databricks Apps, `app.yaml` names the serving endpoint and the Lakebase Autoscaling endpoint. The platform injects `PGHOST`, `PGUSER`, `PGDATABASE`, `PGPORT`, and `PGSSLMODE`. The app mints a short-lived database password from `LAKEBASE_ENDPOINT`. Create the app with user-authorization scope `model-serving`, or the forwarded user token cannot call the endpoint. Do not set `CRABRIKS_DEV_USER` or `DATABRICKS_TOKEN` on the deployed app.
-
-### Model providers
-
-The chat picker lists every configured model. Databricks Model Serving is the default when `SERVING_ENDPOINT` and `DATABRICKS_HOST` are set. Add any OpenAI-compatible provider (OpenRouter, a gateway, a self-hosted server) with `CRABRIKS_MODELS`, a JSON array whose `api_key_env` names where the secret is read from — the catalog never holds the key itself:
+Add external OpenAI-compatible endpoints via `CRABRIKS_MODELS`:
 
 ```bash
-CRABRIKS_MODELS='[
+export CRABRIKS_MODELS='[
   {
     "id": "openrouter-llama-3.3-70b",
-    "label": "Llama 3.3 70B · OpenRouter",
+    "label": "Llama 3.3 70B (OpenRouter)",
     "model": "meta-llama/llama-3.3-70b-instruct",
     "base_url": "https://openrouter.ai/api/v1",
     "api_key_env": "OPENROUTER_API_KEY"
   }
 ]'
-OPENROUTER_API_KEY=sk-or-...
+export OPENROUTER_API_KEY=sk-or-...
 ```
 
-A turn carries the picked model id (`{"message": "...", "model": "..."}`); an unknown id is rejected with 422, and omitting it uses the default. The picker is display only — Databricks remains the only provider that uses the per-request user token.
+---
 
-### Deploy to another workspace
+## Sensitive Tool Guardrails
 
-`databricks.yml` is a bundle that creates the app and its three resources, so another workspace (or a Marketplace install) does not have to build them by hand:
+Protect destructive or privileged tools with interactive user approvals:
+
+```bash
+export CRABRIKS_SENSITIVE_TOOLS="bash,delete_file,drop_table"
+```
+
+Pending approvals freeze the run and appear in the UI approvals inbox (`/approvals`).
+
+---
+
+## Deploy to Databricks
+
+Deploy as a Databricks Asset Bundle (DAB):
 
 ```bash
 databricks bundle deploy --profile <PROFILE> \
   --var serving_endpoint=databricks-meta-llama-3-3-70b-instruct \
-  --var postgres_branch=<branch> \
-  --var postgres_database=<database> \
-  --var provider_secret_scope=<scope> \
-  --var provider_secret_key=<key>
+  --var postgres_branch=projects/crabriks/branches/production \
+  --var postgres_database=projects/crabriks/branches/production/databases/databricks-postgres
 ```
 
-The bundle attaches the serving endpoint, the Lakebase database, and the provider secret, and mirrors `app.yaml`. To share the app with just Databricks and no extra provider, drop the `OPENROUTER_API_KEY` and `CRABRIKS_MODELS` env entries and the `openrouter-api-key` resource from both files. If the app already exists, bind it first (`databricks bundle deployment bind`) or deploy by name (`databricks apps deploy crabriks`) to use the API flow.
+---
+
+## Quality Gates
+
+Crabriks enforces zero-warning code quality across all files:
+
+```bash
+prek run -a          # Fast staged / all-file checks (ruff, complexipy, pyright)
+uv run pytest        # Run test suite
+```
+
+Manual checks:
+```bash
+uv run ruff check --fix . && uv run ruff format .
+uv run complexipy src --max-complexity-allowed 15
+uv run pyright
+uv run vulture src --min-confidence 80
+npx jscpd@5 src --threshold 3 --min-lines 5 --min-tokens 50
+```
