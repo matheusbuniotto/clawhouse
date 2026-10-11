@@ -39,7 +39,12 @@ test:
 
 check:
 	@echo "==> Running quality gates (prek)..."
-	@which prek >/dev/null 2>&1 && prek run -a || (uv run ruff check . && uv run ruff format --check . && uv run complexipy src --max-complexity-allowed 15 && uv run pyright)
+	@if command -v prek >/dev/null 2>&1; then \
+		prek run -a; \
+	else \
+		echo "prek is not installed; running ruff, complexipy, and pyright"; \
+		uv run ruff check . && uv run ruff format --check . && uv run complexipy src --max-complexity-allowed 15 && uv run pyright; \
+	fi
 	@echo "==> Running pytest test suite..."
 	uv run pytest
 
