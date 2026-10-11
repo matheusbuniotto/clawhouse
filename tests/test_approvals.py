@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -9,7 +10,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from crabriks.app import create_app
 from crabriks.identity import Caller
 from crabriks.model import MissingAccessToken
-from crabriks.settings import Settings
+from crabriks.settings import Settings, sensitive_tools_from_env
 from crabriks.shapes import TranscriptEntry
 from crabriks.store import (
     ApprovalAlreadyResolved,
@@ -464,3 +465,11 @@ async def test_approvals_api_lifecycle_and_guardrails() -> None:
             headers=HEADERS,
         )
         assert repeat_resp.status_code == 409
+
+
+def test_malformed_sensitive_tools_env_fails_closed() -> None:
+    with pytest.raises(json.JSONDecodeError):
+        sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '["unclosed_string'})
+
+    with pytest.raises(ValueError):
+        sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '{"invalid": "not_a_list"}'})

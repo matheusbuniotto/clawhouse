@@ -47,11 +47,12 @@ def sensitive_tools_from_env(env: Mapping[str, str]) -> tuple[str, ...]:
     raw = env.get("CRABRIKS_SENSITIVE_TOOLS")
     if not raw:
         return ()
-    if raw.startswith("["):
-        try:
-            return tuple(str(x) for x in json.loads(raw))
-        except (ValueError, TypeError):
-            return ()
+    stripped = raw.strip()
+    if stripped.startswith(("[", "{")):
+        loaded = json.loads(stripped)
+        if not isinstance(loaded, list):
+            raise ValueError("CRABRIKS_SENSITIVE_TOOLS JSON must be a list of tool names")
+        return tuple(str(x) for x in loaded)
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
