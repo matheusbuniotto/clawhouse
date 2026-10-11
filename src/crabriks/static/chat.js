@@ -1,3 +1,4 @@
+import { appendToolActivity, markRunningToolsError, renderAssistantTurn, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "crabriks.session";
 const MODEL_KEY = "crabriks.model";
 const log = document.querySelector("#log");
@@ -18,6 +19,7 @@ const statusLine = statusNode;
 const modelPicker = modelSelect;
 const sendButton = send;
 let draft = null;
+let draftText = "";
 function sessionId() {
     const fromUrl = new URLSearchParams(location.search).get("session");
     if (fromUrl) {
@@ -43,16 +45,19 @@ function showEmpty() {
 }
 function renderEntry(entry) {
     if (entry.role === "user") {
-        transcript.append(el("p", "bubble user", entry.content));
+        transcript.append(renderUserTurn(entry.content));
         return;
     }
     if (entry.role === "assistant") {
-        transcript.append(el("p", "bubble assistant", entry.content));
+        transcript.append(renderAssistantTurn(entry.content));
         return;
     }
-    const label = entry.role === "tool_call" ? "call" : "result";
     const name = entry.tool_name ?? "tool";
-    transcript.append(el("p", "tool", `${name} ${label} ${entry.content}`));
+    if (entry.role === "tool_call") {
+        appendToolActivity(transcript, { event: "tool_call", name, arguments: entry.content });
+        return;
+    }
+    appendToolActivity(transcript, { event: "tool_result", name, content: entry.content });
 }
 function renderTranscript(entries) {
     dropDraft();
@@ -66,25 +71,25 @@ function renderTranscript(entries) {
     transcript.scrollTop = transcript.scrollHeight;
 }
 function ensureDraft() {
-    const empty = transcript.querySelector(".empty");
-    empty?.remove();
+    transcript.querySelector(".empty")?.remove();
     if (draft)
         return draft;
-    draft = el("p", "bubble assistant draft");
+    draft = document.createElement("article");
+    draft.className = "assistant draft";
     draft.dataset.draft = "true";
     transcript.append(draft);
+    draftText = "";
     return draft;
 }
 function dropDraft() {
     draft?.remove();
     draft = null;
+    draftText = "";
 }
 function commitReply(reply) {
-    const node = ensureDraft();
-    node.textContent = reply;
-    node.classList.remove("draft");
-    delete node.dataset.draft;
-    draft = null;
+    const text = reply || draftText;
+    dropDraft();
+    transcript.append(renderAssistantTurn(text));
 }
 function setBusy(busy) {
     input.disabled = busy;
@@ -147,15 +152,24 @@ function parseFrame(raw) {
 function onFrame(frame) {
     const payload = JSON.parse(frame.data);
     if (frame.event === "token" && payload.text) {
-        ensureDraft().textContent = `${ensureDraft().textContent ?? ""}${payload.text}`;
+        draftText += payload.text;
+        ensureDraft().textContent = draftText;
         return;
     }
     if (frame.event === "tool_call") {
-        transcript.append(el("p", "tool", `${payload.name ?? "tool"} call ${payload.arguments ?? ""}`));
+        appendToolActivity(transcript, {
+            event: "tool_call",
+            name: payload.name ?? "tool",
+            arguments: payload.arguments ?? "",
+        });
         return;
     }
     if (frame.event === "tool_result") {
-        transcript.append(el("p", "tool", `${payload.name ?? "tool"} result ${payload.content ?? ""}`));
+        appendToolActivity(transcript, {
+            event: "tool_result",
+            name: payload.name ?? "tool",
+            content: payload.content ?? "",
+        });
         return;
     }
     if (frame.event === "done") {
@@ -164,8 +178,10 @@ function onFrame(frame) {
         return;
     }
     if (frame.event === "error") {
+        const failure = payload.error ?? "The turn failed before a reply was completed.";
+        markRunningToolsError(transcript, failure);
         dropDraft();
-        setStatus(payload.error ?? "The turn failed before a reply was completed.");
+        setStatus(failure);
     }
 }
 async function readSse(response) {
@@ -213,7 +229,7 @@ async function sendMessage(text) {
         return;
     }
     transcript.querySelector(".empty")?.remove();
-    transcript.append(el("p", "bubble user", text));
+    transcript.append(renderUserTurn(text));
     let finished = false;
     try {
         finished = await readSse(response);
@@ -247,4 +263,3 @@ modelPicker.addEventListener("change", () => {
 void loadIdentity();
 void loadModels();
 void loadTranscript();
-export {};
