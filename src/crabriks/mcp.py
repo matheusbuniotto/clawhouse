@@ -1,0 +1,210 @@
+import logging
+import re
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+from fastmcp.client.transports import StreamableHttpTransport
+from pydantic_ai.mcp import MCPToolset
+from pydantic_ai.toolsets import AbstractToolset
+
+logger = logging.getLogger("crabriks.mcp")
+
+
+class InsecureMCPEndpoint(ValueError):
+    """MCP server endpoints must use https in v1."""
+
+
+def validate_mcp_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https":
+        raise InsecureMCPEndpoint(f"MCP server URL must use https: {url}")
+
+
+@dataclass(frozen=True, slots=True)
+class MCPServerConfig:
+    name: str
+    url: str
+    timeout_seconds: float = 30.0
+
+    def __post_init__(self) -> None:
+        validate_mcp_url(self.url)
+
+
+MAX_TOOL_NAME_LENGTH = 64
+
+
+def sanitize_identifier(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "_", value)
+    return cleaned.strip("_") or "tool"
+
+
+def safe_tool_name(server_name: str, tool_name: str) -> str:
+    safe_srv = sanitize_identifier(server_name)
+    safe_tool = sanitize_identifier(tool_name)
+    combined = f"{safe_srv}__{safe_tool}"
+    return combined[:MAX_TOOL_NAME_LENGTH]
+
+
+@dataclass(frozen=True, slots=True)
+class RawMCPTool:
+    server_name: str
+    tool_name: str
+    description: str
+    parameters_schema: dict[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DisambiguatedTool:
+    server_name: str
+    original_name: str
+    safe_name: str
+    description: str
+    parameters_schema: dict[str, object] | None = None
+
+
+def disambiguate_tool_names(
+    tools: Sequence[RawMCPTool],
+    max_length: int = MAX_TOOL_NAME_LENGTH,
+) -> list[DisambiguatedTool]:
+    used_names: set[str] = set()
+    results: list[DisambiguatedTool] = []
+    # Sort deterministically by (server_name, tool_name) prior to suffix disambiguation
+    sorted_tools = sorted(tools, key=lambda t: (t.server_name, t.tool_name))
+
+    for raw in sorted_tools:
+        base = safe_tool_name(raw.server_name, raw.tool_name)[:max_length]
+        if base not in used_names:
+            assigned = base
+        else:
+            counter = 1
+            while True:
+                suffix = f"_{counter}"
+                prefix = base[: max_length - len(suffix)]
+                candidate = f"{prefix}{suffix}"
+                if candidate not in used_names:
+                    assigned = candidate
+                    break
+                counter += 1
+        used_names.add(assigned)
+        results.append(
+            DisambiguatedTool(
+                server_name=raw.server_name,
+                original_name=raw.tool_name,
+                safe_name=assigned,
+                description=raw.description,
+                parameters_schema=raw.parameters_schema,
+            )
+        )
+
+    # Sort deterministically by safe name
+    results.sort(key=lambda t: t.safe_name)
+    return results
+
+
+def scrub_token(text: str, token: str) -> str:
+    if not token or not text:
+        return text
+    return text.replace(token, "[REDACTED]")
+
+
+@dataclass(frozen=True, slots=True)
+class MCPBundle:
+    tools: tuple[DisambiguatedTool, ...]
+    toolsets: tuple[AbstractToolset, ...]
+
+
+def create_mcp_toolset(server: MCPServerConfig, token: str) -> MCPToolset:
+    validate_mcp_url(server.url)
+    headers = {"Authorization": f"Bearer {token}"} if token else None
+    transport = StreamableHttpTransport(server.url, headers=headers)
+    return MCPToolset(
+        transport,
+        init_timeout=server.timeout_seconds,
+        read_timeout=server.timeout_seconds,
+    )
+
+
+async def _fetch_server_tools(
+    toolset: AbstractToolset[object],
+    server_name: str,
+    token: str = "",
+) -> list[RawMCPTool]:
+    list_tools_fn = getattr(toolset, "list_tools", None)
+    if callable(list_tools_fn):
+        res = list_tools_fn()
+        raw_items = (await res) if isinstance(res, Awaitable) else res
+        items = list(raw_items) if isinstance(raw_items, list | tuple) else []
+    else:
+        dict_tools = await toolset.get_tools(None)  # type: ignore[arg-type]
+        items = list(dict_tools.values())
+    return [_raw_tool_from_item(item, server_name, token) for item in items if _item_name(item)]
+
+
+def _item_name(item: object) -> str:
+    name = getattr(item, "name", None)
+    tool_def = getattr(item, "tool_def", None)
+    if name is None and tool_def is not None:
+        name = getattr(tool_def, "name", None)
+    return str(name or "")
+
+
+def _raw_tool_from_item(item: object, server_name: str, token: str = "") -> RawMCPTool:
+    name = _item_name(item)
+    desc = getattr(item, "description", None) or ""
+    schema = getattr(item, "input_schema", None)
+    tool_def = getattr(item, "tool_def", None)
+    if not desc and tool_def is not None:
+        desc = getattr(tool_def, "description", "") or ""
+    if schema is None and tool_def is not None:
+        schema = getattr(tool_def, "parameters_json_schema", None)
+    return RawMCPTool(
+        server_name=server_name,
+        tool_name=name,
+        description=scrub_token(desc, token),
+        parameters_schema=schema,
+    )
+
+
+async def load_mcp_tools(
+    servers: Sequence[MCPServerConfig],
+    token: str,
+    *,
+    toolset_factory: Callable[[MCPServerConfig, str], AbstractToolset[object]] | None = None,
+) -> MCPBundle:
+    raw_tools: list[RawMCPTool] = []
+    server_toolsets: dict[str, AbstractToolset[object]] = {}
+
+    for server in servers:
+        try:
+            toolset = (
+                toolset_factory(server, token)
+                if toolset_factory is not None
+                else create_mcp_toolset(server, token)
+            )
+            tools = await _fetch_server_tools(toolset, server.name, token)
+            raw_tools.extend(tools)
+            server_toolsets[server.name] = toolset
+        except Exception as exc:  # noqa: BLE001
+            scrubbed = scrub_token(str(exc), token)
+            logger.warning(
+                "MCP server %r omitted; tools/list failed: %s",
+                server.name,
+                scrubbed,
+            )
+            continue
+
+    disambiguated = disambiguate_tool_names(raw_tools)
+    active_toolsets: list[AbstractToolset[object]] = []
+
+    for server_name, toolset in server_toolsets.items():
+        name_map = {
+            t.safe_name: t.original_name for t in disambiguated if t.server_name == server_name
+        }
+        if name_map:
+            active_toolsets.append(toolset.renamed(name_map))
+
+    return MCPBundle(
+        tools=tuple(disambiguated),
+        toolsets=tuple(active_toolsets),
+    )

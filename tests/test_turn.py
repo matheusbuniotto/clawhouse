@@ -7,9 +7,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_core import SchemaValidator, core_schema
 
+from crabriks.mcp import MCPServerConfig
 from crabriks.prompt import (
     CLOCK_DESCRIPTION,
     SKILLS_READ_DESCRIPTION,
@@ -39,13 +44,16 @@ EXPECTED_TIME = "2026-10-10T12:00:00Z"
 CALL_ID = "call-clock"
 
 
-def _ctx(
+def _ctx(  # noqa: PLR0913
     store: MemorySessionStore,
     model: FunctionModel,
     *,
     owner: str = OWNER,
     emit: list[TurnNotice] | None = None,
     workspace: WorkspacePaths | None = None,
+    mcp_servers: tuple[MCPServerConfig, ...] = (),
+    user_token: str = "",
+    mcp_toolset_factory: object = None,
 ) -> TurnContext:
     async def capture(notice: TurnNotice) -> None:
         if emit is not None:
@@ -58,6 +66,9 @@ def _ctx(
         now=lambda: FROZEN,
         emit=capture,
         workspace=workspace,
+        mcp_servers=mcp_servers,
+        user_token=user_token,
+        mcp_toolset_factory=mcp_toolset_factory,  # type: ignore[arg-type]
     )
 
 
@@ -450,3 +461,271 @@ async def test_turn_skills_discovery_is_cached_per_session(tmp_path: Path) -> No
     third = await run_turn(other_session, "third turn", ctx=ctx)
     assert third.status == "ok"
     assert "- sql: Modified description." in seen[2]
+
+
+class _MockUCToolset(AbstractToolset[object]):
+    @property
+    def id(self) -> str:
+        return "system_ai_srv"
+
+    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+        del ctx
+        tool_def = ToolDefinition(
+            name="describe_table",
+            description="Describe columns of a Unity Catalog table",
+            parameters_json_schema={
+                "type": "object",
+                "properties": {"table": {"type": "string"}},
+                "required": ["table"],
+            },
+        )
+        return {
+            "describe_table": ToolsetTool(
+                toolset=self,
+                tool_def=tool_def,
+                max_retries=1,
+                args_validator=SchemaValidator(core_schema.dict_schema()),
+            )
+        }
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, object],
+        ctx: RunContext[object],
+        tool: ToolsetTool[object],
+    ) -> object:
+        del name, ctx, tool
+        table = str(tool_args.get("table", ""))
+        return json.dumps(
+            {
+                "table": table,
+                "columns": ["trip_id", "pickup_time", "fare_amount"],
+            }
+        )
+
+    async def list_tools(self) -> list[object]:
+        return [
+            type(
+                "Tool",
+                (),
+                {
+                    "name": "describe_table",
+                    "description": "Describe columns of a Unity Catalog table",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"table": {"type": "string"}},
+                    },
+                },
+            )()
+        ]
+
+
+class _MockSecondaryToolset(AbstractToolset[object]):
+    @property
+    def id(self) -> str:
+        return "billing_srv"
+
+    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+        del ctx
+        tool_def = ToolDefinition(
+            name="get_balance",
+            description="Get billing balance",
+            parameters_json_schema={"type": "object"},
+        )
+        return {
+            "get_balance": ToolsetTool(
+                toolset=self,
+                tool_def=tool_def,
+                max_retries=1,
+                args_validator=SchemaValidator(core_schema.dict_schema()),
+            )
+        }
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, object],
+        ctx: RunContext[object],
+        tool: ToolsetTool[object],
+    ) -> object:
+        del name, tool_args, ctx, tool
+        return '{"balance": 100}'
+
+    async def list_tools(self) -> list[object]:
+        return [
+            type(
+                "Tool",
+                (),
+                {
+                    "name": "get_balance",
+                    "description": "Get billing balance",
+                    "input_schema": {"type": "object"},
+                },
+            )()
+        ]
+
+
+class _MockFailingServerToolset(AbstractToolset[object]):
+    @property
+    def id(self) -> str:
+        return "fail_srv"
+
+    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+        del ctx
+        return {}
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, object],
+        ctx: RunContext[object],
+        tool: ToolsetTool[object],
+    ) -> object:
+        del name, tool_args, ctx, tool
+        return "err"
+
+    async def list_tools(self) -> list[object]:
+        raise RuntimeError("Server unavailable")
+
+
+async def test_turn_includes_mcp_tools_in_prompt_ordered_deterministically() -> None:
+    seen_instructions: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen_instructions.append(info.instructions or "")
+        yield "ok"
+
+    servers = (
+        MCPServerConfig(name="system.ai", url="https://adb-1.databricks.com/mcp"),
+        MCPServerConfig(name="billing", url="https://billing.databricks.com/mcp"),
+    )
+
+    def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        del token
+        if srv.name == "billing":
+            return _MockSecondaryToolset()
+        return _MockUCToolset()
+
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=capture),
+        mcp_servers=servers,
+        mcp_toolset_factory=factory,
+    )
+
+    result = await run_turn(SESSION, "hello", ctx=ctx)
+    assert result.status == "ok"
+    assert len(seen_instructions) == 1
+    prompt = seen_instructions[0]
+
+    billing_pos = prompt.find("- billing__get_balance: Get billing balance")
+    uc_pos = prompt.find("- system_ai__describe_table: Describe columns of a Unity Catalog table")
+    assert billing_pos != -1
+    assert uc_pos != -1
+    # billing alphabetically precedes system_ai
+    assert billing_pos < uc_pos
+
+
+async def test_turn_survives_when_mcp_server_tools_list_fails() -> None:
+    seen_instructions: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen_instructions.append(info.instructions or "")
+        yield "survived"
+
+    servers = (
+        MCPServerConfig(name="fail", url="https://fail.databricks.com/mcp"),
+        MCPServerConfig(name="system.ai", url="https://adb-1.databricks.com/mcp"),
+    )
+
+    def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        del token
+        if srv.name == "fail":
+            return _MockFailingServerToolset()
+        return _MockUCToolset()
+
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=capture),
+        mcp_servers=servers,
+        mcp_toolset_factory=factory,
+    )
+
+    result = await run_turn(SESSION, "hello", ctx=ctx)
+    assert result.status == "ok"
+    assert result.reply == "survived"
+    prompt = seen_instructions[0]
+    assert "- system_ai__describe_table:" in prompt
+    assert "fail__" not in prompt
+
+
+async def test_turn_demo_agent_answers_unity_catalog_question_through_mcp_tool() -> None:
+    uc_tool_call_id = "call-uc-describe"
+
+    async def uc_assistant(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        tool_returns = [
+            getattr(part, "content", None)
+            for message in messages
+            for part in message.parts
+            if getattr(part, "part_kind", None) == "tool-return"
+        ]
+        if not tool_returns:
+            yield {
+                0: DeltaToolCall(
+                    name="system_ai__describe_table",
+                    json_args=json.dumps({"table": "main.default.trips"}),
+                    tool_call_id=uc_tool_call_id,
+                )
+            }
+            return
+
+        assert "trip_id" in str(tool_returns[0])
+        yield "Table main.default.trips has columns: trip_id, pickup_time, fare_amount."
+
+    emitted_notices: list[TurnNotice] = []
+    servers = (MCPServerConfig(name="system.ai", url="https://adb-1.databricks.com/mcp"),)
+
+    def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        assert token == "dapi-user-test-token"
+        return _MockUCToolset()
+
+    ctx = _ctx(
+        MemorySessionStore(),
+        FunctionModel(stream_function=uc_assistant),
+        emit=emitted_notices,
+        mcp_servers=servers,
+        user_token="dapi-user-test-token",
+        mcp_toolset_factory=factory,
+    )
+
+    result = await run_turn(
+        SESSION,
+        "What are the columns of the unity catalog table main.default.trips?",
+        ctx=ctx,
+    )
+
+    assert result.status == "ok"
+    assert "trip_id, pickup_time, fare_amount" in result.reply
+
+    # Assert transcript entries
+    roles = [entry.role for entry in result.transcript]
+    assert roles == ["user", "tool_call", "tool_result", "assistant"]
+    assert result.transcript[1].tool_name == "system_ai__describe_table"
+    assert result.transcript[1].tool_call_id == uc_tool_call_id
+    assert "main.default.trips" in result.transcript[1].content
+    assert "trip_id" in result.transcript[2].content
+
+    # Assert streamed notices
+    call_notices = [n for n in emitted_notices if isinstance(n, ToolCallNotice)]
+    result_notices = [n for n in emitted_notices if isinstance(n, ToolResultNotice)]
+    assert len(call_notices) == 1
+    assert call_notices[0].name == "system_ai__describe_table"
+    assert len(result_notices) == 1
+    assert result_notices[0].name == "system_ai__describe_table"
+    assert "trip_id" in result_notices[0].content

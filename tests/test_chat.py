@@ -8,11 +8,16 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_core import SchemaValidator, core_schema
 
 from crabriks.app import create_app
 from crabriks.identity import Caller
+from crabriks.mcp import MCPServerConfig
 from crabriks.model import MissingAccessToken, ModelEntry, UnknownModel
 from crabriks.settings import Settings
 from crabriks.store import MemorySessionStore
@@ -448,3 +453,118 @@ async def test_static_assets_are_served(path: str) -> None:
         response = await client.get(path)
     assert response.status_code == 200
     assert response.text
+
+
+class _UCServer(AbstractToolset[object]):
+    @property
+    def id(self) -> str:
+        return "uc"
+
+    async def get_tools(self, ctx: RunContext[object]) -> dict[str, ToolsetTool[object]]:
+        del ctx
+        tdef = ToolDefinition(
+            name="list_catalogs",
+            description="List UC catalogs",
+            parameters_json_schema={"type": "object"},
+        )
+        return {
+            "list_catalogs": ToolsetTool(
+                toolset=self,
+                tool_def=tdef,
+                max_retries=1,
+                args_validator=SchemaValidator(core_schema.dict_schema()),
+            )
+        }
+
+    async def call_tool(
+        self,
+        name: str,
+        tool_args: dict[str, object],
+        ctx: RunContext[object],
+        tool: ToolsetTool[object],
+    ) -> object:
+        del name, tool_args, ctx, tool
+        return '{"catalogs": ["main", "system"]}'
+
+    async def list_tools(self) -> list[object]:
+        return [
+            type(
+                "T",
+                (),
+                {
+                    "name": "list_catalogs",
+                    "description": "List UC catalogs",
+                    "input_schema": {},
+                },
+            )()
+        ]
+
+
+async def test_chat_turn_executes_mcp_tool_with_user_token_and_streams_notices() -> None:
+    captured_tokens: list[str] = []
+
+    def factory(srv: MCPServerConfig, token: str) -> AbstractToolset[object]:
+        del srv
+        captured_tokens.append(token)
+        return _UCServer()
+
+    async def model_stream(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        tool_returns = [
+            getattr(part, "content", None)
+            for message in messages
+            for part in message.parts
+            if getattr(part, "part_kind", None) == "tool-return"
+        ]
+        if not tool_returns:
+            yield {
+                0: DeltaToolCall(
+                    name="system_ai__list_catalogs",
+                    json_args="{}",
+                    tool_call_id="call-uc-cat",
+                )
+            }
+            return
+        yield "Found catalogs: main, system"
+
+    store = MemorySessionStore()
+    settings = Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host=None,
+        mcp_servers=(MCPServerConfig(name="system.ai", url="https://adb-1.databricks.com/mcp"),),
+    )
+
+    def model_for(caller: Caller, model_id: str | None) -> FunctionModel:
+        del caller, model_id
+        return FunctionModel(stream_function=model_stream)
+
+    app = create_app(
+        settings=settings,
+        model_for=model_for,
+        store=store,
+        mcp_toolset_factory=factory,
+    )
+
+    async with _client(app) as client:
+        resp = await client.post(
+            f"/api/sessions/{SESSION}/turns",
+            headers={
+                "x-forwarded-email": "ada@example.com",
+                "x-forwarded-access-token": "dapi-user-xyz",
+            },
+            json={"message": "list catalogs"},
+        )
+
+    assert resp.status_code == 200
+    events = _events(resp.text)
+    event_types = [e[0] for e in events]
+    assert "tool_call" in event_types
+    assert "tool_result" in event_types
+    assert "done" in event_types
+
+    assert captured_tokens == ["dapi-user-xyz"]
+    assert "dapi-user-xyz" not in resp.text

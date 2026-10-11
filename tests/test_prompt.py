@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from crabriks.bootstrap import BootstrapContext, BootstrapFile
-from crabriks.prompt import CLOCK, RuntimeMeta, SkillCard, build_system_prompt
+from crabriks.prompt import CLOCK, RuntimeMeta, SkillCard, ToolCard, build_system_prompt
 from crabriks.workspace import resolve_agent_workspace
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
@@ -160,6 +160,24 @@ def test_a_truncation_notice_appears_once_and_names_no_file() -> None:
         "Bootstrap context was truncated to fit the budget."
     )
     assert project in prompt.text
+
+
+def test_system_prompt_preserves_deterministic_order_of_tools() -> None:
+    prompt = build_system_prompt(
+        tools=(
+            CLOCK,
+            ToolCard(name="billing__get_balance", description="Get billing balance"),
+            ToolCard(name="system_ai__describe_table", description="Describe table"),
+        ),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+    )
+    tools_section = (
+        "# Tools\n"
+        "- clock: Return the current UTC time as an ISO-8601 timestamp.\n"
+        "- billing__get_balance: Get billing balance\n"
+        "- system_ai__describe_table: Describe table"
+    )
+    assert tools_section in prompt.prefix
 
 
 _NAMES = ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")

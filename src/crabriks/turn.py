@@ -19,11 +19,13 @@ from pydantic_ai.messages import (
     TextPartDelta,
 )
 from pydantic_ai.models import Model
+from pydantic_ai.toolsets import AbstractToolset
 
 from crabriks.agent import TurnDeps, crabriks_agent, format_utc
 from crabriks.bootstrap import BootstrapContext, load_bootstrap
 from crabriks.history import to_model_messages
-from crabriks.prompt import BUILTIN_TOOLS, RuntimeMeta, build_system_prompt
+from crabriks.mcp import MCPServerConfig, load_mcp_tools, scrub_token
+from crabriks.prompt import BUILTIN_TOOLS, RuntimeMeta, ToolCard, build_system_prompt
 from crabriks.shapes import TranscriptEntry, TurnResult, TurnStatus
 from crabriks.skills import SkillsCache, SkillsCatalog, load_skills
 from crabriks.store import RunInProgress, SessionForbidden, SessionStore
@@ -68,6 +70,7 @@ class ToolResultNotice:
 TurnNotice = Token | ToolCallNotice | ToolResultNotice
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
+MCPToolsetFactory = Callable[[MCPServerConfig, str], AbstractToolset[object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +82,9 @@ class TurnContext:
     emit: Emit | None = None
     workspace: WorkspacePaths | None = None
     skills_cache: SkillsCache | None = None
+    mcp_servers: tuple[MCPServerConfig, ...] = ()
+    user_token: str = ""
+    mcp_toolset_factory: MCPToolsetFactory | None = None
 
 
 def canonical_session_id(value: str) -> str:
@@ -185,8 +191,16 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     await _append_user(claimed)
     skills = _skills_for_session(claimed)
+    mcp_bundle = await load_mcp_tools(
+        ctx.mcp_servers,
+        ctx.user_token,
+        toolset_factory=ctx.mcp_toolset_factory,
+    )
+    mcp_cards = tuple(
+        ToolCard(name=t.safe_name, description=t.description) for t in mcp_bundle.tools
+    )
     prompt = build_system_prompt(
-        tools=BUILTIN_TOOLS,
+        tools=(*BUILTIN_TOOLS, *mcp_cards),
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
         bootstrap=_bootstrap(ctx),
         workspace=ctx.workspace,
@@ -199,8 +213,10 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         instructions=prompt.text,
         deps=TurnDeps(now=ctx.now, skills=skills),
         event_stream_handler=_persist_and_emit(claimed, queue),
+        toolsets=mcp_bundle.toolsets or None,
     )
-    reply = result.output if isinstance(result.output, str) else str(result.output)
+    raw_reply = result.output if isinstance(result.output, str) else str(result.output)
+    reply = scrub_token(raw_reply, ctx.user_token) if ctx.user_token else raw_reply
     await _append(claimed, TranscriptEntry(role="assistant", content=reply))
     transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     return TurnResult(
@@ -226,18 +242,40 @@ async def _append(claimed: _Claimed, entry: TranscriptEntry) -> None:
     await claimed.ctx.store.append_entry(claimed.session_id, claimed.run_id, entry)
 
 
+def _scrub_notice(notice: TurnNotice, token: str) -> TurnNotice:
+    if not token:
+        return notice
+    if isinstance(notice, ToolCallNotice):
+        return ToolCallNotice(
+            name=notice.name,
+            arguments=scrub_token(notice.arguments, token),
+            tool_call_id=notice.tool_call_id,
+        )
+    if isinstance(notice, ToolResultNotice):
+        return ToolResultNotice(
+            name=notice.name,
+            content=scrub_token(notice.content, token),
+            tool_call_id=notice.tool_call_id,
+        )
+    if isinstance(notice, Token):
+        return Token(scrub_token(notice.text, token))
+    return notice
+
+
 def _persist_and_emit(claimed: _Claimed, queue: _Queue):
     async def handle(
         run_ctx: RunContext[TurnDeps],
         events: AsyncIterable[AgentStreamEvent],
     ) -> None:
         del run_ctx
+        token = claimed.ctx.user_token
         async for event in events:
             notice = notice_from(event)
             if notice is None:
                 continue
-            await _record(claimed, notice)
-            await _publish(claimed.ctx, queue, notice)
+            scrubbed = _scrub_notice(notice, token)
+            await _record(claimed, scrubbed)
+            await _publish(claimed.ctx, queue, scrubbed)
 
     return handle
 
