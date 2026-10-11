@@ -207,13 +207,32 @@ def _page_routes(app: FastAPI) -> None:
 
 
 def _asset_routes(app: FastAPI) -> None:
+    _style_routes(app)
+    _script_routes(app)
+
+
+def _style_routes(app: FastAPI) -> None:
+    @app.get("/tokens.css")
+    async def tokens_style() -> FileResponse:
+        return FileResponse(STATIC / "tokens.css", media_type="text/css")
+
+    @app.get("/shell.css")
+    async def shell_style() -> FileResponse:
+        return FileResponse(STATIC / "shell.css", media_type="text/css")
+
+    @app.get("/transcript.css")
+    async def transcript_style() -> FileResponse:
+        return FileResponse(STATIC / "transcript.css", media_type="text/css")
+
+    @app.get("/screens.css")
+    async def screens_style() -> FileResponse:
+        return FileResponse(STATIC / "screens.css", media_type="text/css")
+
+
+def _script_routes(app: FastAPI) -> None:
     @app.get("/chat.js")
     async def chat_script() -> FileResponse:
         return FileResponse(STATIC / "chat.js", media_type="text/javascript")
-
-    @app.get("/chat.css")
-    async def chat_style() -> FileResponse:
-        return FileResponse(STATIC / "chat.css", media_type="text/css")
 
     @app.get("/sessions.js")
     async def sessions_script() -> FileResponse:
