@@ -18,9 +18,17 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/crabriks/static/index.html" = "crabriks/static/index.html"
+"src/crabriks/static/approvals.html" = "crabriks/static/approvals.html"
+"src/crabriks/static/approvals.js" = "crabriks/static/approvals.js"
 "src/crabriks/static/chat.css" = "crabriks/static/chat.css"
 "src/crabriks/static/chat.js" = "crabriks/static/chat.js"
+"src/crabriks/static/index.html" = "crabriks/static/index.html"
+"src/crabriks/static/new.html" = "crabriks/static/new.html"
+"src/crabriks/static/new.js" = "crabriks/static/new.js"
+"src/crabriks/static/sessions.html" = "crabriks/static/sessions.html"
+"src/crabriks/static/sessions.js" = "crabriks/static/sessions.js"
+"src/crabriks/static/status.html" = "crabriks/static/status.html"
+"src/crabriks/static/status.js" = "crabriks/static/status.js"
 
 [dependency-groups]
 dev = [
