@@ -77,6 +77,15 @@ test("renders fenced code blocks with a working copy control", async () => {
   expect(writeText).toHaveBeenCalledWith("const x = 1;");
 });
 
+test("highlights fenced code with token classes while preserving the text", () => {
+  const host = mount('```json\n{"a": 1}\n```');
+
+  const code = host.querySelector("pre code") as HTMLElement;
+  expect(code.textContent).toBe('{"a": 1}');
+  expect(code.querySelector(".tok-key")?.textContent).toBe('"a"');
+  expect(code.querySelector(".tok-number")?.textContent).toBe("1");
+});
+
 test("renders pipe tables with a header row", () => {
   const host = mount("| Name | Qty |\n| --- | --- |\n| Nails | 4 |\n| Bolts | 2 |");
 

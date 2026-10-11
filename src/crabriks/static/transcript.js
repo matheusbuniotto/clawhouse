@@ -1,13 +1,11 @@
 /** Pure, side-effect-free transcript rendering: markdown and tool-activity rows. */
+import { el } from "./dom.js";
+import { highlight } from "./highlight.js";
 export function renderUserTurn(text) {
-    const node = document.createElement("p");
-    node.className = "bubble user";
-    node.textContent = text;
-    return node;
+    return el("p", "bubble user", text);
 }
 export function renderAssistantTurn(source) {
-    const node = document.createElement("article");
-    node.className = "assistant";
+    const node = el("article", "assistant");
     node.append(renderMarkdown(source));
     return node;
 }
@@ -15,6 +13,7 @@ const STATUS_LABEL = {
     running: "Running",
     ok: "OK",
     error: "Error",
+    idle: "Idle",
 };
 /**
  * One activity row per call: a `tool_call` opens it running, a following
@@ -46,18 +45,15 @@ function lastRunningTool(container) {
     return rows.length ? rows[rows.length - 1] : null;
 }
 function createToolRow(name, args) {
-    const row = document.createElement("details");
-    row.className = "tool-row";
+    const row = el("details", "tool-row");
     row.dataset.state = "running";
-    const head = document.createElement("summary");
-    head.className = "tool-head";
-    head.append(element("span", name, "tool-name"));
-    const chip = element("span", STATUS_LABEL.running, "tool-status");
+    const head = el("summary", "tool-head");
+    head.append(el("span", "tool-name", name));
+    const chip = el("span", "tool-status", STATUS_LABEL.running);
     chip.dataset.state = "running";
     head.append(chip);
-    head.append(element("span", summarize(name, args), "tool-summary"));
-    const body = document.createElement("div");
-    body.className = "tool-body";
+    head.append(el("span", "tool-summary", summarize(name, args)));
+    const body = el("div", "tool-body");
     if (args)
         body.append(toolSection("Input", args, "tool-input"));
     row.append(head, body);
@@ -80,10 +76,9 @@ function completeToolRow(row, state, output) {
     row.querySelector(".tool-body")?.append(toolSection("Output", output, "tool-output"));
 }
 function toolSection(label, text, className) {
-    const section = document.createElement("div");
-    section.className = "tool-section";
-    section.append(element("span", label, "tool-label"));
-    section.append(element("pre", text, `tool-io ${className}`));
+    const section = el("div", "tool-section");
+    section.append(el("span", "tool-label", label));
+    section.append(el("pre", `tool-io ${className}`, text));
     return section;
 }
 function summarize(name, args) {
@@ -195,21 +190,22 @@ function appendCodeBlock(fragment, lines, start, language) {
     return index;
 }
 function codeBlock(code, language) {
-    const wrap = document.createElement("div");
-    wrap.className = "code-block";
-    const head = document.createElement("div");
-    head.className = "code-head";
+    const wrap = el("div", "code-block");
+    const head = el("div", "code-head");
     if (language)
-        head.append(element("span", language, "code-lang"));
-    const button = document.createElement("button");
+        head.append(el("span", "code-lang", language));
+    const button = el("button", "code-copy", "Copy");
     button.type = "button";
-    button.className = "code-copy";
-    button.textContent = "Copy";
     button.addEventListener("click", () => void copyText(button, code));
     head.append(button);
     const pre = document.createElement("pre");
     const codeElement = document.createElement("code");
-    codeElement.textContent = code;
+    for (const token of highlight(code, language)) {
+        if (token.kind === "plain")
+            codeElement.append(document.createTextNode(token.text));
+        else
+            codeElement.append(el("span", `tok tok-${token.kind}`, token.text));
+    }
     pre.append(codeElement);
     wrap.append(head, pre);
     return wrap;
@@ -270,12 +266,12 @@ function appendInline(parent, text) {
 }
 function inlineNode(token) {
     if (token.startsWith("`"))
-        return element("code", token.slice(1, -1));
+        return el("code", undefined, token.slice(1, -1));
     if (token.startsWith("["))
         return linkNode(token);
     if (token.startsWith("**"))
-        return element("strong", token.slice(2, -2));
-    return element("em", token.slice(1, -1));
+        return el("strong", undefined, token.slice(2, -2));
+    return el("em", undefined, token.slice(1, -1));
 }
 function linkNode(token) {
     const split = token.indexOf("](");
@@ -294,13 +290,6 @@ function isSafeUrl(url) {
     if (SAFE_SCHEME.test(url))
         return true;
     return !SCHEME.test(url);
-}
-function element(tag, text, className) {
-    const node = document.createElement(tag);
-    if (className)
-        node.className = className;
-    node.textContent = text;
-    return node;
 }
 function isListItem(line) {
     return UNORDERED_ITEM.test(line) || ORDERED_ITEM.test(line);

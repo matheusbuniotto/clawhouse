@@ -301,3 +301,33 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Syntax highlighting tokens — colours come from tokens.css. */
+.tok-keyword {
+  color: var(--syntax-keyword);
+}
+
+.tok-string {
+  color: var(--syntax-string);
+}
+
+.tok-number {
+  color: var(--syntax-number);
+}
+
+.tok-comment {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.tok-key {
+  color: var(--syntax-key);
+}
+
+.tok-literal {
+  color: var(--syntax-literal);
+}
+
+.tok-variable {
+  color: var(--syntax-variable);
+}
