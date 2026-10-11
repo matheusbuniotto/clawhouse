@@ -306,8 +306,8 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
         del messages, info
         yield {
             0: DeltaToolCall(
-                name="skills_read",
-                json_args=f'{{"name": "{user_token}"}}',
+                name="skills_search",
+                json_args=f'{{"query": "{user_token}"}}',
                 tool_call_id="call-skill",
             )
         }
@@ -317,15 +317,44 @@ async def test_secrets_scrubbed_from_approval_arguments() -> None:
         store=store,
         model=FunctionModel(stream_function=call_sensitive),
         now=lambda: NOW,
-        sensitive_tools=("skills_read",),
+        sensitive_tools=("skills_search",),
         user_token=user_token,
     )
 
     result = await run_turn(SESSION_ID, "run sensitive tool", ctx=ctx)
     assert result.status == "pending_approval"
-    approval = await store.get_approval(result.approval_id)  # type: ignore[arg-type]
+    approval_id = result.approval_id
+    assert approval_id is not None
+    approval = await store.get_approval(approval_id)
     assert user_token not in approval.arguments
     assert "[REDACTED]" in approval.arguments
+
+    # Verify resume restores user token in ToolCallPart
+    seen_tool_call_args: list[object] = []
+
+    async def reply_after_approval(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str]:
+        del info
+        for m in messages:
+            for p in getattr(m, "parts", []):
+                if getattr(p, "part_kind", "") == "tool-call":
+                    seen_tool_call_args.append(getattr(p, "args", ""))
+        yield "skill executed"
+
+    resume_ctx = TurnContext(
+        owner_id=OWNER,
+        store=store,
+        model=FunctionModel(stream_function=reply_after_approval),
+        now=lambda: NOW,
+        sensitive_tools=("skills_search",),
+        user_token=user_token,
+    )
+    resumed = await resume_turn(SESSION_ID, approval_id, "approved", ctx=resume_ctx)
+    assert resumed.status == "ok"
+    assert len(seen_tool_call_args) == 1
+    assert user_token in str(seen_tool_call_args[0])
+    assert "[REDACTED]" not in str(seen_tool_call_args[0])
 
 
 async def test_approvals_page_requires_signed_in_user() -> None:

@@ -375,12 +375,15 @@ async def _run_model_resume(
     prompt = _prompt_for(claimed, skills, mcp_bundle)
     toolsets = _wrap_toolsets(mcp_bundle.toolsets, ctx.sensitive_tools)
     history = to_model_messages(prior)
+    call_args = approval.arguments
+    if ctx.user_token and "[REDACTED]" in call_args:
+        call_args = call_args.replace("[REDACTED]", ctx.user_token)
     history.append(
         ModelResponse(
             parts=[
                 ToolCallPart(
                     tool_name=approval.tool_name,
-                    args=approval.arguments,
+                    args=call_args,
                     tool_call_id=approval.tool_call_id,
                 )
             ]
