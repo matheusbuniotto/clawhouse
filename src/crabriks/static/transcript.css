@@ -1,4 +1,4 @@
-/* transcript.css — chat transcript, message bubbles, and tool activity. Owner: #46. */
+/* transcript.css — chat transcript, assistant document, and tool activity. Owner: #46. */
 
 .log {
   flex: 1;
@@ -13,6 +13,7 @@
   font-style: italic;
 }
 
+/* User turns stay a bounded, right-aligned, tinted bubble. */
 .bubble {
   max-width: 38rem;
   margin: 0 0 14px;
@@ -30,21 +31,273 @@
   color: var(--text-strong);
 }
 
-.bubble.assistant {
-  margin-right: auto;
+/* Assistant turns are a full-width document with no bubble chrome. */
+.assistant {
+  max-width: 44rem;
+  margin: 0 0 18px;
+  color: var(--text);
+  font-family: var(--font-chat);
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
-.bubble.draft {
+.assistant.draft {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.assistant > :first-child {
+  margin-top: 0;
+}
+
+.assistant > :last-child {
+  margin-bottom: 0;
+}
+
+.assistant h1,
+.assistant h2,
+.assistant h3,
+.assistant h4,
+.assistant h5,
+.assistant h6 {
+  margin: 1.4em 0 0.5em;
+  color: var(--text-strong);
+  line-height: 1.3;
+}
+
+.assistant h1 {
+  font-size: calc(var(--font-size-lg) * 1.6);
+}
+
+.assistant h2 {
+  font-size: calc(var(--font-size-lg) * 1.3);
+}
+
+.assistant h3 {
+  font-size: var(--font-size-lg);
+}
+
+.assistant h4 {
+  font-size: var(--font-size-md);
+}
+
+.assistant h5 {
+  font-size: var(--font-size-sm);
+}
+
+.assistant h6 {
+  font-size: var(--font-size-xs);
+}
+
+.assistant p {
+  margin: 0 0 0.85em;
+}
+
+.assistant ul,
+.assistant ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.4em;
+}
+
+.assistant li {
+  margin: 0 0 0.25em;
+}
+
+.assistant blockquote {
+  margin: 0 0 0.85em;
+  padding: 0.25em 0 0.25em 14px;
+  border-left: 2px solid var(--border-strong);
   color: var(--muted);
 }
 
-.tool {
-  margin: 0 0 14px;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
+.assistant a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.assistant a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.assistant code {
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-hover);
-  color: var(--muted);
+  color: var(--text-strong);
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
-  line-height: 1.45;
+}
+
+.assistant table {
+  width: 100%;
+  margin: 0 0 14px;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.assistant th,
+.assistant td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.assistant th {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+/* Fenced code: one rounded container with a language tag and a copy control. */
+.code-block {
+  margin: 0 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-accent);
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+
+.code-lang {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.code-copy {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.code-copy:hover {
+  border-color: var(--border-hover);
+  color: var(--text-strong);
+}
+
+.code-copy:focus-visible {
+  outline: var(--focus-ring);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+.code-block code {
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* Tool activity: one collapsible row per call, with a state chip. */
+.tool-row {
+  margin: 0 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-head::-webkit-details-marker {
+  display: none;
+}
+
+.tool-name {
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.tool-status {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-status[data-state="running"] {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.tool-status[data-state="ok"] {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.tool-status[data-state="error"] {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.tool-summary {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tool-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.tool-section {
+  margin-top: 10px;
+}
+
+.tool-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tool-io {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

@@ -1,0 +1,166 @@
+import { expect, test, vi } from "vitest";
+
+import {
+  appendToolActivity,
+  markRunningToolsError,
+  renderAssistantTurn,
+  renderMarkdown,
+  renderUserTurn,
+} from "./transcript";
+
+function mount(source: string): HTMLElement {
+  const host = document.createElement("div");
+  host.append(renderMarkdown(source));
+  return host;
+}
+
+test("renders headings and paragraphs", () => {
+  const host = mount("# Title\n\nBody text.\n\n## Sub");
+
+  expect([...host.children].map((node) => node.tagName)).toEqual(["H1", "P", "H2"]);
+  expect(host.querySelector("h1")?.textContent).toBe("Title");
+  expect(host.querySelector("p")?.textContent).toBe("Body text.");
+  expect(host.querySelector("h2")?.textContent).toBe("Sub");
+});
+
+test("renders ordered and unordered lists with inline code", () => {
+  const host = mount("- one\n- two\n\n1. first\n2. second\n\nUse `npm` here.");
+
+  expect([...host.children].map((node) => node.tagName)).toEqual(["UL", "OL", "P"]);
+  expect([...host.querySelectorAll("ul li")].map((node) => node.textContent)).toEqual([
+    "one",
+    "two",
+  ]);
+  expect([...host.querySelectorAll("ol li")].map((node) => node.textContent)).toEqual([
+    "first",
+    "second",
+  ]);
+  expect(host.querySelector("p code")?.textContent).toBe("npm");
+  expect(host.querySelector("p")?.textContent).toBe("Use npm here.");
+});
+
+test("renders blockquotes and links, refusing unsafe link schemes", () => {
+  const host = mount("> quoted line\n\nSee [docs](/docs) and [bad](javascript:steal).");
+
+  expect(host.querySelector("blockquote")?.textContent).toBe("quoted line");
+  const anchors = host.querySelectorAll("a");
+  expect(anchors).toHaveLength(1);
+  expect(anchors[0].textContent).toBe("docs");
+  expect(anchors[0].getAttribute("href")).toBe("/docs");
+  expect(host.querySelector("p")?.textContent).toBe("See docs and bad.");
+});
+
+test("escapes raw HTML and event handlers from model output", () => {
+  const source = '<img src=x onerror="alert(1)"> <script>alert(1)</script>';
+  const host = mount(source);
+
+  expect(host.querySelector("img")).toBeNull();
+  expect(host.querySelector("script")).toBeNull();
+  expect(host.textContent).toBe(source);
+});
+
+test("renders fenced code blocks with a working copy control", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+  const host = mount("```ts\nconst x = 1;\n```");
+
+  const block = host.querySelector(".code-block") as HTMLElement;
+  expect(block.querySelector(".code-lang")?.textContent).toBe("ts");
+  expect(block.querySelector("pre code")?.textContent).toBe("const x = 1;");
+  const copy = block.querySelector(".code-copy") as HTMLButtonElement;
+  expect(copy.textContent).toBe("Copy");
+
+  copy.click();
+  await vi.waitFor(() => expect(copy.textContent).toBe("Copied"));
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(writeText).toHaveBeenCalledWith("const x = 1;");
+});
+
+test("renders pipe tables with a header row", () => {
+  const host = mount("| Name | Qty |\n| --- | --- |\n| Nails | 4 |\n| Bolts | 2 |");
+
+  const table = host.querySelector("table") as HTMLTableElement;
+  expect([...table.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
+    "Name",
+    "Qty",
+  ]);
+  expect(
+    [...table.querySelectorAll("tbody tr")].map((row) =>
+      [...row.querySelectorAll("td")].map((cell) => cell.textContent),
+    ),
+  ).toEqual([
+    ["Nails", "4"],
+    ["Bolts", "2"],
+  ]);
+});
+
+test("user turns keep a tinted bubble, assistant turns have no bubble", () => {
+  const user = renderUserTurn('<b>hi</b>');
+  expect(user.tagName).toBe("P");
+  expect(user.className).toBe("bubble user");
+  expect(user.textContent).toBe("<b>hi</b>");
+  expect(user.querySelector("b")).toBeNull();
+
+  const assistant = renderAssistantTurn("# Hi\n\ntext");
+  expect(assistant.className).toBe("assistant");
+  expect(assistant.querySelector("h1")?.textContent).toBe("Hi");
+  expect(assistant.querySelector(".bubble")).toBeNull();
+});
+
+test("a tool call becomes a collapsible row with a running chip and summary", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: '{"q":"notes"}' });
+
+  const row = host.querySelector(".tool-row") as HTMLDetailsElement;
+  expect(row.tagName).toBe("DETAILS");
+  expect(row.dataset.state).toBe("running");
+  expect(row.open).toBe(false);
+  expect(row.querySelector(".tool-name")?.textContent).toBe("lookup");
+  const chip = row.querySelector(".tool-status") as HTMLElement;
+  expect(chip.textContent).toBe("Running");
+  expect(chip.dataset.state).toBe("running");
+  expect(row.querySelector(".tool-summary")?.textContent).toBe('Called lookup with {"q":"notes"}');
+  expect(row.querySelector(".tool-input")?.textContent).toBe('{"q":"notes"}');
+  expect(row.querySelector(".tool-output")).toBeNull();
+
+  row.open = true;
+  expect(row.open).toBe(true);
+  expect(row.querySelector(".tool-body")?.contains(row.querySelector(".tool-input"))).toBe(true);
+});
+
+test("a tool result completes the same row with an OK chip and output", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });
+  appendToolActivity(host, { event: "tool_result", name: "lookup", content: "42" });
+
+  expect(host.querySelectorAll(".tool-row")).toHaveLength(1);
+  const row = host.querySelector(".tool-row") as HTMLElement;
+  expect(row.dataset.state).toBe("ok");
+  const chip = row.querySelector(".tool-status") as HTMLElement;
+  expect(chip.textContent).toBe("OK");
+  expect(chip.dataset.state).toBe("ok");
+  expect(row.querySelector(".tool-output")?.textContent).toBe("42");
+});
+
+test("a failed call marks the running row with an Error chip", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });
+  markRunningToolsError(host, "boom");
+
+  const row = host.querySelector(".tool-row") as HTMLElement;
+  expect(row.dataset.state).toBe("error");
+  expect(row.querySelector(".tool-status")?.textContent).toBe("Error");
+  expect(row.querySelector(".tool-output")?.textContent).toBe("boom");
+});
+
+test("tool input and output are never parsed as HTML", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "x", arguments: "<img src=x onerror=1>" });
+  appendToolActivity(host, { event: "tool_result", name: "x", content: "<script>alert(1)</script>" });
+
+  expect(host.querySelector("img")).toBeNull();
+  expect(host.querySelector("script")).toBeNull();
+  expect(host.querySelector(".tool-input")?.textContent).toBe("<img src=x onerror=1>");
+  expect(host.querySelector(".tool-output")?.textContent).toBe("<script>alert(1)</script>");
+});

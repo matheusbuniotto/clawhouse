@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
     "moduleDetection": "force",
     "noEmitOnError": true,
@@ -11,5 +11,5 @@
     "outDir": "../src/crabriks/static",
     "rootDir": "."
   },
-  "files": ["chat.ts", "sessions.ts", "new.ts", "approvals.ts", "status.ts"]
+  "files": ["chat.ts", "transcript.ts", "sessions.ts", "new.ts", "approvals.ts", "status.ts"]
 }
