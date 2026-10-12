@@ -634,6 +634,7 @@ async def _at_suggestions(app: FastAPI, caller: Caller, q: str) -> dict[str, Any
 def _composer_routes(app: FastAPI) -> None:
     @app.get("/api/composer/suggestions")
     async def composer_suggestions(
+        *,
         prefix: str | None = None,
         trigger_type: str | None = Query(None, alias="type"),
         q: str | None = None,
