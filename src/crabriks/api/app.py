@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from pydantic_ai.models import Model
@@ -634,13 +634,68 @@ async def _at_suggestions(app: FastAPI, caller: Caller, q: str) -> dict[str, Any
 def _composer_routes(app: FastAPI) -> None:
     @app.get("/api/composer/suggestions")
     async def composer_suggestions(
-        prefix: str = "@",
-        q: str = "",
+        prefix: str | None = None,
+        trigger_type: str | None = Query(None, alias="type"),
+        q: str | None = None,
+        query: str | None = None,
         caller: Caller = _require_caller,
     ) -> dict[str, Any]:
-        if prefix == "/":
-            return _slash_suggestions(app, q)
-        return await _at_suggestions(app, caller, q)
+        p = trigger_type if trigger_type is not None else (prefix or "@")
+        search_query = query if query is not None else (q or "")
+        if p == "/":
+            res = _slash_suggestions(app, search_query)
+            flat = [
+                {
+                    "label": s["label"],
+                    "insert_text": s["id"],
+                    "detail": s["description"],
+                    "kind": "skill",
+                }
+                for s in res.get("skills", [])
+            ] + [
+                {
+                    "label": c["label"],
+                    "insert_text": c["id"],
+                    "detail": c["description"],
+                    "kind": "command",
+                }
+                for c in res.get("commands", [])
+            ]
+            res["suggestions"] = flat
+            return res
+
+        res = await _at_suggestions(app, caller, search_query)
+        flat = (
+            [
+                {
+                    "label": a["name"],
+                    "insert_text": f"@{a['name']}",
+                    "detail": a["description"],
+                    "kind": "agent",
+                }
+                for a in res.get("agents", [])
+            ]
+            + [
+                {
+                    "label": f["label"],
+                    "insert_text": f"@{f['path']}",
+                    "detail": "file",
+                    "kind": "file",
+                }
+                for f in res.get("files", [])
+            ]
+            + [
+                {
+                    "label": t["name"],
+                    "insert_text": f"@{t['name']}",
+                    "detail": t["description"],
+                    "kind": "table",
+                }
+                for t in res.get("tables", [])
+            ]
+        )
+        res["suggestions"] = flat
+        return res
 
 
 def _caller(request: Request) -> Caller:
