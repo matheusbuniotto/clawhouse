@@ -252,6 +252,134 @@ export function mount(root, ctx) {
             input.focus();
         }
     }
+    // Autocomplete popover state
+    let popover = null;
+    let suggestions = [];
+    let selectedIndex = -1;
+    let debounceTimer = null;
+    let suggestionsAbort = null;
+    let activeTrigger = null;
+    function closePopover() {
+        if (debounceTimer)
+            clearTimeout(debounceTimer);
+        if (suggestionsAbort)
+            suggestionsAbort.abort();
+        debounceTimer = null;
+        suggestionsAbort = null;
+        if (popover) {
+            popover.remove();
+            popover = null;
+        }
+        suggestions = [];
+        selectedIndex = -1;
+        activeTrigger = null;
+    }
+    function renderPopover() {
+        if (!popover) {
+            popover = el("ul", "composer-popover");
+            popover.setAttribute("role", "listbox");
+            form.append(popover);
+        }
+        popover.replaceChildren();
+        if (suggestions.length === 0) {
+            closePopover();
+            return;
+        }
+        suggestions.forEach((item, idx) => {
+            const li = el("li", `composer-popover-item${idx === selectedIndex ? " active" : ""}`);
+            li.setAttribute("role", "option");
+            li.setAttribute("aria-selected", idx === selectedIndex ? "true" : "false");
+            const label = el("span", "popover-item-label", item.label);
+            const detail = el("span", "popover-item-detail", item.detail);
+            const kind = el("span", "popover-item-kind", item.kind);
+            li.append(label, detail, kind);
+            li.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                applySuggestion(item);
+            });
+            popover?.append(li);
+        });
+    }
+    function applySuggestion(item) {
+        if (!activeTrigger)
+            return;
+        const value = input.value;
+        const before = value.slice(0, activeTrigger.start);
+        const after = value.slice(activeTrigger.end);
+        input.value = before + item.insert_text + " " + after;
+        const newCursor = activeTrigger.start + item.insert_text.length + 1;
+        input.setSelectionRange(newCursor, newCursor);
+        closePopover();
+        input.focus();
+        grow();
+    }
+    let requestSeq = 0;
+    async function fetchSuggestions(seq, type, query, start, end) {
+        if (suggestionsAbort)
+            suggestionsAbort.abort();
+        suggestionsAbort = new AbortController();
+        try {
+            const res = await fetch(`/api/composer/suggestions?type=${encodeURIComponent(type)}&query=${encodeURIComponent(query)}`, { signal: suggestionsAbort.signal });
+            if (!res.ok)
+                return;
+            // Guard against stale response using request sequence and active trigger bounds
+            if (seq !== requestSeq ||
+                !activeTrigger ||
+                activeTrigger.type !== type ||
+                activeTrigger.query !== query ||
+                activeTrigger.start !== start ||
+                activeTrigger.end !== end) {
+                return;
+            }
+            const data = (await res.json());
+            // Re-check sequence and trigger after asynchronous JSON parsing
+            if (seq !== requestSeq ||
+                !activeTrigger ||
+                activeTrigger.type !== type ||
+                activeTrigger.query !== query ||
+                activeTrigger.start !== start ||
+                activeTrigger.end !== end) {
+                return;
+            }
+            suggestions = data.suggestions ?? [];
+            selectedIndex = suggestions.length > 0 ? 0 : -1;
+            renderPopover();
+        }
+        catch {
+            // aborted or network error
+        }
+    }
+    function inspectTrigger() {
+        const cursor = input.selectionStart;
+        const textBefore = input.value.slice(0, cursor);
+        const match = /(?:^|\s)([@\/])([^\s]*)$/.exec(textBefore);
+        if (!match) {
+            closePopover();
+            return;
+        }
+        const type = match[1];
+        const query = match[2];
+        const triggerStart = cursor - query.length - 1;
+        activeTrigger = { type, query, start: triggerStart, end: cursor };
+        // Immediately cancel in-flight request, clear previous suggestions and popover
+        requestSeq += 1;
+        const currentSeq = requestSeq;
+        if (suggestionsAbort) {
+            suggestionsAbort.abort();
+            suggestionsAbort = null;
+        }
+        suggestions = [];
+        selectedIndex = -1;
+        if (popover) {
+            popover.remove();
+            popover = null;
+        }
+        if (debounceTimer)
+            clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            void fetchSuggestions(currentSeq, type, query, triggerStart, cursor);
+        }, 250);
+    }
     abortButton.addEventListener("click", () => {
         controller?.abort();
         controller = null;
@@ -259,6 +387,7 @@ export function mount(root, ctx) {
     });
     form.addEventListener("submit", (event) => {
         event.preventDefault();
+        closePopover();
         const text = input.value.trim();
         if (!text)
             return;
@@ -266,8 +395,37 @@ export function mount(root, ctx) {
         grow();
         void sendMessage(text);
     });
-    input.addEventListener("input", grow);
+    input.addEventListener("input", () => {
+        grow();
+        inspectTrigger();
+    });
     input.addEventListener("keydown", (event) => {
+        if (popover && suggestions.length > 0) {
+            if (event.key === "ArrowDown") {
+                event.preventDefault();
+                selectedIndex = (selectedIndex + 1) % suggestions.length;
+                renderPopover();
+                return;
+            }
+            if (event.key === "ArrowUp") {
+                event.preventDefault();
+                selectedIndex = (selectedIndex - 1 + suggestions.length) % suggestions.length;
+                renderPopover();
+                return;
+            }
+            if (event.key === "Enter" || event.key === "Tab") {
+                if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
+                    event.preventDefault();
+                    applySuggestion(suggestions[selectedIndex]);
+                    return;
+                }
+            }
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closePopover();
+                return;
+            }
+        }
         if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             form.requestSubmit();

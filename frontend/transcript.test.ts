@@ -173,3 +173,22 @@ test("tool input and output are never parsed as HTML", () => {
   expect(host.querySelector(".tool-input")?.textContent).toBe("<img src=x onerror=1>");
   expect(host.querySelector(".tool-output")?.textContent).toBe("<script>alert(1)</script>");
 });
+
+test("renders tabular result when tool output contains columns and rows", () => {
+  const host = document.createElement("div");
+  const data = JSON.stringify({
+    columns: ["id", "val"],
+    rows: [[1, "apple"], [2, "banana"]],
+    row_count: 2,
+  });
+  appendToolActivity(host, { event: "tool_call", name: "query", arguments: "{}" });
+  appendToolActivity(host, { event: "tool_result", name: "query", content: data });
+
+  const table = host.querySelector(".tabular-table");
+  expect(table).not.toBeNull();
+  expect(host.querySelector(".tabular-count")?.textContent).toBe("2 rows");
+  const headers = [...host.querySelectorAll(".tabular-table th")].map((th) => th.textContent);
+  expect(headers).toEqual(["id", "val"]);
+  const cells = [...host.querySelectorAll(".tabular-table td")].map((td) => td.textContent);
+  expect(cells).toEqual(["1", "apple", "2", "banana"]);
+});

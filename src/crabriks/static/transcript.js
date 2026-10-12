@@ -72,7 +72,84 @@ function completeToolRow(row, state, output) {
         existing.textContent = output;
         return;
     }
-    row.querySelector(".tool-body")?.append(toolSection("Output", output, "tool-output"));
+    row.querySelector(".tool-body")?.append(toolOutputSection(output));
+}
+function toolOutputSection(output) {
+    const section = el("div", "tool-section");
+    section.append(el("span", "tool-label", "Output"));
+    const parsed = tryParseTabular(output);
+    if (parsed) {
+        section.append(renderTabularView(parsed, output));
+    }
+    else {
+        section.append(el("pre", "tool-io tool-output", output));
+    }
+    return section;
+}
+function tryParseTabular(text) {
+    try {
+        const data = JSON.parse(text);
+        if (typeof data !== "object" || data === null)
+            return null;
+        const obj = data;
+        if (Array.isArray(obj.columns) && Array.isArray(obj.rows)) {
+            return {
+                columns: obj.columns.map(String),
+                rows: obj.rows,
+                row_count: typeof obj.row_count === "number" ? obj.row_count : obj.rows.length,
+            };
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+function renderTabularView(data, rawJson) {
+    const wrap = el("div", "tabular-result");
+    const count = data.row_count ?? data.rows.length;
+    const meta = el("div", "tabular-meta");
+    meta.append(el("span", "tabular-count", `${count} row${count === 1 ? "" : "s"}`));
+    const tableWrap = el("div", "tabular-table-wrap");
+    const table = document.createElement("table");
+    table.className = "tabular-table";
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    for (const col of data.columns) {
+        const th = document.createElement("th");
+        th.textContent = col;
+        trHead.append(th);
+    }
+    thead.append(trHead);
+    table.append(thead);
+    const tbody = document.createElement("tbody");
+    for (const row of data.rows) {
+        const tr = document.createElement("tr");
+        if (Array.isArray(row)) {
+            for (const val of row) {
+                const td = document.createElement("td");
+                td.textContent = val === null || val === undefined ? "NULL" : String(val);
+                tr.append(td);
+            }
+        }
+        else if (typeof row === "object" && row !== null) {
+            for (const col of data.columns) {
+                const td = document.createElement("td");
+                const val = row[col];
+                td.textContent = val === null || val === undefined ? "NULL" : String(val);
+                tr.append(td);
+            }
+        }
+        tbody.append(tr);
+    }
+    table.append(tbody);
+    tableWrap.append(table);
+    const rawDetails = el("details", "tabular-raw");
+    const rawSummary = el("summary", "", "Raw JSON");
+    const rawPre = el("pre", "tool-io tool-output", rawJson);
+    rawDetails.append(rawSummary, rawPre);
+    wrap.append(meta, tableWrap, rawDetails);
+    return wrap;
 }
 function toolSection(label, text, className) {
     const section = el("div", "tool-section");

@@ -356,6 +356,7 @@ body {
 
 /* Composer — one container with the model pill inline and abort only while busy. */
 .composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -465,6 +466,123 @@ body {
   margin: 0;
   color: var(--danger);
   font-size: var(--font-size-sm);
+}
+
+.composer-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  z-index: 100;
+}
+
+.composer-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.composer-popover-item:hover,
+.composer-popover-item.active {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.popover-item-label {
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.popover-item-detail {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 250px;
+}
+
+.popover-item-kind {
+  font-size: var(--font-size-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-accent);
+  color: var(--muted);
+}
+
+.tabular-result {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.tabular-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
+
+.tabular-table-wrap {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.tabular-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+}
+
+.tabular-table th,
+.tabular-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tabular-table th {
+  background: var(--bg-accent);
+  color: var(--text-strong);
+  position: sticky;
+  top: 0;
+}
+
+.tabular-raw {
+  margin-top: 6px;
+}
+
+.tabular-raw summary {
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  padding: 4px 8px;
+}
+
+.tabular-raw summary:hover {
+  color: var(--text-strong);
 }
 
 .sr {

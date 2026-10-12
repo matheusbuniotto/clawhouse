@@ -46,7 +46,9 @@ from crabriks.capabilities.bootstrap import (
     load_bootstrap,
     load_bootstrap_directives,
 )
+from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
+from crabriks.capabilities.mentions import execute_compaction, resolve_mention_bundles
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
@@ -126,6 +128,7 @@ class TurnContext:
     user_token: str = ""
     mcp_toolset_factory: MCPToolsetFactory | None = None
     sensitive_tools: tuple[str, ...] = ()
+    databricks_capability: DatabricksCapability | None = None
 
 
 def canonical_session_id(value: str) -> str:
@@ -391,6 +394,16 @@ def _birth_ritual_active(
     return any(entry.role == "user" and is_wake_up_message(entry.content) for entry in prior)
 
 
+DATABRICKS_TOOL_CARDS = (
+    ToolCard(name="dbsql_query", description="Execute a SQL query on a Databricks SQL Warehouse."),
+    ToolCard(name="system_ai_query", description="Invoke Databricks AI functions or models."),
+    ToolCard(name="uc_describe_table", description="Describe schema of a Unity Catalog table."),
+    ToolCard(name="uc_list_catalogs", description="List available Unity Catalog catalogs."),
+    ToolCard(name="uc_list_schemas", description="List schemas within a Unity Catalog catalog."),
+    ToolCard(name="uc_list_tables", description="List tables within a Unity Catalog schema."),
+)
+
+
 def _capabilities_for_turn(
     claimed: _Claimed,
     mcp: MCPCapability | None,
@@ -400,6 +413,11 @@ def _capabilities_for_turn(
     capabilities: list[AgentCapability[TurnDeps]] = []
     if birth_ritual:
         capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
+    if claimed.ctx.databricks_capability is not None:
+        cap = claimed.ctx.databricks_capability
+        if not cap.user_token and claimed.ctx.user_token:
+            cap.user_token = claimed.ctx.user_token
+        capabilities.append(cap)
     if mcp is not None:
         capabilities.append(mcp)
     skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
@@ -421,10 +439,11 @@ def _prompt_for(
     ctx = claimed.ctx
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
+    db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
     builtin = (*BUILTIN_TOOLS, SAVE_PROFILE_TOOL_CARD) if birth_ritual else BUILTIN_TOOLS
     user_directives = profile.user_directives if profile else None
     return build_system_prompt(
-        tools=(*builtin, *mcp_cards),
+        tools=(*builtin, *db_cards, *mcp_cards),
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
         bootstrap=_bootstrap(ctx, user_directives=user_directives),
         workspace=ctx.workspace,
@@ -445,9 +464,33 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
+    if claimed.user_message.strip() == "/compact":
+        summary = await execute_compaction(ctx.store, claimed.session_id, ctx.owner_id, ctx.model)
+        reply = f"Conversation history compacted successfully.\n\nSummary:\n{summary}"
+        await _append(claimed, TranscriptEntry(role="assistant", content=reply))
+        transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+        return TurnResult(
+            session_id=claimed.session_id,
+            status="ok",
+            reply=reply,
+            error=None,
+            transcript=transcript,
+        )
+
+    bundle = await resolve_mention_bundles(
+        claimed.user_message,
+        store=ctx.store,
+        owner_id=ctx.owner_id,
+        workspace=ctx.workspace,
+        databricks_cap=ctx.databricks_capability,
+    )
+    user_prompt = claimed.user_message
+    if bundle.injected_context:
+        user_prompt = f"{claimed.user_message}\n\n[Injected Context]\n{bundle.injected_context}"
+
     prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
     result = await crabriks_agent().run(
-        claimed.user_message,
+        user_prompt,
         message_history=to_model_messages(prior) or None,
         model=ctx.model,
         instructions=prompt.text,
