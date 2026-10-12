@@ -488,9 +488,8 @@ body {
 .composer-popover-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--font-size-sm);
@@ -505,15 +504,18 @@ body {
 .popover-item-label {
   font-weight: 500;
   color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
 }
 
 .popover-item-detail {
+  flex: 1;
   font-size: var(--font-size-xs);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 250px;
 }
 
 .popover-item-kind {
@@ -522,6 +524,10 @@ body {
   border-radius: var(--radius-sm);
   background: var(--bg-accent);
   color: var(--muted);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tabular-result {
