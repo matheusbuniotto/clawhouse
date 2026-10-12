@@ -276,6 +276,27 @@ export function mount(root, ctx) {
     modelPicker.addEventListener("change", () => {
         sessionStorage.setItem(MODEL_KEY, modelPicker.value);
     });
+    async function checkHatchDraft() {
+        try {
+            const [hatchRes, sessionsRes] = await Promise.all([
+                fetch("/api/hatch"),
+                fetch("/api/sessions"),
+            ]);
+            if (!hatchRes.ok || !sessionsRes.ok)
+                return;
+            const hatchData = (await hatchRes.json());
+            const sessionsData = (await sessionsRes.json());
+            const hasSessions = (sessionsData.sessions?.length ?? 0) > 0;
+            if (!hatchData.hatched && !hasSessions && !input.value) {
+                input.value = "Wake up, my friend!";
+                grow();
+            }
+        }
+        catch {
+            // ignore network errors
+        }
+    }
     void loadModels();
     void loadTranscript();
+    void checkHatchDraft();
 }

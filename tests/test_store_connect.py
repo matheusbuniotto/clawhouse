@@ -7,6 +7,7 @@ from crabriks.store import (
     MemorySessionStore,
     MissingDatabaseCredential,
     PgConnect,
+    UserProfile,
     connection_plan,
     open_store,
 )
@@ -106,3 +107,28 @@ def test_tables_live_in_the_app_owned_schema() -> None:
     assert "CREATE TABLE IF NOT EXISTS crabriks.runs" in SCHEMA
     assert "CREATE TABLE IF NOT EXISTS crabriks.transcript_entries" in SCHEMA
     assert "ON crabriks.runs (session_id)" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS crabriks.user_profiles" in SCHEMA
+
+
+async def test_memory_session_store_user_profile() -> None:
+    store = MemorySessionStore()
+    assert await store.get_user_profile("ada@example.com") is None
+
+    profile = UserProfile(
+        user_id="ada@example.com",
+        assistant_name="Jarvis",
+        signature_emoji="🤖",
+        user_directives="Data Engineer, be concise",
+        hatched=True,
+    )
+    saved = await store.save_user_profile(profile)
+    assert saved.user_id == "ada@example.com"
+    assert saved.assistant_name == "Jarvis"
+    assert saved.signature_emoji == "🤖"
+    assert saved.user_directives == "Data Engineer, be concise"
+    assert saved.hatched is True
+    assert saved.created_at is not None
+    assert saved.updated_at is not None
+
+    retrieved = await store.get_user_profile("ada@example.com")
+    assert retrieved == saved

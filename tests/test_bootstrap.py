@@ -158,6 +158,26 @@ def test_truncation_leaves_the_git_files_unchanged(tmp_path: Path) -> None:
     assert not paths.soul.exists()
 
 
+def test_user_directives_populate_missing_user_file_and_respect_caps(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.directory.mkdir(parents=True)
+    paths.agents.write_text("Agents.\n", encoding="utf-8")
+
+    # missing USER.md is replaced by user_directives
+    loaded = load_bootstrap(paths, user_directives="Prefers concise Python.\n")
+    by_name = {item.name: item.text for item in loaded.files}
+    assert by_name["USER.md"] == "Prefers concise Python.\n"
+    assert loaded.notice is None
+
+    # oversized user_directives is capped at 4000
+    oversized = "D" * 5000
+    loaded_capped = load_bootstrap(paths, user_directives=oversized)
+    by_name_capped = {item.name: item.text for item in loaded_capped.files}
+    assert len(by_name_capped["USER.md"]) == 4000
+    assert by_name_capped["USER.md"] == "D" * 4000
+    assert loaded_capped.notice == "Bootstrap context was truncated to fit the budget."
+
+
 def _write(root: Path, contents: dict[str, str]):
     paths = resolve_agent_workspace(root, "main")
     paths.directory.mkdir(parents=True)

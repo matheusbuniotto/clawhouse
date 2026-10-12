@@ -174,3 +174,36 @@ test("the composer grows, keeps the model pill inline, and exposes abort only wh
   expect(abort.hidden).toBe(true);
   release?.();
 });
+
+test("when unhatched and no sessions exist, the chat composer pre-fills the wake-up draft message", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/hatch") return jsonResponse({ hatched: false });
+    if (url === "/api/sessions") return jsonResponse({ sessions: [] });
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  await vi.waitFor(() => expect(message.value).toBe("Wake up, my friend!"));
+});
+
+test("when already hatched or sessions exist, the composer is not pre-filled", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/hatch") return jsonResponse({ hatched: true });
+    if (url === "/api/sessions") return jsonResponse({ sessions: [] });
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
+  expect(message.value).toBe("");
+});

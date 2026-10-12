@@ -175,6 +175,30 @@ def test_system_prompt_preserves_deterministic_order_of_tools() -> None:
     assert tools_section in prompt.prefix
 
 
+def test_custom_assistant_name_and_emoji_in_identity() -> None:
+    prompt = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+        assistant_name="Jarvis",
+        signature_emoji="🤖",
+    )
+    assert "# Identity\nYou are Jarvis 🤖, the platform agent main." in prompt.prefix
+
+
+def test_birth_ritual_section_injected_when_requested() -> None:
+    prompt = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+        birth_ritual=True,
+    )
+    assert "# Birth Ritual" in prompt.prefix
+    assert "preferred name" in prompt.prefix
+    assert "role" in prompt.prefix
+    assert "tone" in prompt.prefix
+    assert "emoji" in prompt.prefix
+    assert "save_profile" in prompt.prefix
+
+
 _NAMES = ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")
 
 

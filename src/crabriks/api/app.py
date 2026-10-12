@@ -47,6 +47,7 @@ from crabriks.store.shapes import (
     RunState,
     SessionSummary,
     TranscriptEntry,
+    UserProfile,
 )
 from crabriks.store.store import (
     ApprovalAlreadyResolved,
@@ -83,6 +84,21 @@ class SessionOut(BaseModel):
     title: str
     created_at: str
     run_state: RunState = "idle"
+
+
+class HatchStatusOut(BaseModel):
+    user_id: str
+    hatched: bool
+    assistant_name: str | None = None
+    signature_emoji: str | None = None
+    user_directives: str | None = None
+
+
+class HatchProfileIn(BaseModel):
+    assistant_name: str | None = None
+    signature_emoji: str | None = None
+    user_directives: str | None = None
+    hatched: bool = True
 
 
 class AuthSnapshotOut(BaseModel):
@@ -175,6 +191,7 @@ def _routes(app: FastAPI) -> None:
     _page_routes(app)
     _asset_routes(app)
     _session_routes(app)
+    _hatch_routes(app)
     _approval_routes(app)
     _status_routes(app)
 
@@ -332,6 +349,46 @@ def _session_routes(app: FastAPI) -> None:
         if not message:
             raise HTTPException(status_code=422, detail="message is empty")
         return await _stream_turn(request, session_id, message, caller, model_id=body.model)
+
+
+def _hatch_routes(app: FastAPI) -> None:
+    @app.get("/api/hatch")
+    async def get_hatch_status(
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> HatchStatusOut:
+        profile = await request.app.state.store.get_user_profile(caller.user_id)
+        if profile is None:
+            return HatchStatusOut(user_id=caller.user_id, hatched=False)
+        return HatchStatusOut(
+            user_id=profile.user_id,
+            hatched=profile.hatched,
+            assistant_name=profile.assistant_name,
+            signature_emoji=profile.signature_emoji,
+            user_directives=profile.user_directives,
+        )
+
+    @app.post("/api/hatch")
+    async def save_hatch_status(
+        body: HatchProfileIn,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> HatchStatusOut:
+        profile = UserProfile(
+            user_id=caller.user_id,
+            assistant_name=body.assistant_name,
+            signature_emoji=body.signature_emoji,
+            user_directives=body.user_directives,
+            hatched=body.hatched,
+        )
+        saved = await request.app.state.store.save_user_profile(profile)
+        return HatchStatusOut(
+            user_id=saved.user_id,
+            hatched=saved.hatched,
+            assistant_name=saved.assistant_name,
+            signature_emoji=saved.signature_emoji,
+            user_directives=saved.user_directives,
+        )
 
 
 def _approval_routes(app: FastAPI) -> None:

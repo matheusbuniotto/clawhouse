@@ -26,16 +26,47 @@ class BootstrapContext:
     notice: str | None
 
 
-def load_bootstrap(paths: WorkspacePaths) -> BootstrapContext:
+def load_bootstrap(
+    paths: WorkspacePaths,
+    *,
+    user_directives: str | None = None,
+) -> BootstrapContext:
     """Read the bootstrap files. A missing file yields a marker, not an exception."""
     files: list[BootstrapFile] = []
     truncated = False
     for name, path, limit in _sources(paths):
         text, cut, missing = _read(path, name, limit)
+        if name == "USER.md" and user_directives:
+            if missing:
+                missing = False
+                text = user_directives[:limit]
+                cut = len(user_directives) > limit
+            else:
+                combined = f"{text}\n\n{user_directives}".strip()
+                cut = cut or (len(combined) > limit)
+                text = combined[:limit]
         files.append(BootstrapFile(name=name, text=text, missing=missing))
         truncated = truncated or cut
     fitted, cut_more = _fit_total(tuple(files))
     if truncated or cut_more:
+        return BootstrapContext(files=fitted, notice=_NOTICE)
+    return BootstrapContext(files=fitted, notice=None)
+
+
+def load_bootstrap_directives(user_directives: str) -> BootstrapContext:
+    """Build a bootstrap context when only user directives are provided."""
+    limit = 4_000
+    text = user_directives[:limit]
+    cut = len(user_directives) > limit
+    files = (
+        BootstrapFile(name="AGENTS.md", text="[MISSING] AGENTS.md", missing=True),
+        BootstrapFile(name="SOUL.md", text="[MISSING] SOUL.md", missing=True),
+        BootstrapFile(name="IDENTITY.md", text="[MISSING] IDENTITY.md", missing=True),
+        BootstrapFile(name="USER.md", text=text, missing=False),
+        BootstrapFile(name="MEMORY.md", text="[MISSING] MEMORY.md", missing=True),
+    )
+    fitted, cut_more = _fit_total(files)
+    if cut or cut_more:
         return BootstrapContext(files=fitted, notice=_NOTICE)
     return BootstrapContext(files=fitted, notice=None)
 

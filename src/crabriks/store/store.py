@@ -28,6 +28,7 @@ from crabriks.store.shapes import (
     SessionSummary,
     TranscriptEntry,
     TurnStatus,
+    UserProfile,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,18 @@ CREATE TABLE IF NOT EXISTS crabriks.approvals (
 
 CREATE INDEX IF NOT EXISTS approvals_session_status
     ON crabriks.approvals (session_id, status);
+
+CREATE TABLE IF NOT EXISTS crabriks.user_profiles (
+    user_id text PRIMARY KEY,
+    assistant_name text,
+    signature_emoji text,
+    user_directives text,
+    hatched boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
 """
+
 
 _RUNNING_INDEX = "runs_one_running_per_session"
 _STALE_RUN_MINUTES = 10
@@ -142,6 +154,10 @@ class SessionStore(Protocol):
 
     async def has_pending_approval(self, session_id: str) -> bool: ...
 
+    async def get_user_profile(self, user_id: str) -> UserProfile | None: ...
+
+    async def save_user_profile(self, profile: UserProfile) -> UserProfile: ...
+
     async def close(self) -> None: ...
 
 
@@ -180,6 +196,7 @@ class MemorySessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, _MemorySession] = {}
         self._approvals: dict[str, ApprovalEntry] = {}
+        self._profiles: dict[str, UserProfile] = {}
         self._lock = asyncio.Lock()
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
@@ -321,6 +338,21 @@ class MemorySessionStore:
                 a.session_id == session_id and a.status == "pending"
                 for a in self._approvals.values()
             )
+
+    async def get_user_profile(self, user_id: str) -> UserProfile | None:
+        async with self._lock:
+            return self._profiles.get(user_id)
+
+    async def save_user_profile(self, profile: UserProfile) -> UserProfile:
+        async with self._lock:
+            now = datetime.now(UTC)
+            saved = replace(
+                profile,
+                created_at=profile.created_at or now,
+                updated_at=now,
+            )
+            self._profiles[profile.user_id] = saved
+            return saved
 
     async def close(self) -> None:
         return None
@@ -642,6 +674,63 @@ class LakebaseSessionStore:
             _uuid(session_id),
         )
         return val is not None
+
+    async def get_user_profile(self, user_id: str) -> UserProfile | None:
+        row = await self._pool.fetchrow(
+            """
+            SELECT
+                user_id, assistant_name, signature_emoji, user_directives,
+                hatched, created_at, updated_at
+            FROM crabriks.user_profiles
+            WHERE user_id = $1
+            """,
+            user_id,
+        )
+        if row is None:
+            return None
+        return _profile_from_row(row)
+
+    async def save_user_profile(self, profile: UserProfile) -> UserProfile:
+        now = datetime.now(UTC)
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO crabriks.user_profiles (
+                user_id, assistant_name, signature_emoji,
+                user_directives, hatched, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $6)
+            ON CONFLICT (user_id) DO UPDATE SET
+                assistant_name = EXCLUDED.assistant_name,
+                signature_emoji = EXCLUDED.signature_emoji,
+                user_directives = EXCLUDED.user_directives,
+                hatched = EXCLUDED.hatched,
+                updated_at = EXCLUDED.updated_at
+            RETURNING
+                user_id, assistant_name, signature_emoji,
+                user_directives, hatched, created_at, updated_at
+            """,
+            profile.user_id,
+            profile.assistant_name,
+            profile.signature_emoji,
+            profile.user_directives,
+            profile.hatched,
+            now,
+        )
+        if row is None:
+            raise RuntimeError("failed to save user profile")
+        return _profile_from_row(row)
+
+
+def _profile_from_row(row: asyncpg.Record) -> UserProfile:
+    return UserProfile(
+        user_id=row["user_id"],
+        assistant_name=row["assistant_name"],
+        signature_emoji=row["signature_emoji"],
+        user_directives=row["user_directives"],
+        hatched=row["hatched"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 def _approval_from_row(row: asyncpg.Record) -> ApprovalEntry:
