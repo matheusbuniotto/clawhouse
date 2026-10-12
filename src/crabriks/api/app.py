@@ -355,6 +355,27 @@ def _session_routes(app: FastAPI) -> None:
         summary = await request.app.state.store.create_session(caller.user_id)
         return _session_out(summary)
 
+    _session_item_routes(app)
+
+
+def _session_item_routes(app: FastAPI) -> None:
+    @app.delete("/api/sessions/{session_id}", status_code=204)
+    async def delete_session(
+        session_id: str,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> Response:
+        try:
+            canonical = canonical_session_id(session_id)
+            await request.app.state.store.delete_session(canonical, caller.user_id)
+            return Response(status_code=204)
+        except InvalidSessionId as exc:
+            raise HTTPException(status_code=422, detail="Session id must be a UUID.") from exc
+        except SessionNotFound as exc:
+            raise HTTPException(status_code=404, detail="Session not found.") from exc
+        except SessionForbidden as exc:
+            raise HTTPException(status_code=403, detail="You do not own this session.") from exc
+
     @app.get("/api/sessions/{session_id}/transcript")
     async def read_transcript(
         session_id: str,

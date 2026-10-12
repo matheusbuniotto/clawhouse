@@ -203,6 +203,42 @@ body {
   text-overflow: ellipsis;
 }
 
+.rail-session-actions {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease);
+}
+
+.rail-session:hover .rail-session-actions,
+.rail-session:focus-within .rail-session-actions {
+  opacity: 1;
+}
+
+.rail-session-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.rail-session-delete:hover {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
 .rail-session-time {
   color: var(--muted);
   font-size: var(--font-size-xs);

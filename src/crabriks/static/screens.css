@@ -8,7 +8,7 @@
 
 .session {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 0;
@@ -16,6 +16,7 @@
 }
 
 .session-link {
+  flex: 1;
   color: var(--text-strong);
   font-weight: 500;
   text-decoration: none;
@@ -25,10 +26,35 @@
   color: var(--accent);
 }
 
+.session-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .when {
   color: var(--muted);
   font-size: var(--font-size-sm);
   white-space: nowrap;
+}
+
+.btn-delete-session {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease),
+    border-color var(--duration-fast) var(--ease);
+}
+
+.btn-delete-session:hover {
+  background: var(--danger-subtle);
+  border-color: var(--danger);
 }
 
 .start {

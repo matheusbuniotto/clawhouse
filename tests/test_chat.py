@@ -438,6 +438,36 @@ async def test_starting_a_session_creates_it_for_the_caller() -> None:
     assert [session["id"] for session in listed.json()["sessions"]] == [body["id"]]
 
 
+async def test_deleting_a_session_removes_it_for_the_caller() -> None:
+    store = MemorySessionStore()
+    app = _app(store, FunctionModel(stream_function=_reply("ok")))
+    async with _client(app) as client:
+        created = await client.post("/api/sessions", headers=HEADERS)
+        sid = created.json()["id"]
+
+        # Deleting a non-owned session returns 403
+        foreign = await client.delete(
+            f"/api/sessions/{sid}",
+            headers={
+                "x-forwarded-email": "grace@example.com",
+                "x-forwarded-access-token": "dapi-other",
+            },
+        )
+        assert foreign.status_code == 403
+
+        # Deleting the session as owner succeeds
+        deleted = await client.delete(f"/api/sessions/{sid}", headers=HEADERS)
+        assert deleted.status_code == 204
+
+        # Listing now returns empty
+        listed = await client.get("/api/sessions", headers=HEADERS)
+        assert listed.json()["sessions"] == []
+
+        # Deleting again returns 404
+        not_found = await client.delete(f"/api/sessions/{sid}", headers=HEADERS)
+        assert not_found.status_code == 404
+
+
 @pytest.mark.parametrize("path", ["/sessions", "/new"])
 async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) -> None:
     app = _app(MemorySessionStore(), FunctionModel(stream_function=_reply("ok")))
