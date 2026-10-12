@@ -245,3 +245,41 @@ test("shows autocomplete popover on @ trigger and inserts suggestion on Enter", 
   expect(document.querySelector(".composer-popover")).toBeNull();
   expect(message.value).toBe("@main ");
 });
+
+test("shows autocomplete popover on / trigger and inserts /skill suggestion on Enter", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/composer/suggestions")) {
+      return jsonResponse({
+        suggestions: [
+          {
+            label: "/skill:code-review",
+            insert_text: "/skill:code-review",
+            detail: "Activate code-review skill instructions",
+            kind: "skill",
+          },
+        ],
+      });
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "/sk";
+  message.selectionStart = 3;
+  message.selectionEnd = 3;
+  message.dispatchEvent(new Event("input"));
+
+  await vi.waitFor(() => expect(document.querySelector(".composer-popover")).not.toBeNull());
+  expect(document.querySelector(".popover-item-label")?.textContent).toBe("/skill:code-review");
+
+  // Press Enter to select
+  message.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  expect(document.querySelector(".composer-popover")).toBeNull();
+  expect(message.value).toBe("/skill:code-review ");
+});

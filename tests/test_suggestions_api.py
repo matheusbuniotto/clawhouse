@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.function import FunctionModel
 
 from crabriks.app import create_app
+from crabriks.capabilities.workspace import resolve_agent_workspace
 from crabriks.settings import Settings
 from crabriks.store import MemorySessionStore
 
@@ -46,7 +47,13 @@ def test_app(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_composer_suggestions_slash_prefix(test_app) -> None:
+async def test_composer_suggestions_slash_prefix(test_app, tmp_path: Path) -> None:
+    # Setup a skill in workspace
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    skill_dir = workspace.skills / "code-review"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("Review code.", encoding="utf-8")
+
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test", headers=HEADERS
     ) as client:
@@ -59,6 +66,8 @@ async def test_composer_suggestions_slash_prefix(test_app) -> None:
         assert "/compact" in command_ids
         assert "/clear" in command_ids
         assert "/help" in command_ids
+        skill_ids = [skill["id"] for skill in data["skills"]]
+        assert "/skill:code-review" in skill_ids
 
 
 @pytest.mark.asyncio

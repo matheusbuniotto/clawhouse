@@ -14,6 +14,7 @@ from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mentions import (
     extract_agent_mentions,
     extract_file_mentions,
+    extract_skill_mentions,
     extract_table_mentions,
     resolve_mention_bundles,
 )
@@ -26,10 +27,13 @@ OWNER = "ada@example.com"
 
 
 def test_mention_extractors() -> None:
-    text = "Check @samples.nyctaxi.trips and @file:SOUL.md with @sql_analyst"
+    text = (
+        "Check @samples.nyctaxi.trips and @file:SOUL.md with @sql_analyst using /skill:code-review"
+    )
     assert extract_table_mentions(text) == ["samples.nyctaxi.trips"]
     assert extract_file_mentions(text) == ["SOUL.md"]
     assert extract_agent_mentions(text) == ["sql_analyst"]
+    assert extract_skill_mentions(text) == ["code-review"]
 
 
 @pytest.mark.asyncio
@@ -125,3 +129,79 @@ async def test_compact_command_creates_summary_checkpoint() -> None:
     # Verify transcript now has summary checkpoint
     transcript = await store.transcript(session_id, OWNER)
     assert any("compact" in e.content.lower() or "summary" in e.content.lower() for e in transcript)
+
+
+@pytest.mark.asyncio
+async def test_resolve_mention_bundles_injects_skill_instructions(tmp_path: Path) -> None:
+    store = MemorySessionStore()
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    skill_dir = workspace.skills / "sql_optimizer"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("Optimize all SELECT queries.", encoding="utf-8")
+
+    bundle = await resolve_mention_bundles(
+        "/skill:sql_optimizer help optimize this query",
+        store=store,
+        owner_id=OWNER,
+        workspace=workspace,
+        databricks_cap=None,
+    )
+
+    assert "### Skill Instructions: sql_optimizer" in bundle.injected_context
+    assert "Optimize all SELECT queries." in bundle.injected_context
+
+
+@pytest.mark.asyncio
+async def test_resolve_mention_bundles_missing_skill(tmp_path: Path) -> None:
+    store = MemorySessionStore()
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    workspace.directory.mkdir(parents=True, exist_ok=True)
+
+    bundle = await resolve_mention_bundles(
+        "/skill:nonexistent_skill please help",
+        store=store,
+        owner_id=OWNER,
+        workspace=workspace,
+        databricks_cap=None,
+    )
+
+    assert "### Skill: nonexistent_skill (not found)" in bundle.injected_context
+
+
+@pytest.mark.asyncio
+async def test_turn_with_skill_command_injects_instructions_into_turn(tmp_path: Path) -> None:
+    store = MemorySessionStore()
+    session_id = "44444444-4444-4444-8444-444444444444"
+    await store.open_session(session_id, OWNER)
+
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    skill_dir = workspace.skills / "code_review"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("Always check for edge cases and types.", encoding="utf-8")
+
+    received_prompts: list[str] = []
+
+    async def model_fn(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del info
+        for m in messages:
+            for p in getattr(m, "parts", []):
+                content = getattr(p, "content", None)
+                if isinstance(content, str):
+                    received_prompts.append(content)
+        yield "Review complete."
+
+    ctx = TurnContext(
+        owner_id=OWNER,
+        store=store,
+        workspace=workspace,
+        model=FunctionModel(stream_function=model_fn),
+        now=lambda: NOW,
+    )
+
+    result = await run_turn(session_id, "/skill:code_review please review my code", ctx=ctx)
+    assert result.status == "ok"
+    assert result.reply == "Review complete."
+
+    # Verify that the injected context with skill instructions was passed to the agent
+    assert any("### Skill Instructions: code_review" in p for p in received_prompts)
+    assert any("Always check for edge cases and types." in p for p in received_prompts)

@@ -26,6 +26,7 @@ _TABLE_REGEX = re.compile(r"@([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+)")
 _FILE_PREFIX_REGEX = re.compile(r"@file:([^\s]+)")
 _FILE_EXT_REGEX = re.compile(r"@([a-zA-Z0-9_\-\./]+\.(?:md|py|json|txt|ya?ml|sql))")
 _AGENT_REGEX = re.compile(r"@([a-zA-Z0-9_]+)(?![\.\:\/])")
+_SKILL_REGEX = re.compile(r"/skill:([a-zA-Z0-9_\-]+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +54,37 @@ def extract_agent_mentions(text: str) -> list[str]:
     return list(dict.fromkeys(agents))
 
 
+def extract_skill_mentions(text: str) -> list[str]:
+    return list(dict.fromkeys(_SKILL_REGEX.findall(text)))
+
+
+async def _resolve_agent_context(
+    text: str, store: SessionStore, owner_id: str
+) -> tuple[CustomAgent | None, str | None]:
+    agent_names = extract_agent_mentions(text)
+    if not agent_names:
+        return None, None
+    custom_agents = await store.list_custom_agents(owner_id)
+    for ca in custom_agents:
+        if ca.name in agent_names:
+            prompt_text = ca.system_prompt
+            part = f"### Agent Persona: {ca.name}\n{ca.description}\nInstructions:\n{prompt_text}"
+            return ca, part
+    return None, None
+
+
+def _resolve_skill_context(text: str, workspace: WorkspacePaths | None) -> list[str]:
+    skills = extract_skill_mentions(text)
+    parts: list[str] = []
+    for skill_name in skills:
+        instructions = _read_skill_instructions(skill_name, workspace)
+        if instructions is not None:
+            parts.append(f"### Skill Instructions: {skill_name}\n{instructions}")
+        else:
+            parts.append(f"### Skill: {skill_name} (not found)")
+    return parts
+
+
 async def resolve_mention_bundles(
     text: str,
     *,
@@ -64,32 +96,24 @@ async def resolve_mention_bundles(
     context_parts: list[str] = []
 
     # 1. Resolve table mentions
-    tables = extract_table_mentions(text)
-    for table_name in tables:
+    for table_name in extract_table_mentions(text):
         desc = await _describe_table(table_name, databricks_cap)
         if desc:
             context_parts.append(f"### Table Context: {table_name}\n{desc}")
 
     # 2. Resolve file mentions
-    files = extract_file_mentions(text)
-    for file_path in files:
+    for file_path in extract_file_mentions(text):
         content = _read_file_content(file_path, workspace)
         if content:
             context_parts.append(f"### File Context: {file_path}\n{content}")
 
     # 3. Resolve target agent mention
-    agent_names = extract_agent_mentions(text)
-    target_agent: CustomAgent | None = None
-    if agent_names:
-        custom_agents = await store.list_custom_agents(owner_id)
-        for ca in custom_agents:
-            if ca.name in agent_names:
-                target_agent = ca
-                prompt_text = ca.system_prompt
-                context_parts.append(
-                    f"### Agent Persona: {ca.name}\n{ca.description}\nInstructions:\n{prompt_text}"
-                )
-                break
+    target_agent, agent_part = await _resolve_agent_context(text, store, owner_id)
+    if agent_part:
+        context_parts.append(agent_part)
+
+    # 4. Resolve skill mentions (/skill:{name})
+    context_parts.extend(_resolve_skill_context(text, workspace))
 
     injected = "\n\n".join(context_parts)
     return MentionBundle(injected_context=injected, target_agent=target_agent)
@@ -124,6 +148,28 @@ def _read_file_content(file_path: str, workspace: WorkspacePaths | None) -> str 
     if candidate.exists() and candidate.is_file():
         try:
             return candidate.read_text(encoding="utf-8")[:4000]
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
+def _read_skill_instructions(skill_name: str, workspace: WorkspacePaths | None) -> str | None:
+    if not workspace:
+        return None
+    candidate = workspace.skills / skill_name / "SKILL.md"
+    if not candidate.exists():
+        repo_root = workspace.directory.parent.parent.parent
+        for alt in (
+            repo_root / ".agents" / "skills" / skill_name / "SKILL.md",
+            repo_root / "skills" / skill_name / "SKILL.md",
+        ):
+            if alt.exists():
+                candidate = alt
+                break
+
+    if candidate.exists() and candidate.is_file():
+        try:
+            return candidate.read_text(encoding="utf-8")[:8000]
         except Exception:  # noqa: BLE001
             return None
     return None
