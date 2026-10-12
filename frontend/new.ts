@@ -54,15 +54,20 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     try {
       const res = await fetch("/api/agents");
       if (!res.ok) return;
-      const data = (await res.json()) as {
-        agents: { name: string; description: string; system_prompt: string }[];
-      };
+      const agents = (await res.json()) as {
+        id: string;
+        name: string;
+        description: string;
+        system_prompt: string;
+        is_platform?: boolean;
+      }[];
       agentsList.replaceChildren();
-      if (!data.agents || data.agents.length === 0) {
+      const customOnly = agents.filter((ag) => !ag.is_platform);
+      if (customOnly.length === 0) {
         agentsList.append(emptyNote);
         return;
       }
-      for (const ag of data.agents) {
+      for (const ag of customOnly) {
         const item = el("li", "custom-agent-item");
         const title = el("strong", "agent-name", `@${ag.name}`);
         const desc = el("span", "agent-desc", ag.description);
@@ -70,7 +75,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         delBtn.type = "button";
         delBtn.addEventListener("click", async () => {
           delBtn.disabled = true;
-          await fetch(`/api/agents/${encodeURIComponent(ag.name)}`, { method: "DELETE" });
+          await fetch(`/api/agents/${encodeURIComponent(ag.id)}`, { method: "DELETE" });
           void loadAgents();
         });
         item.append(title, desc, delBtn);

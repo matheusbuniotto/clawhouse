@@ -151,7 +151,7 @@ async def test_dbsql_query_read_vs_mutation_approval() -> None:
         store=store,
         model=FunctionModel(stream_function=call_read),
         now=now,
-        user_token="test-token",
+        user_token="mock_dummy_token",
         databricks_capability=cap,
     )
 
@@ -178,7 +178,7 @@ async def test_dbsql_query_read_vs_mutation_approval() -> None:
         store=store,
         model=FunctionModel(stream_function=call_mutate),
         now=now,
-        user_token="test-token",
+        user_token="mock_dummy_token",
         databricks_capability=cap,
     )
 
