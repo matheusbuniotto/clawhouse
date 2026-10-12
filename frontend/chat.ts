@@ -366,6 +366,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         { signal: suggestionsAbort.signal },
       );
       if (!res.ok) return;
+      // Ensure this response still matches the currently active trigger
+      if (!activeTrigger || activeTrigger.type !== type || activeTrigger.query !== query) {
+        return;
+      }
       const data = (await res.json()) as {
         suggestions: { label: string; insert_text: string; detail: string; kind: string }[];
       };
@@ -391,6 +395,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     const query = match[2];
     const triggerStart = cursor - query.length - 1;
     activeTrigger = { type, query, start: triggerStart, end: cursor };
+
+    // Immediately cancel any previous in-flight request when input changes
+    if (suggestionsAbort) {
+      suggestionsAbort.abort();
+      suggestionsAbort = null;
+    }
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
