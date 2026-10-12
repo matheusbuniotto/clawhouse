@@ -362,10 +362,14 @@ class DatabricksCapability(AbstractCapability[Any]):
     id: str | None = "databricks"
 
     def get_toolset(self) -> AgentToolset[Any] | None:
-        client = self.client_factory(self.user_token)
-        warehouse_id = resolve_warehouse_id(client, self.warehouse_id)
-        impl = DatabricksTools(client, warehouse_id)
-        return FunctionToolset(impl.all_tools())
+        try:
+            client = self.client_factory(self.user_token)
+            warehouse_id = resolve_warehouse_id(client, self.warehouse_id)
+            impl = DatabricksTools(client, warehouse_id)
+            return FunctionToolset(impl.all_tools())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("DatabricksCapability failed to initialize client: %s", exc)
+            return None
 
     def get_wrapper_toolset(self, toolset: AbstractToolset[Any]) -> AbstractToolset[Any]:
         def approval_required(
