@@ -191,7 +191,6 @@
 .session-status-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
   border: 1px solid var(--border);
@@ -200,8 +199,20 @@
   background: var(--card);
 }
 
+.session-status-row .session-link {
+  flex: 1;
+}
+
+.session-status-row .when {
+  margin-left: auto;
+}
+
 .status-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  text-align: center;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);

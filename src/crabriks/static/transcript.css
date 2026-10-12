@@ -260,6 +260,11 @@
 }
 
 .tool-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  text-align: center;
   padding: 2px 8px;
   border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
