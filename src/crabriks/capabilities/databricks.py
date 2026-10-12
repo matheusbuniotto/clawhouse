@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.jobs import JobSettings, SparkPythonTask, SqlTask, SqlTaskFile, Task
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
@@ -34,6 +36,12 @@ _MUTATING_KEYWORDS = {
     "vacuum",
 }
 _READONLY_KEYWORDS = {"select", "show", "describe", "desc", "explain"}
+# Lakeflow tools that change workspace state; each one waits for human approval.
+_JOBS_PAGE_MAX = 100  # the Jobs API rejects a page limit above 100
+_TASK_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
+_APPROVAL_REQUIRED_TOOLS = frozenset(
+    {"jobs_run_now", "jobs_cancel_run", "jobs_create", "jobs_edit"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +100,12 @@ def enforce_query_limit(sql: str, default_limit: int = 100) -> str:
     if re.search(r"\blimit\s+\d+", sql, re.IGNORECASE):
         return sql
     return f"{sql.strip()}\nLIMIT {default_limit}"
+
+
+def _enum_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
 
 
 def resolve_warehouse_id(client: WorkspaceClient, configured_id: str | None) -> str | None:
@@ -212,6 +226,113 @@ class DatabricksTools:
         except Exception as exc:  # noqa: BLE001
             return f"system_ai_query failed: {exc}"
 
+    async def jobs_list(self, limit: int = 25) -> dict[str, object]:
+        """List Lakeflow jobs in the workspace."""
+        limit = max(1, min(limit, _JOBS_PAGE_MAX))
+        try:
+            jobs = list(itertools.islice(self.client.jobs.list(limit=limit), limit))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to list jobs: {exc}"}
+        return {
+            "jobs": [
+                {
+                    "job_id": job.job_id,
+                    "name": job.settings.name if job.settings else None,
+                    "creator": job.creator_user_name,
+                }
+                for job in jobs
+            ],
+            "job_count": len(jobs),
+        }
+
+    async def jobs_run_now(
+        self, job_id: int, parameters: dict[str, str] | None = None
+    ) -> dict[str, object]:
+        """Trigger an immediate run of a Lakeflow job, optionally overriding job parameters."""
+        try:
+            wait = self.client.jobs.run_now(job_id=job_id, job_parameters=parameters)
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to run job {job_id}: {exc}"}
+        return {"run_id": wait.run_id, "job_id": job_id}
+
+    async def jobs_create(
+        self,
+        name: str,
+        task_type: Literal["python", "sql"],
+        path: str,
+        *,
+        parameters: list[str] | None = None,
+        warehouse_id: str | None = None,
+    ) -> dict[str, object]:
+        """Create a single-task Lakeflow job that runs a Python script or a SQL file.
+
+        `path` is a workspace file path. SQL tasks run on `warehouse_id`, defaulting to the
+        session's SQL warehouse.
+        """
+        task_key = _TASK_KEY_UNSAFE.sub("_", name)
+        if task_type == "python":
+            task = Task(
+                task_key=task_key,
+                spark_python_task=SparkPythonTask(python_file=path, parameters=parameters),
+            )
+        else:
+            sql_warehouse = warehouse_id or self.warehouse_id
+            if not sql_warehouse:
+                return {"error": "A SQL job needs a SQL warehouse; none is available."}
+            task = Task(
+                task_key=task_key,
+                sql_task=SqlTask(warehouse_id=sql_warehouse, file=SqlTaskFile(path=path)),
+            )
+        try:
+            created = self.client.jobs.create(name=name, tasks=[task])
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to create job {name}: {exc}"}
+        return {"job_id": created.job_id, "name": name}
+
+    async def jobs_edit(self, job_id: int, new_settings: dict[str, Any]) -> dict[str, object]:
+        """Update a Lakeflow job. `new_settings` holds the top-level job settings to change."""
+        try:
+            self.client.jobs.update(job_id=job_id, new_settings=JobSettings.from_dict(new_settings))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to update job {job_id}: {exc}"}
+        return {"job_id": job_id, "updated": True}
+
+    async def jobs_cancel_run(self, run_id: int) -> dict[str, object]:
+        """Request cancellation of an active Lakeflow job run."""
+        try:
+            self.client.jobs.cancel_run(run_id=run_id)
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to cancel run {run_id}: {exc}"}
+        return {"run_id": run_id, "cancel_requested": True}
+
+    async def jobs_get_run(self, run_id: int) -> dict[str, object]:
+        """Get the state of a Lakeflow job run."""
+        try:
+            run = self.client.jobs.get_run(run_id=run_id)
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to get run {run_id}: {exc}"}
+        state = run.state
+        duration = run.end_time - run.start_time if run.start_time and run.end_time else None
+        return {
+            "run_id": run.run_id,
+            "job_id": run.job_id,
+            "life_cycle_state": _enum_value(state.life_cycle_state if state else None),
+            "result_state": _enum_value(state.result_state if state else None),
+            "state_message": state.state_message if state else None,
+            "duration_ms": duration,
+            "url": run.run_page_url,
+            "tasks": [
+                {
+                    "task_key": task.task_key,
+                    "life_cycle_state": _enum_value(
+                        task.state.life_cycle_state if task.state else None
+                    ),
+                    "result_state": _enum_value(task.state.result_state if task.state else None),
+                }
+                for task in run.tasks or []
+            ],
+        }
+
     def all_tools(self) -> list[Callable[..., Any]]:
         return [
             self.uc_list_catalogs,
@@ -220,6 +341,12 @@ class DatabricksTools:
             self.uc_describe_table,
             self.dbsql_query,
             self.system_ai_query,
+            self.jobs_list,
+            self.jobs_get_run,
+            self.jobs_run_now,
+            self.jobs_cancel_run,
+            self.jobs_create,
+            self.jobs_edit,
         ]
 
 
@@ -249,6 +376,6 @@ class DatabricksCapability(AbstractCapability[Any]):
             if tool_def.name == "dbsql_query":
                 sql = str(args.get("query", ""))
                 return not is_readonly_query(sql)
-            return False
+            return tool_def.name in _APPROVAL_REQUIRED_TOOLS
 
         return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)

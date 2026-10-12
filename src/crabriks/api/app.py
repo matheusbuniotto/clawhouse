@@ -292,6 +292,10 @@ def _core_script_routes(app: FastAPI) -> None:
     async def highlight_script() -> FileResponse:
         return FileResponse(STATIC / "highlight.js", media_type="text/javascript")
 
+    @app.get("/jobs.js")
+    async def jobs_script() -> FileResponse:
+        return FileResponse(STATIC / "jobs.js", media_type="text/javascript")
+
 
 def _screen_script_routes(app: FastAPI) -> None:
     @app.get("/chat.js")

@@ -343,3 +343,61 @@
 .tok-variable {
   color: var(--syntax-variable);
 }
+
+/* Lakeflow job results: run cards with a state badge, and job lists. */
+.job-list {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.job-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.job-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.job-chip {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.job-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.job-badge[data-state="pending"],
+.job-badge[data-state="running"] {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.job-badge[data-state="success"] {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.job-badge[data-state="failed"] {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.job-link {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--accent);
+}

@@ -192,3 +192,103 @@ test("renders tabular result when tool output contains columns and rows", () => 
   const cells = [...host.querySelectorAll(".tabular-table td")].map((td) => td.textContent);
   expect(cells).toEqual(["1", "apple", "2", "banana"]);
 });
+
+function renderToolResult(content: unknown): HTMLElement {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "jobs_get_run", arguments: "{}" });
+  appendToolActivity(host, {
+    event: "tool_result",
+    name: "jobs_get_run",
+    content: JSON.stringify(content),
+  });
+  return host;
+}
+
+test("renders a finished job run as a card with a success badge and id chips", () => {
+  const host = renderToolResult({
+    run_id: 77,
+    job_id: 5,
+    life_cycle_state: "TERMINATED",
+    result_state: "SUCCESS",
+    duration_ms: 3500,
+    url: "https://example.cloud.databricks.com/#job/5/run/77",
+  });
+
+  const badge = host.querySelector<HTMLElement>(".job-badge");
+  expect(badge?.textContent).toBe("SUCCESS");
+  expect(badge?.dataset.state).toBe("success");
+  const chips = [...host.querySelectorAll(".job-chip")].map((chip) => chip.textContent);
+  expect(chips).toEqual(["Job 5", "Run 77", "3.5s"]);
+  const link = host.querySelector<HTMLAnchorElement>(".job-link");
+  expect(link?.href).toBe("https://example.cloud.databricks.com/#job/5/run/77");
+  expect(link?.rel).toBe("noopener noreferrer");
+});
+
+test("a terminated run that did not succeed gets a failed badge", () => {
+  const host = renderToolResult({
+    run_id: 78,
+    job_id: 5,
+    life_cycle_state: "TERMINATED",
+    result_state: "FAILED",
+  });
+
+  const badge = host.querySelector<HTMLElement>(".job-badge");
+  expect(badge?.textContent).toBe("FAILED");
+  expect(badge?.dataset.state).toBe("failed");
+});
+
+test("in-flight runs show their life cycle state", () => {
+  const pending = renderToolResult({ run_id: 1, job_id: 5, life_cycle_state: "PENDING" });
+  const running = renderToolResult({ run_id: 2, job_id: 5, life_cycle_state: "RUNNING" });
+
+  expect(pending.querySelector<HTMLElement>(".job-badge")?.dataset.state).toBe("pending");
+  expect(pending.querySelector(".job-badge")?.textContent).toBe("PENDING");
+  expect(running.querySelector<HTMLElement>(".job-badge")?.dataset.state).toBe("running");
+  expect(running.querySelector(".job-badge")?.textContent).toBe("RUNNING");
+});
+
+test("a freshly triggered run shows id chips without a badge", () => {
+  const host = renderToolResult({ run_id: 901, job_id: 5 });
+
+  expect(host.querySelector(".job-badge")).toBeNull();
+  const chips = [...host.querySelectorAll(".job-chip")].map((chip) => chip.textContent);
+  expect(chips).toEqual(["Job 5", "Run 901"]);
+});
+
+test("renders a job list as one row per job", () => {
+  const host = renderToolResult({
+    jobs: [
+      { job_id: 5, name: "nightly", creator: "a@x.com" },
+      { job_id: 6, name: "hourly", creator: "b@x.com" },
+    ],
+    job_count: 2,
+  });
+
+  const names = [...host.querySelectorAll(".job-name")].map((n) => n.textContent);
+  expect(names).toEqual(["nightly", "hourly"]);
+  const ids = [...host.querySelectorAll(".job-chip")].map((chip) => chip.textContent);
+  expect(ids).toEqual(["Job 5", "Job 6"]);
+});
+
+test("a run url that is not http(s) is not linked", () => {
+  const host = renderToolResult({ run_id: 1, job_id: 5, url: "javascript:alert(1)" });
+
+  expect(host.querySelector(".job-link")).toBeNull();
+});
+
+test("job cards keep the raw JSON available", () => {
+  const host = renderToolResult({ run_id: 901, job_id: 5 });
+
+  expect(host.querySelector(".tabular-raw pre")?.textContent).toBe(
+    JSON.stringify({ run_id: 901, job_id: 5 }),
+  );
+});
+
+test("a created or edited job shows its id chip", () => {
+  const created = renderToolResult({ job_id: 42, name: "etl" });
+  const edited = renderToolResult({ job_id: 5, updated: true });
+
+  expect([...created.querySelectorAll(".job-chip")].map((c) => c.textContent)).toEqual(["Job 42"]);
+  expect(created.querySelector(".job-name")?.textContent).toBe("etl");
+  expect([...edited.querySelectorAll(".job-chip")].map((c) => c.textContent)).toEqual(["Job 5"]);
+});
