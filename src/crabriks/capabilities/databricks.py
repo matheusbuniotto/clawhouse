@@ -37,6 +37,7 @@ _MUTATING_KEYWORDS = {
 }
 _READONLY_KEYWORDS = {"select", "show", "describe", "desc", "explain"}
 # Lakeflow tools that change workspace state; each one waits for human approval.
+_JOBS_PAGE_MAX = 100  # the Jobs API rejects a page limit above 100
 _TASK_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _APPROVAL_REQUIRED_TOOLS = frozenset(
     {"jobs_run_now", "jobs_cancel_run", "jobs_create", "jobs_edit"}
@@ -227,6 +228,7 @@ class DatabricksTools:
 
     async def jobs_list(self, limit: int = 25) -> dict[str, object]:
         """List Lakeflow jobs in the workspace."""
+        limit = max(1, min(limit, _JOBS_PAGE_MAX))
         try:
             jobs = list(itertools.islice(self.client.jobs.list(limit=limit), limit))
         except Exception as exc:  # noqa: BLE001
@@ -319,6 +321,16 @@ class DatabricksTools:
             "state_message": state.state_message if state else None,
             "duration_ms": duration,
             "url": run.run_page_url,
+            "tasks": [
+                {
+                    "task_key": task.task_key,
+                    "life_cycle_state": _enum_value(
+                        task.state.life_cycle_state if task.state else None
+                    ),
+                    "result_state": _enum_value(task.state.result_state if task.state else None),
+                }
+                for task in run.tasks or []
+            ],
         }
 
     def all_tools(self) -> list[Callable[..., Any]]:

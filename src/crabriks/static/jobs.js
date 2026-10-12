@@ -1,5 +1,8 @@
 /** Lakeflow job tool results: run cards with a state badge, and job lists. */
 import { el, rawJsonDisclosure } from "./dom.js";
+function parseJobRow(obj) {
+    return { jobId: asNumber(obj.job_id), name: asString(obj.name) ?? "(unnamed job)" };
+}
 const IN_FLIGHT = {
     PENDING: "pending",
     QUEUED: "pending",
@@ -27,15 +30,13 @@ export function tryParseJobView(text) {
         return null;
     const obj = data;
     if (Array.isArray(obj.jobs)) {
-        const jobs = obj.jobs.map((job) => ({
-            jobId: asNumber(job.job_id),
-            name: asString(job.name) ?? "(unnamed job)",
-        }));
-        return { kind: "list", jobs };
+        return { kind: "list", jobs: obj.jobs.map(parseJobRow) };
     }
     const runId = asNumber(obj.run_id);
-    if (runId === undefined)
-        return null;
+    if (runId === undefined) {
+        // jobs_create / jobs_edit report a job, not a run.
+        return asNumber(obj.job_id) === undefined ? null : { kind: "list", jobs: [parseJobRow(obj)] };
+    }
     return {
         kind: "run",
         run: {

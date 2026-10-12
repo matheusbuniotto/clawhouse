@@ -20,6 +20,10 @@ interface JobRow {
 
 export type JobView = { kind: "run"; run: JobRun } | { kind: "list"; jobs: JobRow[] };
 
+function parseJobRow(obj: Record<string, unknown>): JobRow {
+  return { jobId: asNumber(obj.job_id), name: asString(obj.name) ?? "(unnamed job)" };
+}
+
 const IN_FLIGHT: Record<string, JobBadgeState> = {
   PENDING: "pending",
   QUEUED: "pending",
@@ -49,14 +53,13 @@ export function tryParseJobView(text: string): JobView | null {
   if (typeof data !== "object" || data === null) return null;
   const obj = data as Record<string, unknown>;
   if (Array.isArray(obj.jobs)) {
-    const jobs = (obj.jobs as Record<string, unknown>[]).map((job) => ({
-      jobId: asNumber(job.job_id),
-      name: asString(job.name) ?? "(unnamed job)",
-    }));
-    return { kind: "list", jobs };
+    return { kind: "list", jobs: (obj.jobs as Record<string, unknown>[]).map(parseJobRow) };
   }
   const runId = asNumber(obj.run_id);
-  if (runId === undefined) return null;
+  if (runId === undefined) {
+    // jobs_create / jobs_edit report a job, not a run.
+    return asNumber(obj.job_id) === undefined ? null : { kind: "list", jobs: [parseJobRow(obj)] };
+  }
   return {
     kind: "run",
     run: {

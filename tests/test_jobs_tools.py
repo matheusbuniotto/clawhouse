@@ -12,6 +12,7 @@ from databricks.sdk.service.jobs import (
     RunLifeCycleState,
     RunResultState,
     RunState,
+    RunTask,
     SparkPythonTask,
     SqlTask,
     SqlTaskFile,
@@ -117,6 +118,7 @@ async def test_jobs_get_run_reports_state_without_approval() -> None:
         "state_message": "",
         "duration_ms": 3_500,
         "url": "https://example.cloud.databricks.com/#job/5/run/77",
+        "tasks": [],
     }
     client.jobs.get_run.assert_called_once_with(run_id=77)
 
@@ -299,3 +301,38 @@ async def test_system_prompt_lists_every_jobs_tool() -> None:
         "jobs_cancel_run",
     ):
         assert tool in seen[0]
+
+
+async def test_jobs_get_run_reports_each_task_of_a_multi_task_run() -> None:
+    client = MagicMock()
+    client.jobs.get_run.return_value = Run(
+        run_id=80,
+        job_id=5,
+        state=RunState(life_cycle_state=RunLifeCycleState.RUNNING),
+        tasks=[
+            RunTask(
+                task_key="extract",
+                state=RunState(
+                    life_cycle_state=RunLifeCycleState.TERMINATED,
+                    result_state=RunResultState.SUCCESS,
+                ),
+            ),
+            RunTask(task_key="load", state=RunState(life_cycle_state=RunLifeCycleState.RUNNING)),
+        ],
+    )
+
+    result = await _turn(client, "jobs_get_run", {"run_id": 80})
+
+    assert _tool_result(result)["tasks"] == [
+        {"task_key": "extract", "life_cycle_state": "TERMINATED", "result_state": "SUCCESS"},
+        {"task_key": "load", "life_cycle_state": "RUNNING", "result_state": None},
+    ]
+
+
+async def test_jobs_list_keeps_the_limit_within_the_api_range() -> None:
+    client = MagicMock()
+    client.jobs.list.return_value = []
+
+    await _turn(client, "jobs_list", {"limit": 500})
+
+    client.jobs.list.assert_called_once_with(limit=100)

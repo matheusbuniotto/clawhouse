@@ -283,3 +283,12 @@ test("job cards keep the raw JSON available", () => {
     JSON.stringify({ run_id: 901, job_id: 5 }),
   );
 });
+
+test("a created or edited job shows its id chip", () => {
+  const created = renderToolResult({ job_id: 42, name: "etl" });
+  const edited = renderToolResult({ job_id: 5, updated: true });
+
+  expect([...created.querySelectorAll(".job-chip")].map((c) => c.textContent)).toEqual(["Job 42"]);
+  expect(created.querySelector(".job-name")?.textContent).toBe("etl");
+  expect([...edited.querySelectorAll(".job-chip")].map((c) => c.textContent)).toEqual(["Job 5"]);
+});
