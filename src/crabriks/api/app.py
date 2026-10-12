@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -44,6 +45,7 @@ from crabriks.capabilities.workspace import resolve_agent_workspace
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.store.shapes import (
     ApprovalEntry,
+    CustomAgent,
     RunState,
     SessionSummary,
     TranscriptEntry,
@@ -99,6 +101,23 @@ class HatchProfileIn(BaseModel):
     signature_emoji: str | None = None
     user_directives: str | None = None
     hatched: bool = True
+
+
+class CustomAgentIn(BaseModel):
+    name: str
+    description: str
+    system_prompt: str
+    signature_emoji: str = "🤖"
+
+
+class CustomAgentOut(BaseModel):
+    id: str
+    owner_id: str
+    name: str
+    description: str
+    system_prompt: str
+    signature_emoji: str
+    is_platform: bool = False
 
 
 class AuthSnapshotOut(BaseModel):
@@ -194,6 +213,8 @@ def _routes(app: FastAPI) -> None:
     _hatch_routes(app)
     _approval_routes(app)
     _status_routes(app)
+    _agent_routes(app)
+    _composer_routes(app)
 
 
 def _cache_headers(app: FastAPI) -> None:
@@ -462,6 +483,159 @@ def _status_routes(app: FastAPI) -> None:
             sessions=[_session_out(s) for s in summaries],
             log_tail_url=log_tail_url,
         )
+
+
+def _agent_routes(app: FastAPI) -> None:
+    @app.get("/api/agents", response_model=list[CustomAgentOut])
+    async def list_agents(caller: Caller = _require_caller) -> list[CustomAgentOut]:
+        agents: list[CustomAgentOut] = [
+            CustomAgentOut(
+                id="platform-main",
+                owner_id="platform",
+                name="main",
+                description="Crabriks platform agent",
+                system_prompt="",
+                signature_emoji="🦀",
+                is_platform=True,
+            )
+        ]
+        custom = await app.state.store.list_custom_agents(caller.user_id)
+        for c in custom:
+            agents.append(
+                CustomAgentOut(
+                    id=c.id,
+                    owner_id=c.owner_id,
+                    name=c.name,
+                    description=c.description,
+                    system_prompt=c.system_prompt,
+                    signature_emoji=c.signature_emoji,
+                    is_platform=False,
+                )
+            )
+        return agents
+
+    @app.post("/api/agents", status_code=201, response_model=CustomAgentOut)
+    async def create_agent(
+        payload: CustomAgentIn, caller: Caller = _require_caller
+    ) -> CustomAgentOut:
+        agent_id = str(uuid4())
+        custom = CustomAgent(
+            id=agent_id,
+            owner_id=caller.user_id,
+            name=payload.name,
+            description=payload.description,
+            system_prompt=payload.system_prompt,
+            signature_emoji=payload.signature_emoji,
+        )
+        saved = await app.state.store.create_custom_agent(custom)
+        return CustomAgentOut(
+            id=saved.id,
+            owner_id=saved.owner_id,
+            name=saved.name,
+            description=saved.description,
+            system_prompt=saved.system_prompt,
+            signature_emoji=saved.signature_emoji,
+            is_platform=False,
+        )
+
+    @app.delete("/api/agents/{agent_id}", status_code=204)
+    async def delete_agent(agent_id: str, caller: Caller = _require_caller) -> Response:
+        deleted = await app.state.store.delete_custom_agent(agent_id, caller.user_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        return Response(status_code=204)
+
+
+def _slash_suggestions(app: FastAPI, q: str) -> dict[str, Any]:
+    query = q.lower().strip()
+    commands = [
+        {
+            "id": "/compact",
+            "label": "/compact",
+            "description": "Compact conversation history using context compaction",
+        },
+        {"id": "/clear", "label": "/clear", "description": "Start a fresh conversation"},
+        {"id": "/help", "label": "/help", "description": "Show available shortcuts and commands"},
+    ]
+    filtered_cmds = [
+        c
+        for c in commands
+        if not query or query in c["id"].lower() or query in c["description"].lower()
+    ]
+    skills: list[dict[str, str]] = []
+    workspace = getattr(app.state, "workspace", None)
+    if workspace and getattr(workspace, "skills", None) and workspace.skills.is_dir():
+        for skill_dir in sorted(workspace.skills.iterdir()):
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                s_name = skill_dir.name
+                skills.append(
+                    {
+                        "id": f"/skill:{s_name}",
+                        "label": f"/skill:{s_name}",
+                        "description": f"Activate {s_name} skill instructions",
+                    }
+                )
+    filtered_skills = [
+        s
+        for s in skills
+        if not query or query in s["id"].lower() or query in s["description"].lower()
+    ]
+    return {"commands": filtered_cmds, "skills": filtered_skills}
+
+
+async def _at_suggestions(app: FastAPI, caller: Caller, q: str) -> dict[str, Any]:
+    query = q.lower().strip()
+    agents_list: list[dict[str, str]] = [
+        {"name": "main", "description": "Platform agent", "emoji": "🦀"}
+    ]
+    custom = await app.state.store.list_custom_agents(caller.user_id)
+    for ca in custom:
+        agents_list.append(
+            {"name": ca.name, "description": ca.description, "emoji": ca.signature_emoji}
+        )
+    filtered_agents = [
+        a
+        for a in agents_list
+        if not query or query in a["name"].lower() or query in a["description"].lower()
+    ]
+
+    files_list: list[dict[str, str]] = [
+        {"path": "AGENTS.md", "label": "AGENTS.md"},
+        {"path": "SOUL.md", "label": "SOUL.md"},
+        {"path": "IDENTITY.md", "label": "IDENTITY.md"},
+        {"path": "USER.md", "label": "USER.md"},
+        {"path": "MEMORY.md", "label": "MEMORY.md"},
+    ]
+    filtered_files = [f for f in files_list if not query or query in f["path"].lower()]
+
+    tables_list: list[dict[str, str]] = [
+        {"name": "samples.nyctaxi.trips", "description": "NYC Taxi trips sample data"},
+        {"name": "main.default.customers", "description": "Customer accounts table"},
+        {"name": "main.default.orders", "description": "Order records table"},
+    ]
+    filtered_tables = [
+        t
+        for t in tables_list
+        if not query or query in t["name"].lower() or query in t["description"].lower()
+    ]
+
+    return {
+        "agents": filtered_agents,
+        "files": filtered_files,
+        "tables": filtered_tables,
+    }
+
+
+def _composer_routes(app: FastAPI) -> None:
+    @app.get("/api/composer/suggestions")
+    async def composer_suggestions(
+        prefix: str = "@",
+        q: str = "",
+        caller: Caller = _require_caller,
+    ) -> dict[str, Any]:
+        if prefix == "/":
+            return _slash_suggestions(app, q)
+        return await _at_suggestions(app, caller, q)
 
 
 def _caller(request: Request) -> Caller:

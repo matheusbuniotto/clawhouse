@@ -61,3 +61,14 @@ class UserProfile:
     hatched: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CustomAgent:
+    id: str
+    owner_id: str
+    name: str
+    description: str
+    system_prompt: str
+    signature_emoji: str = "🤖"
+    created_at: datetime | None = None

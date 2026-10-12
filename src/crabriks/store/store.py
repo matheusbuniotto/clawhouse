@@ -24,6 +24,7 @@ from databricks.sdk import WorkspaceClient
 from crabriks.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
+    CustomAgent,
     RunState,
     SessionSummary,
     TranscriptEntry,
@@ -104,6 +105,19 @@ CREATE TABLE IF NOT EXISTS crabriks.user_profiles (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS crabriks.custom_agents (
+    id uuid PRIMARY KEY,
+    owner_id text NOT NULL,
+    name text NOT NULL,
+    description text NOT NULL,
+    system_prompt text NOT NULL,
+    signature_emoji text NOT NULL DEFAULT '🤖',
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS custom_agents_owner_idx
+    ON crabriks.custom_agents (owner_id);
 """
 
 
@@ -158,6 +172,12 @@ class SessionStore(Protocol):
 
     async def save_user_profile(self, profile: UserProfile) -> UserProfile: ...
 
+    async def list_custom_agents(self, owner_id: str) -> tuple[CustomAgent, ...]: ...
+
+    async def create_custom_agent(self, agent: CustomAgent) -> CustomAgent: ...
+
+    async def delete_custom_agent(self, agent_id: str, owner_id: str) -> bool: ...
+
     async def close(self) -> None: ...
 
 
@@ -197,6 +217,7 @@ class MemorySessionStore:
         self._sessions: dict[str, _MemorySession] = {}
         self._approvals: dict[str, ApprovalEntry] = {}
         self._profiles: dict[str, UserProfile] = {}
+        self._custom_agents: dict[str, list[CustomAgent]] = {}
         self._lock = asyncio.Lock()
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
@@ -353,6 +374,23 @@ class MemorySessionStore:
             )
             self._profiles[profile.user_id] = saved
             return saved
+
+    async def list_custom_agents(self, owner_id: str) -> tuple[CustomAgent, ...]:
+        async with self._lock:
+            return tuple(self._custom_agents.get(owner_id, []))
+
+    async def create_custom_agent(self, agent: CustomAgent) -> CustomAgent:
+        async with self._lock:
+            agents = self._custom_agents.setdefault(agent.owner_id, [])
+            agents.append(agent)
+            return agent
+
+    async def delete_custom_agent(self, agent_id: str, owner_id: str) -> bool:
+        async with self._lock:
+            agents = self._custom_agents.get(owner_id, [])
+            initial_len = len(agents)
+            self._custom_agents[owner_id] = [a for a in agents if a.id != agent_id]
+            return len(self._custom_agents[owner_id]) < initial_len
 
     async def close(self) -> None:
         return None
@@ -719,6 +757,63 @@ class LakebaseSessionStore:
         if row is None:
             raise RuntimeError("failed to save user profile")
         return _profile_from_row(row)
+
+    async def list_custom_agents(self, owner_id: str) -> tuple[CustomAgent, ...]:
+        rows = await self._pool.fetch(
+            """
+            SELECT id, owner_id, name, description, system_prompt, signature_emoji, created_at
+            FROM crabriks.custom_agents
+            WHERE owner_id = $1
+            ORDER BY created_at ASC
+            """,
+            owner_id,
+        )
+        return tuple(_custom_agent_from_row(row) for row in rows)
+
+    async def create_custom_agent(self, agent: CustomAgent) -> CustomAgent:
+        now = datetime.now(UTC)
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO crabriks.custom_agents (
+                id, owner_id, name, description, system_prompt, signature_emoji, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, owner_id, name, description, system_prompt, signature_emoji, created_at
+            """,
+            _uuid(agent.id),
+            agent.owner_id,
+            agent.name,
+            agent.description,
+            agent.system_prompt,
+            agent.signature_emoji,
+            agent.created_at or now,
+        )
+        if row is None:
+            raise RuntimeError("failed to create custom agent")
+        return _custom_agent_from_row(row)
+
+    async def delete_custom_agent(self, agent_id: str, owner_id: str) -> bool:
+        res = await self._pool.execute(
+            """
+            DELETE FROM crabriks.custom_agents
+            WHERE id = $1 AND owner_id = $2
+            """,
+            _uuid(agent_id),
+            owner_id,
+        )
+        return res.startswith("DELETE 1")
+
+
+def _custom_agent_from_row(row: asyncpg.Record) -> CustomAgent:
+    return CustomAgent(
+        id=str(row["id"]),
+        owner_id=row["owner_id"],
+        name=row["name"],
+        description=row["description"],
+        system_prompt=row["system_prompt"],
+        signature_emoji=row["signature_emoji"],
+        created_at=row["created_at"],
+    )
 
 
 def _profile_from_row(row: asyncpg.Record) -> UserProfile:
