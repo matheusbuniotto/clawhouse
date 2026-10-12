@@ -41,6 +41,7 @@ from crabriks.agent.turn import (
     resume_turn,
 )
 from crabriks.api.identity import Caller, Unauthenticated, resolve_caller
+from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.workspace import resolve_agent_workspace
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.store.shapes import (
@@ -684,6 +685,7 @@ def _build_turn_context(
         dev_user=dev_user,
         dev_token=dev_token,
     )
+    databricks_cap = DatabricksCapability(user_token=token) if token else None
     return TurnContext(
         owner_id=caller.user_id,
         store=request.app.state.store,
@@ -694,6 +696,7 @@ def _build_turn_context(
         user_token=token,
         sensitive_tools=settings.sensitive_tools,
         mcp_toolset_factory=getattr(request.app.state, "mcp_toolset_factory", None),
+        databricks_capability=databricks_cap,
     )
 
 
