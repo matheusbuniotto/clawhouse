@@ -62,12 +62,22 @@ async def test_composer_suggestions_slash_prefix(test_app, tmp_path: Path) -> No
         data = resp.json()
         assert "commands" in data
         assert "skills" in data
+        assert "suggestions" in data
         command_ids = [cmd["id"] for cmd in data["commands"]]
         assert "/compact" in command_ids
         assert "/clear" in command_ids
         assert "/help" in command_ids
         skill_ids = [skill["id"] for skill in data["skills"]]
         assert "/skill:code-review" in skill_ids
+        flat_labels = [s["label"] for s in data["suggestions"]]
+        assert "/skill:code-review" in flat_labels
+        assert "/compact" in flat_labels
+
+        # Also verify frontend type/query param alias
+        alias_resp = await client.get("/api/composer/suggestions?type=/&query=sk")
+        assert alias_resp.status_code == 200
+        alias_data = alias_resp.json()
+        assert any(s["insert_text"] == "/skill:code-review" for s in alias_data["suggestions"])
 
 
 @pytest.mark.asyncio
@@ -81,8 +91,11 @@ async def test_composer_suggestions_at_prefix(test_app) -> None:
         assert "agents" in data
         assert "files" in data
         assert "tables" in data
+        assert "suggestions" in data
         agent_names = [a["name"] for a in data["agents"]]
         assert "main" in agent_names
+        flat_labels = [s["label"] for s in data["suggestions"]]
+        assert "main" in flat_labels
 
 
 @pytest.mark.asyncio
