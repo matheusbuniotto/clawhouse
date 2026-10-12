@@ -357,7 +357,15 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     grow();
   }
 
-  async function fetchSuggestions(type: "@" | "/", query: string): Promise<void> {
+  let requestSeq = 0;
+
+  async function fetchSuggestions(
+    seq: number,
+    type: "@" | "/",
+    query: string,
+    start: number,
+    end: number,
+  ): Promise<void> {
     if (suggestionsAbort) suggestionsAbort.abort();
     suggestionsAbort = new AbortController();
     try {
@@ -366,8 +374,15 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         { signal: suggestionsAbort.signal },
       );
       if (!res.ok) return;
-      // Ensure this response still matches the currently active trigger
-      if (!activeTrigger || activeTrigger.type !== type || activeTrigger.query !== query) {
+      // Guard against stale response using request sequence and active trigger bounds
+      if (
+        seq !== requestSeq ||
+        !activeTrigger ||
+        activeTrigger.type !== type ||
+        activeTrigger.query !== query ||
+        activeTrigger.start !== start ||
+        activeTrigger.end !== end
+      ) {
         return;
       }
       const data = (await res.json()) as {
@@ -396,15 +411,23 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     const triggerStart = cursor - query.length - 1;
     activeTrigger = { type, query, start: triggerStart, end: cursor };
 
-    // Immediately cancel any previous in-flight request when input changes
+    // Immediately cancel in-flight request, clear previous suggestions and popover
+    requestSeq += 1;
+    const currentSeq = requestSeq;
     if (suggestionsAbort) {
       suggestionsAbort.abort();
       suggestionsAbort = null;
     }
+    suggestions = [];
+    selectedIndex = -1;
+    if (popover) {
+      popover.remove();
+      popover = null;
+    }
 
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      void fetchSuggestions(type, query);
+      void fetchSuggestions(currentSeq, type, query, triggerStart, cursor);
     }, 250);
   }
 
