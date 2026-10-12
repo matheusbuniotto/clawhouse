@@ -48,6 +48,7 @@ from crabriks.capabilities.bootstrap import (
 )
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
+from crabriks.capabilities.mentions import execute_compaction, resolve_mention_bundles
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
@@ -463,9 +464,33 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
+    if claimed.user_message.strip() == "/compact":
+        summary = await execute_compaction(ctx.store, claimed.session_id, ctx.owner_id, ctx.model)
+        reply = f"Conversation history compacted successfully.\n\nSummary:\n{summary}"
+        await _append(claimed, TranscriptEntry(role="assistant", content=reply))
+        transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+        return TurnResult(
+            session_id=claimed.session_id,
+            status="ok",
+            reply=reply,
+            error=None,
+            transcript=transcript,
+        )
+
+    bundle = await resolve_mention_bundles(
+        claimed.user_message,
+        store=ctx.store,
+        owner_id=ctx.owner_id,
+        workspace=ctx.workspace,
+        databricks_cap=ctx.databricks_capability,
+    )
+    user_prompt = claimed.user_message
+    if bundle.injected_context:
+        user_prompt = f"{claimed.user_message}\n\n[Injected Context]\n{bundle.injected_context}"
+
     prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
     result = await crabriks_agent().run(
-        claimed.user_message,
+        user_prompt,
         message_history=to_model_messages(prior) or None,
         model=ctx.model,
         instructions=prompt.text,
