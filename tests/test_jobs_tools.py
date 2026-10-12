@@ -1,8 +1,10 @@
 """Lakeflow Jobs tools, observed through `run_turn` (the chat seam)."""
 
 import json
+import warnings
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from databricks.sdk.service.jobs import (
@@ -23,6 +25,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
 from crabriks.agent.turn import TurnContext, TurnResult, resume_turn, run_turn
 from crabriks.capabilities.databricks import DatabricksCapability
+from crabriks.capabilities.workspace import resolve_agent_workspace
 from crabriks.store.store import MemorySessionStore
 
 SESSION = "00000000-0000-4000-8000-0000000000a1"
@@ -49,13 +52,18 @@ def _calls_tool(name: str, args: dict[str, object]) -> FunctionModel:
     return FunctionModel(stream_function=stream)
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
 def _ctx(
     client: MagicMock,
     store: MemorySessionStore,
     model: FunctionModel | None = None,
     warehouse_id: str | None = "wh-1",
+    workspace_root: Path | None = None,
 ) -> TurnContext:
     return TurnContext(
+        workspace=resolve_agent_workspace(workspace_root, "main") if workspace_root else None,
         owner_id="user-1",
         store=store,
         model=model or FunctionModel(stream_function=_says_done),
@@ -336,3 +344,31 @@ async def test_jobs_list_keeps_the_limit_within_the_api_range() -> None:
     await _turn(client, "jobs_list", {"limit": 500})
 
     client.jobs.list.assert_called_once_with(limit=100)
+
+
+async def test_lakeflow_jobs_skill_activates_in_a_turn_and_the_harness_loads_it() -> None:
+    seen: list[str] = []
+
+    async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del info
+        for m in messages:
+            for part in m.parts:
+                content = getattr(part, "content", None)
+                if content is not None:
+                    seen.append(str(content))
+        yield "done"
+
+    ctx = _ctx(
+        MagicMock(),
+        MemorySessionStore(),
+        FunctionModel(stream_function=capture),
+        workspace_root=REPO_ROOT,
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = await run_turn(SESSION, "/skill:lakeflow-jobs rerun my etl", ctx=ctx)
+
+    assert result.status == "ok"
+    assert any("### Skill Instructions: lakeflow-jobs" in text for text in seen)
+    assert any("jobs_run_now" in text for text in seen)
+    assert [str(w.message) for w in caught if "lakeflow-jobs" in str(w.message)] == []
