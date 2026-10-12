@@ -388,6 +388,17 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       const data = (await res.json()) as {
         suggestions: { label: string; insert_text: string; detail: string; kind: string }[];
       };
+      // Re-check sequence and trigger after asynchronous JSON parsing
+      if (
+        seq !== requestSeq ||
+        !activeTrigger ||
+        activeTrigger.type !== type ||
+        activeTrigger.query !== query ||
+        activeTrigger.start !== start ||
+        activeTrigger.end !== end
+      ) {
+        return;
+      }
       suggestions = data.suggestions ?? [];
       selectedIndex = suggestions.length > 0 ? 0 : -1;
       renderPopover();
