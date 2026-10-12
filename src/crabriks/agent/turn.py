@@ -25,7 +25,12 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 from pydantic_ai.tools import DeferredToolResults, ToolApproved, ToolDefinition, ToolDenied
-from pydantic_ai.toolsets import AbstractToolset, ApprovalRequiredToolset
+from pydantic_ai.toolsets import (
+    AbstractToolset,
+    AgentToolset,
+    ApprovalRequiredToolset,
+    FunctionToolset,
+)
 
 from crabriks.agent.core import TurnDeps, crabriks_agent, format_utc
 from crabriks.agent.history import to_model_messages
@@ -36,11 +41,21 @@ from crabriks.agent.prompt import (
     ToolCard,
     build_system_prompt,
 )
-from crabriks.capabilities.bootstrap import BootstrapContext, load_bootstrap
+from crabriks.capabilities.bootstrap import (
+    BootstrapContext,
+    load_bootstrap,
+    load_bootstrap_directives,
+)
 from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
-from crabriks.store.shapes import ApprovalEntry, TranscriptEntry, TurnResult, TurnStatus
+from crabriks.store.shapes import (
+    ApprovalEntry,
+    TranscriptEntry,
+    TurnResult,
+    TurnStatus,
+    UserProfile,
+)
 from crabriks.store.store import (
     ApprovalForbidden,
     ApprovalPending,
@@ -317,11 +332,74 @@ class SensitiveToolGate(AbstractCapability[TurnDeps]):
         return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)
 
 
+SAVE_PROFILE_NAME = "save_profile"
+SAVE_PROFILE_DESCRIPTION = (
+    "Save the assistant's name, signature emoji, and user directives to the user profile "
+    "upon completing the birth ritual."
+)
+SAVE_PROFILE_TOOL_CARD = ToolCard(name=SAVE_PROFILE_NAME, description=SAVE_PROFILE_DESCRIPTION)
+
+
+def is_wake_up_message(text: str) -> bool:
+    cleaned = text.strip().lower()
+    if cleaned in ("wake up, my friend!", "wake up, my friend", "wake up my friend", "wake up"):
+        return True
+    return cleaned.startswith("wake up, my friend")
+
+
+@dataclass
+class HatchCapability(AbstractCapability[TurnDeps]):
+    """Attached during the birth sequence ritual to persist caller's profile."""
+
+    store: SessionStore
+    owner_id: str
+
+    def get_toolset(self) -> AgentToolset[TurnDeps] | None:
+        store = self.store
+        owner_id = self.owner_id
+
+        async def save_profile(
+            assistant_name: str,
+            signature_emoji: str,
+            user_directives: str,
+        ) -> str:
+            profile = UserProfile(
+                user_id=owner_id,
+                assistant_name=assistant_name,
+                signature_emoji=signature_emoji,
+                user_directives=user_directives,
+                hatched=True,
+            )
+            await store.save_user_profile(profile)
+            return (
+                f"Saved profile for {owner_id}: assistant name '{assistant_name}', "
+                f"signature emoji '{signature_emoji}'."
+            )
+
+        return FunctionToolset([save_profile])
+
+
+def _birth_ritual_active(
+    claimed: _Claimed,
+    prior: tuple[TranscriptEntry, ...],
+    profile: UserProfile | None,
+) -> bool:
+    if profile is not None and profile.hatched:
+        return False
+    if is_wake_up_message(claimed.user_message):
+        return True
+    return any(entry.role == "user" and is_wake_up_message(entry.content) for entry in prior)
+
+
 def _capabilities_for_turn(
     claimed: _Claimed,
     mcp: MCPCapability | None,
+    *,
+    birth_ritual: bool = False,
 ) -> list[AgentCapability[TurnDeps]] | None:
     capabilities: list[AgentCapability[TurnDeps]] = []
+    if birth_ritual:
+        capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
     if mcp is not None:
         capabilities.append(mcp)
     skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
@@ -333,28 +411,41 @@ def _capabilities_for_turn(
     return capabilities or None
 
 
-def _prompt_for(claimed: _Claimed, mcp: MCPCapability | None) -> SystemPrompt:
+def _prompt_for(
+    claimed: _Claimed,
+    mcp: MCPCapability | None,
+    *,
+    profile: UserProfile | None = None,
+    birth_ritual: bool = False,
+) -> SystemPrompt:
     ctx = claimed.ctx
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
+    builtin = (*BUILTIN_TOOLS, SAVE_PROFILE_TOOL_CARD) if birth_ritual else BUILTIN_TOOLS
+    user_directives = profile.user_directives if profile else None
     return build_system_prompt(
-        tools=(*BUILTIN_TOOLS, *mcp_cards),
+        tools=(*builtin, *mcp_cards),
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
-        bootstrap=_bootstrap(ctx),
+        bootstrap=_bootstrap(ctx, user_directives=user_directives),
         workspace=ctx.workspace,
+        assistant_name=profile.assistant_name if profile else None,
+        signature_emoji=profile.signature_emoji if profile else None,
+        birth_ritual=birth_ritual,
     )
 
 
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+    profile = await ctx.store.get_user_profile(ctx.owner_id)
+    birth_ritual = _birth_ritual_active(claimed, prior, profile)
     await _append_user(claimed)
     mcp = await mcp_capability(
         ctx.mcp_servers,
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
-    prompt = _prompt_for(claimed, mcp)
+    prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
     result = await crabriks_agent().run(
         claimed.user_message,
         message_history=to_model_messages(prior) or None,
@@ -362,8 +453,9 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         instructions=prompt.text,
         deps=TurnDeps(now=ctx.now),
         event_stream_handler=_persist_and_emit(claimed, queue),
-        capabilities=_capabilities_for_turn(claimed, mcp),
+        capabilities=_capabilities_for_turn(claimed, mcp, birth_ritual=birth_ritual),
     )
+
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
     raw_reply = result.output if isinstance(result.output, str) else str(result.output)
@@ -387,12 +479,14 @@ async def _run_model_resume(
 ) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+    profile = await ctx.store.get_user_profile(ctx.owner_id)
+    birth_ritual = _birth_ritual_active(claimed, prior, profile)
     mcp = await mcp_capability(
         ctx.mcp_servers,
         ctx.user_token,
         toolset_factory=ctx.mcp_toolset_factory,
     )
-    prompt = _prompt_for(claimed, mcp)
+    prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
     history = to_model_messages(prior)
     call_args = approval.arguments
     if ctx.user_token and "[REDACTED]" in call_args:
@@ -418,7 +512,7 @@ async def _run_model_resume(
         event_stream_handler=_persist_and_emit(
             claimed, queue, skip_tool_call_id=approval.tool_call_id
         ),
-        capabilities=_capabilities_for_turn(claimed, mcp),
+        capabilities=_capabilities_for_turn(claimed, mcp, birth_ritual=birth_ritual),
     )
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
@@ -483,10 +577,15 @@ async def _handle_deferred_approvals(
     )
 
 
-def _bootstrap(ctx: TurnContext) -> BootstrapContext | None:
+def _bootstrap(
+    ctx: TurnContext,
+    user_directives: str | None = None,
+) -> BootstrapContext | None:
     if ctx.workspace is None:
+        if user_directives:
+            return load_bootstrap_directives(user_directives)
         return None
-    return load_bootstrap(ctx.workspace)
+    return load_bootstrap(ctx.workspace, user_directives=user_directives)
 
 
 async def _append_user(claimed: _Claimed) -> None:
@@ -661,6 +760,7 @@ __all__ = [
     "ApprovalForbidden",
     "ApprovalNotice",
     "ApprovalPending",
+    "HatchCapability",
     "InvalidSessionId",
     "RunInProgress",
     "SessionForbidden",
@@ -669,6 +769,7 @@ __all__ = [
     "ToolResultNotice",
     "TurnContext",
     "TurnNotice",
+    "is_wake_up_message",
     "iter_resume_turn",
     "iter_turn",
     "resume_turn",

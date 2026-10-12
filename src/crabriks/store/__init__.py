@@ -9,6 +9,7 @@ from crabriks.store.shapes import (
     TranscriptEntry,
     TurnResult,
     TurnStatus,
+    UserProfile,
 )
 from crabriks.store.store import (
     SCHEMA,
@@ -50,6 +51,7 @@ __all__ = [
     "TranscriptEntry",
     "TurnResult",
     "TurnStatus",
+    "UserProfile",
     "connection_plan",
     "open_store",
 ]

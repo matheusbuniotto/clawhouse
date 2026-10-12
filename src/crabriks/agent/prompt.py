@@ -44,12 +44,15 @@ class SystemPrompt:
         return f"{self.prefix}\n\n{self.suffix}"
 
 
-def build_system_prompt(
+def build_system_prompt(  # noqa: PLR0913
     *,
     tools: Sequence[ToolCard],
     runtime: RuntimeMeta,
     bootstrap: BootstrapContext | None = None,
     workspace: WorkspacePaths | None = None,
+    assistant_name: str | None = None,
+    signature_emoji: str | None = None,
+    birth_ritual: bool = False,
 ) -> SystemPrompt:
     """Compose the platform agent's prompt. An agent with no tools is refused.
 
@@ -60,8 +63,9 @@ def build_system_prompt(
     if not tools:
         raise ValueError("an agent must expose at least one tool")
     sections = (
-        _identity(bootstrap),
+        _identity(bootstrap, assistant_name=assistant_name, signature_emoji=signature_emoji),
         _tools(tools),
+        _birth_ritual() if birth_ritual else None,
         _project(bootstrap),
         _workspace(workspace),
     )
@@ -76,8 +80,32 @@ def _runtime(runtime: RuntimeMeta) -> str:
     return "# Runtime\n" + "\n".join(lines)
 
 
-def _identity(bootstrap: BootstrapContext | None) -> str:
-    blocks = [f"# Identity\nYou are Crabriks, the platform agent {AGENT_NAME}."]
+def _birth_ritual() -> str:
+    return (
+        "# Birth Ritual\n"
+        "You are awakening for the first time. The user has initiated the hatch ritual.\n"
+        "Conduct the onboarding birth ritual:\n"
+        "- Greet the user warmly and acknowledge awakening.\n"
+        "- Guide them to establish:\n"
+        "  1. Your preferred name / nickname\n"
+        "  2. Your signature emoji\n"
+        "  3. The user's role and focus in Databricks\n"
+        "  4. Preferred communication tone and directives\n"
+        "- Once the user shares these preferences, conclude the ritual and save them "
+        "using the save_profile tool."
+    )
+
+
+def _identity(
+    bootstrap: BootstrapContext | None,
+    *,
+    assistant_name: str | None = None,
+    signature_emoji: str | None = None,
+) -> str:
+    name = assistant_name or "Crabriks"
+    if signature_emoji and signature_emoji not in name:
+        name = f"{name} {signature_emoji}"
+    blocks = [f"# Identity\nYou are {name}, the platform agent {AGENT_NAME}."]
     blocks.extend(_blocks(bootstrap, _IDENTITY_FILES))
     return "\n\n".join(blocks)
 

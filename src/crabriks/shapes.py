@@ -9,6 +9,7 @@ from crabriks.store.shapes import (
     TranscriptEntry,
     TurnResult,
     TurnStatus,
+    UserProfile,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "TranscriptEntry",
     "TurnResult",
     "TurnStatus",
+    "UserProfile",
 ]

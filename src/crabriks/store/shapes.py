@@ -50,3 +50,14 @@ class TurnResult:
     error: str | None
     transcript: tuple[TranscriptEntry, ...]
     approval_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UserProfile:
+    user_id: str
+    assistant_name: str | None = None
+    signature_emoji: str | None = None
+    user_directives: str | None = None
+    hatched: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

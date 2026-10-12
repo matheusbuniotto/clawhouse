@@ -10,7 +10,7 @@ import pytest
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from crabriks.shapes import TranscriptEntry
+from crabriks.shapes import TranscriptEntry, UserProfile
 from crabriks.store import LakebaseSessionStore, RunInProgress
 from crabriks.turn import TurnContext, run_turn
 
@@ -169,3 +169,33 @@ async def test_lakebase_list_sessions_reports_run_state_lifecycle() -> None:
     assert states_by_id[idle_session.id] == "idle"
     assert states_by_id[running_session.id] == "running"
     assert states_by_id[error_session.id] == "error"
+
+
+async def test_lakebase_user_profile_crud() -> None:
+    pool = await _pool()
+    store = LakebaseSessionStore(pool)
+    try:
+        await store.migrate()
+        await pool.execute("TRUNCATE crabriks.user_profiles CASCADE")
+        assert await store.get_user_profile(OWNER) is None
+
+        profile = UserProfile(
+            user_id=OWNER,
+            assistant_name="Jarvis",
+            signature_emoji="🤖",
+            user_directives="Data Engineer, be concise",
+            hatched=True,
+        )
+        saved = await store.save_user_profile(profile)
+        assert saved.user_id == OWNER
+        assert saved.hatched is True
+
+        retrieved = await store.get_user_profile(OWNER)
+        assert retrieved is not None
+        assert retrieved.user_id == OWNER
+        assert retrieved.assistant_name == "Jarvis"
+        assert retrieved.signature_emoji == "🤖"
+        assert retrieved.user_directives == "Data Engineer, be concise"
+        assert retrieved.hatched is True
+    finally:
+        await store.close()

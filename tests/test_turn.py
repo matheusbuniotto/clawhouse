@@ -16,7 +16,7 @@ from pydantic_core import SchemaValidator, core_schema
 
 from crabriks.mcp import InsecureMCPEndpoint, MCPServerConfig
 from crabriks.prompt import CLOCK_DESCRIPTION
-from crabriks.shapes import TranscriptEntry
+from crabriks.shapes import TranscriptEntry, UserProfile
 from crabriks.skills import loaded_skill_text
 from crabriks.store import MemorySessionStore
 from crabriks.turn import (
@@ -858,3 +858,123 @@ async def test_turn_fails_when_duplicate_mcp_server_names_configured() -> None:
 def test_turn_fails_when_insecure_mcp_endpoint_configured() -> None:
     with pytest.raises(InsecureMCPEndpoint, match="must use https"):
         MCPServerConfig(name="insecure", url="http://insecure.example.com/mcp")
+
+
+async def test_birth_ritual_injected_and_offers_save_profile_for_wake_up() -> None:
+    store = MemorySessionStore()
+    seen_instructions: list[str] = []
+    seen_tool_names: list[list[str]] = []
+
+    async def model_fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        seen_instructions.append(info.instructions or "")
+        seen_tool_names.append([tool.name for tool in info.function_tools])
+        if "tool-return" not in _parts(messages):
+            args = json.dumps(
+                {
+                    "assistant_name": "Jarvis",
+                    "signature_emoji": "🤖",
+                    "user_directives": "Data Engineer, be concise",
+                }
+            )
+            yield {0: DeltaToolCall(name="save_profile", json_args=args, tool_call_id="call-hatch")}
+            return
+        yield "Hello Ada! I am Jarvis 🤖. Glad to meet you."
+
+    ctx = _ctx(store, FunctionModel(stream_function=model_fn))
+    result = await run_turn(SESSION, "Wake up, my friend!", ctx=ctx)
+
+    assert result.status == "ok"
+    assert "Hello Ada! I am Jarvis 🤖" in result.reply
+
+    # Verified instructions carried the birth sequence ritual
+    assert len(seen_instructions) >= 1
+    prompt = seen_instructions[0]
+    assert "# Birth Ritual" in prompt
+    assert "preferred name" in prompt
+    assert "role" in prompt
+    assert "tone" in prompt
+    assert "emoji" in prompt
+    assert "save_profile" in prompt
+
+    # Verified save_profile tool was available
+    assert "save_profile" in seen_tool_names[0]
+
+    # Verified durable persistence in Lakebase profile
+    saved_profile = await store.get_user_profile(OWNER)
+    assert saved_profile is not None
+    assert saved_profile.hatched is True
+    assert saved_profile.assistant_name == "Jarvis"
+    assert saved_profile.signature_emoji == "🤖"
+    assert saved_profile.user_directives == "Data Engineer, be concise"
+
+
+async def test_ritual_is_not_a_gate_operational_task_executes_directly() -> None:
+    store = MemorySessionStore()
+    seen_instructions: list[str] = []
+
+    async def model_fn(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen_instructions.append(info.instructions or "")
+        yield "Counted 42 records in sales_table."
+
+    ctx = _ctx(store, FunctionModel(stream_function=model_fn))
+    result = await run_turn(SESSION, "Count records in sales_table", ctx=ctx)
+
+    assert result.status == "ok"
+    assert result.reply == "Counted 42 records in sales_table."
+
+    # Verified birth sequence was NOT injected because task was operational
+    assert len(seen_instructions) == 1
+    prompt = seen_instructions[0]
+    assert "# Birth Ritual" not in prompt
+
+    # Profile remains unhatched
+    assert await store.get_user_profile(OWNER) is None
+
+    # Sending wake up phrase subsequently in the same session triggers the birth ritual
+    result_turn2 = await run_turn(SESSION, "Wake up, my friend!", ctx=ctx)
+    assert result_turn2.status == "ok"
+    assert len(seen_instructions) == 2
+    assert "# Birth Ritual" in seen_instructions[1]
+
+
+async def test_subsequent_turns_include_custom_identity_and_directives(
+    tmp_path: Path,
+) -> None:
+    store = MemorySessionStore()
+    await store.save_user_profile(
+        UserProfile(
+            user_id=OWNER,
+            assistant_name="Jarvis",
+            signature_emoji="🤖",
+            user_directives="Prefers concise tables and Python.",
+            hatched=True,
+        )
+    )
+
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    workspace.directory.mkdir(parents=True)
+    workspace.agents.write_text("Follow agreements.\n", encoding="utf-8")
+
+    seen_instructions: list[str] = []
+
+    async def model_fn(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages
+        seen_instructions.append(info.instructions or "")
+        yield "Ready to help."
+
+    ctx = _ctx(store, FunctionModel(stream_function=model_fn), workspace=workspace)
+    result = await run_turn(SESSION, "Help me with a query", ctx=ctx)
+
+    assert result.status == "ok"
+    assert len(seen_instructions) == 1
+    prompt = seen_instructions[0]
+
+    # Verified custom assistant name and emoji in identity
+    assert "You are Jarvis 🤖, the platform agent main." in prompt
+    # Verified user directives in project context under USER.md
+    assert "Prefers concise tables and Python." in prompt
+    # Verified no birth ritual section
+    assert "# Birth Ritual" not in prompt

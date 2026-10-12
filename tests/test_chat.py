@@ -631,3 +631,51 @@ async def test_unauthorized_user_cannot_use_dev_token_for_mcp() -> None:
     assert resp.status_code == 200
     assert captured_tokens == []
     assert dev_auth not in resp.text
+
+
+async def test_hatch_state_query_and_update() -> None:
+    store = MemorySessionStore()
+    app = _app(store, FunctionModel(stream_function=_clock))
+
+    async with _client(app) as client:
+        # 1. Unhatched user initially
+        get_res = await client.get("/api/hatch", headers=HEADERS)
+        assert get_res.status_code == 200
+        assert get_res.json() == {
+            "user_id": "ada@example.com",
+            "hatched": False,
+            "assistant_name": None,
+            "signature_emoji": None,
+            "user_directives": None,
+        }
+
+        # 2. Save profile through /api/hatch
+        post_res = await client.post(
+            "/api/hatch",
+            headers=HEADERS,
+            json={
+                "assistant_name": "Jarvis",
+                "signature_emoji": "🤖",
+                "user_directives": "Data Engineer, be concise",
+                "hatched": True,
+            },
+        )
+        assert post_res.status_code == 200
+        assert post_res.json() == {
+            "user_id": "ada@example.com",
+            "hatched": True,
+            "assistant_name": "Jarvis",
+            "signature_emoji": "🤖",
+            "user_directives": "Data Engineer, be concise",
+        }
+
+        # 3. Subsequent query shows hatched with saved details
+        get_after = await client.get("/api/hatch", headers=HEADERS)
+        assert get_after.status_code == 200
+        assert get_after.json() == {
+            "user_id": "ada@example.com",
+            "hatched": True,
+            "assistant_name": "Jarvis",
+            "signature_emoji": "🤖",
+            "user_directives": "Data Engineer, be concise",
+        }

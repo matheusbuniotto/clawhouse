@@ -4,6 +4,7 @@ from crabriks.capabilities.bootstrap import (
     BootstrapContext,
     BootstrapFile,
     load_bootstrap,
+    load_bootstrap_directives,
 )
 
-__all__ = ["BootstrapContext", "BootstrapFile", "load_bootstrap"]
+__all__ = ["BootstrapContext", "BootstrapFile", "load_bootstrap", "load_bootstrap_directives"]
