@@ -100,7 +100,7 @@ def test_databricks_capability_metadata_tools() -> None:
         comment="User accounts table",
     )
 
-    cap = DatabricksCapability(client_factory=lambda token: mock_client, warehouse_id="wh-1")
+    cap = DatabricksCapability(client_factory=lambda _auth: mock_client, warehouse_id="wh-1")
     toolset = cap.get_toolset()
     assert toolset is not None
 
@@ -124,7 +124,7 @@ async def test_dbsql_query_read_vs_mutation_approval() -> None:
     stmt_resp.status.state = MagicMock(value="SUCCEEDED")
     mock_client.statement_execution.execute_statement.return_value = stmt_resp
 
-    cap = DatabricksCapability(client_factory=lambda token: mock_client, warehouse_id="wh-1")
+    cap = DatabricksCapability(client_factory=lambda _auth: mock_client, warehouse_id="wh-1")
 
     # 1. Read-only SELECT query should NOT require approval
     async def call_read(
@@ -151,7 +151,7 @@ async def test_dbsql_query_read_vs_mutation_approval() -> None:
         store=store,
         model=FunctionModel(stream_function=call_read),
         now=now,
-        user_token="mock_dummy_token",
+        user_token="client-credential",
         databricks_capability=cap,
     )
 
@@ -178,7 +178,7 @@ async def test_dbsql_query_read_vs_mutation_approval() -> None:
         store=store,
         model=FunctionModel(stream_function=call_mutate),
         now=now,
-        user_token="mock_dummy_token",
+        user_token="client-credential",
         databricks_capability=cap,
     )
 

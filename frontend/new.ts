@@ -46,14 +46,21 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const createBtn = el("button", "btn-create-agent", "Create Agent");
   createBtn.type = "submit";
 
+  const agentStatusLine = el("p", "status");
+  agentStatusLine.id = "agent-status";
+  agentStatusLine.setAttribute("role", "status");
+
   createForm.append(nameInput, descInput, promptArea, createBtn);
-  agentsSection.append(agentsHeader, agentsList, createForm);
+  agentsSection.append(agentsHeader, agentsList, createForm, agentStatusLine);
   root.append(agentsSection);
 
   async function loadAgents(): Promise<void> {
     try {
       const res = await fetch("/api/agents");
-      if (!res.ok) return;
+      if (!res.ok) {
+        agentStatusLine.textContent = "Failed to load custom agents.";
+        return;
+      }
       const agents = (await res.json()) as {
         id: string;
         name: string;
@@ -75,20 +82,34 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         delBtn.type = "button";
         delBtn.addEventListener("click", async () => {
           delBtn.disabled = true;
-          await fetch(`/api/agents/${encodeURIComponent(ag.id)}`, { method: "DELETE" });
-          void loadAgents();
+          agentStatusLine.textContent = "";
+          try {
+            const delRes = await fetch(`/api/agents/${encodeURIComponent(ag.id)}`, {
+              method: "DELETE",
+            });
+            if (!delRes.ok) {
+              agentStatusLine.textContent = `Failed to delete agent @${ag.name}.`;
+              delBtn.disabled = false;
+              return;
+            }
+            void loadAgents();
+          } catch {
+            agentStatusLine.textContent = `Failed to delete agent @${ag.name}.`;
+            delBtn.disabled = false;
+          }
         });
         item.append(title, desc, delBtn);
         agentsList.append(item);
       }
     } catch {
-      // ignore
+      agentStatusLine.textContent = "Failed to load custom agents.";
     }
   }
 
   createForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     createBtn.disabled = true;
+    agentStatusLine.textContent = "";
     try {
       const res = await fetch("/api/agents", {
         method: "POST",
@@ -99,12 +120,16 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
           system_prompt: promptArea.value.trim(),
         }),
       });
-      if (res.ok) {
-        nameInput.value = "";
-        descInput.value = "";
-        promptArea.value = "";
-        void loadAgents();
+      if (!res.ok) {
+        agentStatusLine.textContent = "Failed to create custom agent.";
+        return;
       }
+      nameInput.value = "";
+      descInput.value = "";
+      promptArea.value = "";
+      void loadAgents();
+    } catch {
+      agentStatusLine.textContent = "Failed to create custom agent.";
     } finally {
       createBtn.disabled = false;
     }
