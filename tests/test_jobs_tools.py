@@ -58,6 +58,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def _ctx(
     client: MagicMock,
     store: MemorySessionStore,
+    *,
     model: FunctionModel | None = None,
     warehouse_id: str | None = "wh-1",
     workspace_root: Path | None = None,
@@ -81,7 +82,7 @@ async def _turn(
     args: dict[str, object],
     store: MemorySessionStore | None = None,
 ) -> TurnResult:
-    ctx = _ctx(client, store or MemorySessionStore(), _calls_tool(tool, args))
+    ctx = _ctx(client, store or MemorySessionStore(), model=_calls_tool(tool, args))
     return await run_turn(SESSION, "go", ctx=ctx)
 
 
@@ -297,7 +298,7 @@ async def test_system_prompt_lists_every_jobs_tool() -> None:
         seen.append(info.instructions or "")
         yield "done"
 
-    ctx = _ctx(MagicMock(), MemorySessionStore(), FunctionModel(stream_function=capture))
+    ctx = _ctx(MagicMock(), MemorySessionStore(), model=FunctionModel(stream_function=capture))
     await run_turn(SESSION, "hi", ctx=ctx)
 
     for tool in (
@@ -361,7 +362,7 @@ async def test_lakeflow_jobs_skill_activates_in_a_turn_and_the_harness_loads_it(
     ctx = _ctx(
         MagicMock(),
         MemorySessionStore(),
-        FunctionModel(stream_function=capture),
+        model=FunctionModel(stream_function=capture),
         workspace_root=REPO_ROOT,
     )
     with warnings.catch_warnings(record=True) as caught:
