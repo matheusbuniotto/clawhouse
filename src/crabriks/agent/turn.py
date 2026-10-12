@@ -1,6 +1,7 @@
 """One serialized chat turn: prompt, tool dispatch, guardrails, and transcript persistence."""
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
@@ -401,6 +402,20 @@ DATABRICKS_TOOL_CARDS = (
     ToolCard(name="uc_list_catalogs", description="List available Unity Catalog catalogs."),
     ToolCard(name="uc_list_schemas", description="List schemas within a Unity Catalog catalog."),
     ToolCard(name="uc_list_tables", description="List tables within a Unity Catalog schema."),
+    ToolCard(name="jobs_list", description="List Lakeflow jobs in the workspace."),
+    ToolCard(name="jobs_get_run", description="Get the state of a Lakeflow job run."),
+    ToolCard(
+        name="jobs_run_now",
+        description="Trigger a Lakeflow job run (needs approval); optional parameter overrides.",
+    ),
+    ToolCard(
+        name="jobs_create",
+        description="Create a Lakeflow job running a Python script or SQL file (needs approval).",
+    ),
+    ToolCard(name="jobs_edit", description="Update Lakeflow job settings (needs approval)."),
+    ToolCard(
+        name="jobs_cancel_run", description="Cancel an active Lakeflow job run (needs approval)."
+    ),
 )
 
 
@@ -794,6 +809,8 @@ def _as_text(content: object) -> str:
     loaded = loaded_skill_text(content)
     if loaded is not None:
         return loaded
+    if isinstance(content, dict | list | tuple):
+        return json.dumps(content, default=str)
     return str(content)
 
 

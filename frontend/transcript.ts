@@ -1,7 +1,8 @@
 /** Pure, side-effect-free transcript rendering: markdown and tool-activity rows. */
 
-import { el, type ActivityState } from "./dom.js";
+import { el, rawJsonDisclosure, type ActivityState } from "./dom.js";
 import { highlight } from "./highlight.js";
+import { renderJobView, tryParseJobView } from "./jobs.js";
 
 export type ToolState = ActivityState;
 
@@ -98,8 +99,11 @@ function toolOutputSection(output: string): HTMLElement {
   section.append(el("span", "tool-label", "Output"));
 
   const parsed = tryParseTabular(output);
+  const job = parsed ? null : tryParseJobView(output);
   if (parsed) {
     section.append(renderTabularView(parsed, output));
+  } else if (job) {
+    section.append(renderJobView(job, output));
   } else {
     section.append(el("pre", "tool-io tool-output", output));
   }
@@ -172,12 +176,8 @@ function renderTabularView(data: TabularData, rawJson: string): HTMLElement {
   table.append(tbody);
   tableWrap.append(table);
 
-  const rawDetails = el("details", "tabular-raw");
-  const rawSummary = el("summary", "", "Raw JSON");
-  const rawPre = el("pre", "tool-io tool-output", rawJson);
-  rawDetails.append(rawSummary, rawPre);
 
-  wrap.append(meta, tableWrap, rawDetails);
+  wrap.append(meta, tableWrap, rawJsonDisclosure(rawJson));
   return wrap;
 }
 

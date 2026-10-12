@@ -24,6 +24,7 @@ dependencies = [
 "src/crabriks/static/dom.js" = "crabriks/static/dom.js"
 "src/crabriks/static/highlight.js" = "crabriks/static/highlight.js"
 "src/crabriks/static/index.html" = "crabriks/static/index.html"
+"src/crabriks/static/jobs.js" = "crabriks/static/jobs.js"
 "src/crabriks/static/new.js" = "crabriks/static/new.js"
 "src/crabriks/static/screens.css" = "crabriks/static/screens.css"
 "src/crabriks/static/sessions.js" = "crabriks/static/sessions.js"

@@ -33,3 +33,10 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   if (days < 7) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
 }
+
+/** A collapsed "Raw JSON" disclosure, shared by the structured tool-result views. */
+export function rawJsonDisclosure(rawJson: string): HTMLDetailsElement {
+  const details = el("details", "tabular-raw");
+  details.append(el("summary", "", "Raw JSON"), el("pre", "tool-io tool-output", rawJson));
+  return details;
+}
