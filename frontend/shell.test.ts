@@ -157,6 +157,39 @@ test("the new-session action and rail session links navigate in place", async ()
   expect(location.search).toBe("?session=s1");
 });
 
+test("clicking the delete button on a rail session calls DELETE and refreshes the list", async () => {
+  let deleted = false;
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/sessions/s1" && init?.method === "DELETE") {
+      deleted = true;
+      return { ok: true, status: 204 } as Response;
+    }
+    if (url === "/api/sessions") {
+      return jsonResponse({ sessions: deleted ? [SESSIONS[1]] : SESSIONS });
+    }
+    if (url === "/api/me") return jsonResponse({ user_id: "ada@example.com" });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await mount();
+  await vi.waitFor(() => expect(document.querySelectorAll(".rail-session")).toHaveLength(2));
+
+  const delBtn = document.querySelector(
+    '.rail-session[data-id="s1"] .rail-session-delete',
+  ) as HTMLButtonElement;
+  expect(delBtn).not.toBeNull();
+  delBtn.click();
+
+  await vi.waitFor(() => expect(deleted).toBe(true));
+  await vi.waitFor(() => expect(document.querySelectorAll(".rail-session")).toHaveLength(1));
+  expect(document.querySelector('.rail-session[data-id="s1"]')).toBeNull();
+  expect(document.querySelector('.rail-session[data-id="s2"]')).not.toBeNull();
+});
+
 test("back and forward re-render the screen from the URL", async () => {
   await mount();
   await vi.waitFor(() => expect(document.querySelector("#screen #log")).not.toBeNull());

@@ -132,6 +132,8 @@ class SessionStore(Protocol):
 
     async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]: ...
 
+    async def delete_session(self, session_id: str, owner_id: str) -> bool: ...
+
     async def claim_run(self, session_id: str) -> str: ...
 
     async def append_entry(self, session_id: str, run_id: str, entry: TranscriptEntry) -> None: ...
@@ -247,6 +249,19 @@ class MemorySessionStore:
             ]
         owned.reverse()
         return tuple(_memory_summary(session_id, session) for session_id, session in owned)
+
+    async def delete_session(self, session_id: str, owner_id: str) -> bool:
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFound(session_id)
+            if session.owner_id != owner_id:
+                raise SessionForbidden(session_id)
+            del self._sessions[session_id]
+            self._approvals = {
+                k: v for k, v in self._approvals.items() if v.session_id != session_id
+            }
+            return True
 
     async def claim_run(self, session_id: str) -> str:
         async with self._lock:
@@ -587,6 +602,18 @@ class LakebaseSessionStore:
             return tuple(_entry_from_row(row) for row in rows)
         await self._require_owner(session_id, owner_id)
         return ()
+
+    async def delete_session(self, session_id: str, owner_id: str) -> bool:
+        await self._require_owner(session_id, owner_id)
+        session = _uuid(session_id)
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM crabriks.approvals WHERE session_id = $1", session)
+            await conn.execute(
+                "DELETE FROM crabriks.transcript_entries WHERE session_id = $1", session
+            )
+            await conn.execute("DELETE FROM crabriks.runs WHERE session_id = $1", session)
+            deleted = await conn.execute("DELETE FROM crabriks.sessions WHERE id = $1", session)
+            return "DELETE 1" in deleted
 
     async def close(self) -> None:
         await self._pool.close()

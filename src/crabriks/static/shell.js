@@ -122,6 +122,32 @@ export function mountShell(root = document) {
         link.dataset.title = item.title.toLowerCase();
         link.href = `/chat?session=${item.id}`;
         link.append(el("span", "rail-session-title", item.title || "Untitled session"));
+        const actions = el("span", "rail-session-actions");
+        const delBtn = el("button", "rail-session-delete", "×");
+        delBtn.type = "button";
+        delBtn.setAttribute("aria-label", `Delete session ${item.title || item.id}`);
+        delBtn.title = "Delete session";
+        delBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!confirm(`Delete "${item.title || "Untitled session"}"?`))
+                return;
+            try {
+                const res = await fetch(`/api/sessions/${item.id}`, { method: "DELETE" });
+                if (res.ok || res.status === 204) {
+                    const currentSession = new URL(location.href).searchParams.get("session");
+                    if (currentSession === item.id) {
+                        navigate("/chat");
+                    }
+                    void loadSessions();
+                }
+            }
+            catch {
+                // ignore network error
+            }
+        });
+        actions.append(delBtn);
+        link.append(actions);
         link.append(el("span", "rail-session-time", relativeTime(item.created_at)));
         if (isRunning(item.run_state)) {
             const pulse = el("span", "rail-session-pulse");
@@ -239,6 +265,9 @@ export function mountShell(root = document) {
     handle.addEventListener("pointerdown", startResize);
     shell.addEventListener("click", onClick);
     window.addEventListener("popstate", onPopState);
+    window.addEventListener("crabriks:session-deleted", () => {
+        void loadSessions();
+    });
     const storedWidth = Number(localStorage.getItem(RAIL_WIDTH_KEY));
     if (Number.isFinite(storedWidth) && storedWidth > 0)
         applyRailWidth(storedWidth);
