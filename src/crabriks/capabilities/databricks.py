@@ -228,7 +228,7 @@ class DatabricksCapability(AbstractCapability[Any]):
     """Provides Unity Catalog discovery, DBSQL query execution, and system.ai tools."""
 
     client_factory: Callable[[str], WorkspaceClient] = field(
-        default_factory=lambda: (lambda token: WorkspaceClient(token=token))
+        default_factory=lambda: lambda token: WorkspaceClient(token=token)
     )
     warehouse_id: str | None = None
     user_token: str = ""

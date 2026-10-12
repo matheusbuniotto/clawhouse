@@ -207,3 +207,41 @@ test("when already hatched or sessions exist, the composer is not pre-filled", a
   await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
   expect(message.value).toBe("");
 });
+
+test("shows autocomplete popover on @ trigger and inserts suggestion on Enter", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/composer/suggestions")) {
+      return jsonResponse({
+        suggestions: [
+          {
+            label: "main",
+            insert_text: "@main",
+            detail: "Databricks Assistant",
+            kind: "agent",
+          },
+        ],
+      });
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "@ma";
+  message.selectionStart = 3;
+  message.selectionEnd = 3;
+  message.dispatchEvent(new Event("input"));
+
+  await vi.waitFor(() => expect(document.querySelector(".composer-popover")).not.toBeNull());
+  expect(document.querySelector(".popover-item-label")?.textContent).toBe("main");
+
+  // Press Enter to select
+  message.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  expect(document.querySelector(".composer-popover")).toBeNull();
+  expect(message.value).toBe("@main ");
+});
