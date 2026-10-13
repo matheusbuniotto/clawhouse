@@ -113,6 +113,24 @@ def test_extra_fields_such_as_a_model_chosen_range_are_rejected() -> None:
         )
 
 
+def test_normalize_host_ensures_https() -> None:
+    assert (
+        sheets.normalize_host("dbc-562d9321-2592.cloud.databricks.com")
+        == "https://dbc-562d9321-2592.cloud.databricks.com"
+    )
+    assert (
+        sheets.normalize_host("https://dbc-562d9321-2592.cloud.databricks.com/")
+        == "https://dbc-562d9321-2592.cloud.databricks.com"
+    )
+
+
+def test_databricks_host_reads_env_with_or_without_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABRICKS_HOST", "dbc-bare.cloud.databricks.com")
+    assert sheets.databricks_host() == "https://dbc-bare.cloud.databricks.com"
+    monkeypatch.setenv("DATABRICKS_HOST", "https://dbc-with-scheme.cloud.databricks.com/")
+    assert sheets.databricks_host() == "https://dbc-with-scheme.cloud.databricks.com"
+
+
 @pytest.mark.asyncio
 async def test_missing_token_never_constructs_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sheets, "databricks_host", lambda: pytest.fail("unexpected host lookup"))

@@ -152,14 +152,21 @@ class GatewayRpcError(Exception):
         super().__init__(f"RPC error {code}")
 
 
+def normalize_host(host: str) -> str:
+    cleaned = host.strip().rstrip("/")
+    if cleaned and not cleaned.startswith(("http://", "https://")):
+        return f"https://{cleaned}"
+    return cleaned
+
+
 def databricks_host() -> str:
-    host = os.environ.get("DATABRICKS_HOST", "").strip().rstrip("/")
+    host = os.environ.get("DATABRICKS_HOST", "").strip()
     if host:
-        return host
+        return normalize_host(host)
     try:
         resolved = WorkspaceClient().config.host
         if isinstance(resolved, str) and resolved:
-            return resolved.rstrip("/")
+            return normalize_host(resolved)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Failed to resolve workspace host from client: %s", exc)
     raise RuntimeError("Databricks workspace host is unavailable.")
@@ -228,7 +235,8 @@ def _exchange(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any] | None:
-    url = f"{host.rstrip('/')}/ai-gateway/mcp-services/{SERVICE}"
+    base_host = normalize_host(host)
+    url = f"{base_host}/ai-gateway/mcp-services/{SERVICE}"
     _post_rpc(
         token,
         url,
@@ -395,7 +403,8 @@ async def _guarded(
             return await action()
     except TimeoutError:
         return {"error": TIMED_OUT}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
+        logger.exception("Google Sheets write failed")
         return {"error": _failure(exc)}
 
 
