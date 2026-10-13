@@ -78,10 +78,33 @@ export function mount(root, ctx) {
             renderEntry(entry);
         transcript.scrollTop = transcript.scrollHeight;
     }
-    function ensureDraft() {
+    function showThinking() {
         transcript.querySelector(".empty")?.remove();
         if (draft)
             return draft;
+        draft = el("article", "assistant draft thinking");
+        draft.dataset.draft = "true";
+        draft.setAttribute("aria-busy", "true");
+        const label = el("span", "thinking-indicator", "Thinking");
+        const dots = el("span", "thinking-dots");
+        dots.append(el("span"), el("span"), el("span"));
+        label.append(dots);
+        draft.append(label);
+        transcript.append(draft);
+        transcript.scrollTop = transcript.scrollHeight;
+        draftText = "";
+        return draft;
+    }
+    function ensureDraft() {
+        transcript.querySelector(".empty")?.remove();
+        if (draft) {
+            if (draft.classList.contains("thinking")) {
+                draft.classList.remove("thinking");
+                draft.removeAttribute("aria-busy");
+                draft.replaceChildren();
+            }
+            return draft;
+        }
         draft = el("article", "assistant draft");
         draft.dataset.draft = "true";
         transcript.append(draft);
@@ -157,14 +180,19 @@ export function mount(root, ctx) {
         if (frame.event === "token" && payload.text) {
             draftText += payload.text;
             ensureDraft().textContent = draftText;
+            transcript.scrollTop = transcript.scrollHeight;
             return;
         }
         if (frame.event === "tool_call") {
+            if (draft?.classList.contains("thinking")) {
+                dropDraft();
+            }
             appendToolActivity(transcript, {
                 event: "tool_call",
                 name: payload.name ?? "tool",
                 arguments: payload.arguments ?? "",
             });
+            transcript.scrollTop = transcript.scrollHeight;
             return;
         }
         if (frame.event === "tool_result") {
@@ -173,6 +201,9 @@ export function mount(root, ctx) {
                 name: payload.name ?? "tool",
                 content: payload.content ?? "",
             });
+            if (!draft)
+                showThinking();
+            transcript.scrollTop = transcript.scrollHeight;
             return;
         }
         if (frame.event === "done") {
@@ -218,6 +249,11 @@ export function mount(root, ctx) {
         controller = new AbortController();
         const signal = controller.signal;
         let finished = false;
+        // Immediately render user message and thinking indicator for responsive chat feel
+        transcript.querySelector(".empty")?.remove();
+        transcript.append(renderUserTurn(text));
+        showThinking();
+        transcript.scrollTop = transcript.scrollHeight;
         try {
             const response = await fetch(`/api/sessions/${sessionId()}/turns`, {
                 method: "POST",
@@ -226,19 +262,20 @@ export function mount(root, ctx) {
                 signal,
             });
             if (response.status === 409) {
+                dropDraft();
                 const body = (await response.json());
                 setStatus(body.error ?? "A turn is already running for this session.");
                 return;
             }
             if (!response.ok) {
+                dropDraft();
                 setStatus("The turn could not be started.");
                 return;
             }
-            transcript.querySelector(".empty")?.remove();
-            transcript.append(renderUserTurn(text));
             finished = await readSse(response);
         }
         catch {
+            dropDraft();
             if (!signal.aborted)
                 setStatus("The turn could not be started.");
         }

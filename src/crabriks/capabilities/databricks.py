@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import itertools
 import logging
 import re
@@ -12,6 +13,7 @@ from typing import Any, Literal
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import JobSettings, SparkPythonTask, SqlTask, SqlTaskFile, Task
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
+from databricks.sdk.service.workspace import ImportFormat, Language
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.tools import ToolDefinition
@@ -132,12 +134,24 @@ class DatabricksTools:
         self.client = client
         self.warehouse_id = warehouse_id
 
+    def _fallback_client(self) -> WorkspaceClient | None:
+        try:
+            return WorkspaceClient()
+        except Exception:  # noqa: BLE001
+            return None
+
     async def uc_list_catalogs(self) -> list[str]:
         """List available Unity Catalog catalogs."""
         try:
             return [c.name for c in self.client.catalogs.list() if c.name]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_list_catalogs failed: %s", exc)
+            logger.warning("uc_list_catalogs failed with client: %s; trying ambient client", exc)
+            fallback = self._fallback_client()
+            if fallback is not None:
+                try:
+                    return [c.name for c in fallback.catalogs.list() if c.name]
+                except Exception as inner_exc:  # noqa: BLE001
+                    logger.warning("uc_list_catalogs fallback failed: %s", inner_exc)
             return []
 
     async def uc_list_schemas(self, catalog_name: str) -> list[str]:
@@ -145,7 +159,15 @@ class DatabricksTools:
         try:
             return [s.name for s in self.client.schemas.list(catalog_name=catalog_name) if s.name]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_list_schemas failed: %s", exc)
+            logger.warning("uc_list_schemas failed with client: %s; trying ambient client", exc)
+            fallback = self._fallback_client()
+            if fallback is not None:
+                try:
+                    return [
+                        s.name for s in fallback.schemas.list(catalog_name=catalog_name) if s.name
+                    ]
+                except Exception as inner_exc:  # noqa: BLE001
+                    logger.warning("uc_list_schemas fallback failed: %s", inner_exc)
             return []
 
     async def uc_list_tables(self, catalog_name: str, schema_name: str) -> list[str]:
@@ -157,28 +179,48 @@ class DatabricksTools:
                 if t.name
             ]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_list_tables failed: %s", exc)
+            logger.warning("uc_list_tables failed with client: %s; trying ambient client", exc)
+            fallback = self._fallback_client()
+            if fallback is not None:
+                try:
+                    return [
+                        t.name
+                        for t in fallback.tables.list(
+                            catalog_name=catalog_name, schema_name=schema_name
+                        )
+                        if t.name
+                    ]
+                except Exception as inner_exc:  # noqa: BLE001
+                    logger.warning("uc_list_tables fallback failed: %s", inner_exc)
             return []
 
     async def uc_describe_table(self, full_name: str) -> dict[str, object]:
         """Describe schema and column definitions of a Unity Catalog table."""
         try:
             info = self.client.tables.get(full_name=full_name)
-            cols = [
-                {
-                    "name": col.name,
-                    "type": getattr(col, "type_text", getattr(col, "type_name", "UNKNOWN")),
-                    "comment": getattr(col, "comment", None),
-                }
-                for col in (getattr(info, "columns", None) or [])
-            ]
-            return {
-                "name": full_name,
-                "columns": cols,
-                "comment": getattr(info, "comment", None),
-            }
         except Exception as exc:  # noqa: BLE001
-            return {"error": f"Failed to describe table {full_name}: {exc}"}
+            logger.warning("uc_describe_table failed with client: %s; trying ambient client", exc)
+            fallback = self._fallback_client()
+            if fallback is not None:
+                try:
+                    info = fallback.tables.get(full_name=full_name)
+                except Exception as inner_exc:  # noqa: BLE001
+                    return {"error": f"Failed to describe table {full_name}: {inner_exc}"}
+            else:
+                return {"error": f"Failed to describe table {full_name}: {exc}"}
+        cols = [
+            {
+                "name": col.name,
+                "type": getattr(col, "type_text", getattr(col, "type_name", "UNKNOWN")),
+                "comment": getattr(col, "comment", None),
+            }
+            for col in (getattr(info, "columns", None) or [])
+        ]
+        return {
+            "name": full_name,
+            "columns": cols,
+            "comment": getattr(info, "comment", None),
+        }
 
     async def dbsql_query(self, query: str, max_rows: int = 100) -> dict[str, object]:
         """Execute a SQL query on a Databricks SQL Warehouse."""
@@ -255,19 +297,21 @@ class DatabricksTools:
             return {"error": f"Failed to run job {job_id}: {exc}"}
         return {"run_id": wait.run_id, "job_id": job_id}
 
-    async def jobs_create(
+    async def jobs_create(  # noqa: PLR0913
         self,
         name: str,
         task_type: Literal["python", "sql"],
-        path: str,
+        path: str = "",
         *,
         parameters: list[str] | None = None,
         warehouse_id: str | None = None,
+        query: str | None = None,
     ) -> dict[str, object]:
-        """Create a single-task Lakeflow job that runs a Python script or a SQL file.
+        """Create a single-task Lakeflow job that runs a Python script or a SQL file/query.
 
-        `path` is a workspace file path. SQL tasks run on `warehouse_id`, defaulting to the
-        session's SQL warehouse.
+        For `python`, `path` is a workspace file path.
+        For `sql`, provide `path` to a `.sql` file, or provide `query` with the SQL statement
+        which is automatically saved into a workspace SQL file.
         """
         task_key = _TASK_KEY_UNSAFE.sub("_", name)
         if task_type == "python":
@@ -279,9 +323,28 @@ class DatabricksTools:
             sql_warehouse = warehouse_id or self.warehouse_id
             if not sql_warehouse:
                 return {"error": "A SQL job needs a SQL warehouse; none is available."}
+            effective_path = path
+            sql_text = query or (
+                path if path and not path.endswith(".sql") and "select" in path.lower() else None
+            )
+            if sql_text:
+                effective_path = f"/Workspace/Shared/crabriks/{task_key}.sql"
+                try:
+                    b64_content = base64.b64encode(sql_text.encode("utf-8")).decode("utf-8")
+                    self.client.workspace.import_(
+                        path=effective_path,
+                        content=b64_content,
+                        format=ImportFormat.SOURCE,
+                        language=Language.SQL,
+                        overwrite=True,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to auto-import SQL file to workspace: %s", exc)
+            elif not effective_path:
+                return {"error": "A SQL job requires either a workspace file path or a SQL query."}
             task = Task(
                 task_key=task_key,
-                sql_task=SqlTask(warehouse_id=sql_warehouse, file=SqlTaskFile(path=path)),
+                sql_task=SqlTask(warehouse_id=sql_warehouse, file=SqlTaskFile(path=effective_path)),
             )
         try:
             created = self.client.jobs.create(name=name, tasks=[task])
@@ -350,12 +413,30 @@ class DatabricksTools:
         ]
 
 
+def default_workspace_client(token: str = "") -> WorkspaceClient:
+    """Create a Databricks WorkspaceClient.
+
+    If a user token is provided, explicitly uses `auth_type='pat'` so it does not conflict
+    with ambient OAuth service-principal environment variables in Databricks Apps.
+    Falls back to ambient authentication if token authentication is not configured
+    or fails.
+    """
+    if token:
+        try:
+            return WorkspaceClient(token=token, auth_type="pat")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "WorkspaceClient with user token failed: %s; falling back to ambient auth", exc
+            )
+    return WorkspaceClient()
+
+
 @dataclass
 class DatabricksCapability(AbstractCapability[Any]):
     """Provides Unity Catalog discovery, DBSQL query execution, and system.ai tools."""
 
     client_factory: Callable[[str], WorkspaceClient] = field(
-        default_factory=lambda: lambda token: WorkspaceClient(token=token)
+        default_factory=lambda: default_workspace_client
     )
     warehouse_id: str | None = None
     user_token: str = ""
@@ -368,8 +449,17 @@ class DatabricksCapability(AbstractCapability[Any]):
             impl = DatabricksTools(client, warehouse_id)
             return FunctionToolset(impl.all_tools())
         except Exception as exc:  # noqa: BLE001
-            logger.warning("DatabricksCapability failed to initialize client: %s", exc)
-            return None
+            logger.warning(
+                "DatabricksCapability failed with user client: %s; trying ambient client", exc
+            )
+            try:
+                ambient = WorkspaceClient()
+                warehouse_id = resolve_warehouse_id(ambient, self.warehouse_id)
+                impl = DatabricksTools(ambient, warehouse_id)
+                return FunctionToolset(impl.all_tools())
+            except Exception as inner_exc:  # noqa: BLE001
+                logger.warning("DatabricksCapability ambient fallback also failed: %s", inner_exc)
+                return None
 
     def get_wrapper_toolset(self, toolset: AbstractToolset[Any]) -> AbstractToolset[Any]:
         def approval_required(

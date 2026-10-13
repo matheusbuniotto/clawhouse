@@ -100,4 +100,43 @@ test.describe("Crabriks UI in Safari (WebKit)", () => {
     await page.goto("/status");
     await expect(page.getByRole("heading", { name: "Connection & Identity" })).toBeVisible();
   });
+
+  test("chat composer renders sent message immediately and shows thinking indicator", async ({ page }) => {
+    // Delay route response to assert in-flight thinking state
+    let resolveResponse: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      resolveResponse = resolve;
+    });
+
+    await page.route("**/api/sessions/*/turns", async (route) => {
+      await gate;
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+        body: 'event: token\ndata: {"text":"Hello"}\n\nevent: done\ndata: {"reply":"Hello"}\n\n',
+      });
+    });
+
+    await page.goto("/chat");
+    const messageInput = page.locator("#message");
+    await expect(messageInput).toBeVisible();
+
+    await messageInput.fill("Hello Crabriks testing immediate rendering");
+    await page.locator("#composer button[type='submit']").click();
+
+    // 1. The user turn must be rendered in the transcript immediately
+    const userTurn = page.locator(".bubble.user").last();
+    await expect(userTurn).toBeVisible();
+    await expect(userTurn).toContainText("Hello Crabriks testing immediate rendering");
+
+    // 2. The thinking indicator must be visible while awaiting response
+    const thinkingTurn = page.locator(".assistant.thinking");
+    await expect(thinkingTurn).toBeVisible();
+    await expect(thinkingTurn.locator(".thinking-indicator")).toContainText("Thinking");
+
+    // Resolve the turn and verify completion
+    resolveResponse();
+    const assistantTurn = page.locator(".assistant").last();
+    await expect(assistantTurn).toContainText("Hello");
+  });
 });

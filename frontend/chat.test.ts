@@ -283,3 +283,39 @@ test("shows autocomplete popover on / trigger and inserts /skill suggestion on E
   expect(document.querySelector(".composer-popover")).toBeNull();
   expect(message.value).toBe("/skill:code-review ");
 });
+
+test("immediately renders user turn and thinking indicator upon submit before response arrives", async () => {
+  let resolveResponse: ((value: Response) => void) | null = null;
+  const delayedResponse = new Promise<Response>((resolve) => {
+    resolveResponse = resolve;
+  });
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") return delayedResponse;
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const input = document.querySelector("#message") as HTMLTextAreaElement;
+  input.value = "my fast query";
+  document
+    .querySelector("#composer")
+    ?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  // Immediately, user bubble is present and thinking indicator is rendered
+  const log = document.querySelector("#log") as HTMLElement;
+  expect(log.querySelector(".bubble.user")?.textContent).toBe("my fast query");
+  expect(log.querySelector(".assistant.thinking")).not.toBeNull();
+  expect(log.querySelector(".thinking-indicator")?.textContent).toContain("Thinking");
+
+  // Complete response
+  const doneFrame = 'event: done\ndata: {"status":"ok","reply":"Answered"}\n\n';
+  resolveResponse!(streamResponse(doneFrame));
+
+  await vi.waitFor(() => expect(log.querySelector(".assistant:not(.thinking)")).not.toBeNull());
+  expect(log.querySelector(".assistant.thinking")).toBeNull();
+  expect(log.querySelector(".assistant")?.textContent).toContain("Answered");
+});

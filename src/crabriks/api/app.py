@@ -232,7 +232,7 @@ def create_app(
                 dev_user=settings.dev_user,
                 dev_token=settings.dev_token,
             )
-            databricks_cap = DatabricksCapability(user_token=token) if token else None
+            databricks_cap = DatabricksCapability(user_token=token or "")
             return TurnContext(
                 owner_id=sch.owner_id,
                 store=app.state.store,
@@ -934,7 +934,7 @@ def _build_turn_context(
         dev_user=dev_user,
         dev_token=dev_token,
     )
-    databricks_cap = DatabricksCapability(user_token=token) if token else None
+    databricks_cap = DatabricksCapability(user_token=token or "")
     return TurnContext(
         owner_id=caller.user_id,
         store=request.app.state.store,

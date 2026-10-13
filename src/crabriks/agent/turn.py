@@ -424,7 +424,7 @@ DATABRICKS_TOOL_CARDS = (
     ),
     ToolCard(
         name="jobs_create",
-        description="Create a Lakeflow job running a Python script or SQL file (needs approval).",
+        description="Create a Lakeflow job from a script or SQL query (needs approval).",
     ),
     ToolCard(name="jobs_edit", description="Update Lakeflow job settings (needs approval)."),
     ToolCard(

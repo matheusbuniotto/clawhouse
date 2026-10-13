@@ -48,6 +48,54 @@
   white-space: pre-wrap;
 }
 
+.assistant.thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 14px;
+  padding: 4px 0;
+}
+
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.thinking-dots span {
+  width: 5px;
+  height: 5px;
+  background-color: var(--accent);
+  border-radius: var(--radius-full);
+  animation: thinking-pulse 1.4s infinite ease-in-out both;
+}
+
+.thinking-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes thinking-pulse {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.35;
+  }
+  40% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
 .assistant > :first-child {
   margin-top: 0;
 }

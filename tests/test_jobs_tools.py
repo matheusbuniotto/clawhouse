@@ -286,6 +286,28 @@ async def test_jobs_create_sql_task_uses_the_session_warehouse() -> None:
     )
 
 
+async def test_jobs_create_sql_task_with_inline_query_imports_file_to_workspace() -> None:
+    client = MagicMock()
+    client.jobs.create.return_value = MagicMock(job_id=44)
+    store = MemorySessionStore()
+    args: dict[str, object] = {
+        "name": "ny_taxi_outliers",
+        "task_type": "sql",
+        "query": "SELECT * FROM samples.nyctaxi.trips WHERE fare_amount > 100",
+    }
+
+    paused = await _turn(client, "jobs_create", args, store)
+    assert paused.approval_id is not None
+    resumed = await _approve(client, store, paused.approval_id)
+
+    assert _tool_result(resumed) == {"job_id": 44, "name": "ny_taxi_outliers"}
+    expected_path = "/Workspace/Shared/crabriks/ny_taxi_outliers.sql"
+    assert client.workspace.import_.call_args.kwargs["path"] == expected_path
+    client.jobs.create.assert_called_once()
+    task = client.jobs.create.call_args.kwargs["tasks"][0]
+    assert task.sql_task.file.path == expected_path
+
+
 async def test_jobs_create_sql_task_without_a_warehouse_reports_an_error() -> None:
     client = MagicMock()
     client.warehouses.list.return_value = []
