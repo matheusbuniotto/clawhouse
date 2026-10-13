@@ -36,6 +36,8 @@ def load_bootstrap(
     truncated = False
     for name, path, limit in _sources(paths):
         text, cut, missing = _read(path, name, limit)
+        if name == "CONTEXT.md" and missing:
+            continue
         if name == "USER.md" and user_directives:
             if missing:
                 missing = False
@@ -78,6 +80,7 @@ def _sources(paths: WorkspacePaths) -> tuple[tuple[str, Path, int], ...]:
         ("IDENTITY.md", paths.identity, 4_000),
         ("USER.md", paths.user_file, 4_000),
         ("MEMORY.md", paths.memory, 8_000),
+        ("CONTEXT.md", paths.context_file, 8_000),
     )
 
 

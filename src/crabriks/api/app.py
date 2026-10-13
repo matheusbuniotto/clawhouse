@@ -1,9 +1,11 @@
 """FastAPI chat surface. Streaming stays here; `run_turn` stays transport-agnostic."""
 
+import asyncio
 import json
 import os
+import shutil
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,15 +41,24 @@ from crabriks.agent.turn import (
     canonical_session_id,
     iter_turn,
     resume_turn,
+    run_turn,
 )
 from crabriks.api.identity import Caller, Unauthenticated, resolve_caller
 from crabriks.capabilities.databricks import DatabricksCapability
-from crabriks.capabilities.workspace import resolve_agent_workspace
+from crabriks.capabilities.schedules import (
+    calculate_next_run,
+    schedule_worker,
+)
+from crabriks.capabilities.workspace import (
+    provision_agent_workspace,
+    resolve_agent_workspace,
+)
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.store.shapes import (
     ApprovalEntry,
     CustomAgent,
     RunState,
+    ScheduleEntry,
     SessionSummary,
     TranscriptEntry,
     UserProfile,
@@ -109,6 +120,8 @@ class CustomAgentIn(BaseModel):
     description: str
     system_prompt: str
     signature_emoji: str = "🤖"
+    soul: str | None = None
+    context: str | None = None
 
 
 class CustomAgentOut(BaseModel):
@@ -119,6 +132,23 @@ class CustomAgentOut(BaseModel):
     system_prompt: str
     signature_emoji: str
     is_platform: bool = False
+
+
+class ScheduleIn(BaseModel):
+    cron_expression: str
+    prompt: str
+
+
+class ScheduleOut(BaseModel):
+    id: str
+    session_id: str
+    owner_id: str
+    cron_expression: str
+    prompt: str
+    status: str
+    next_run_at: str
+    created_at: str
+    last_run_at: str | None = None
 
 
 class AuthSnapshotOut(BaseModel):
@@ -188,13 +218,53 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if store is None:
             app.state.store = await open_store_fn()
-            try:
-                yield
-            finally:
-                await app.state.store.close()
         else:
             app.state.store = store
+
+        stop_event = asyncio.Event()
+
+        def _make_turn_ctx(sch: ScheduleEntry) -> TurnContext:
+            caller = Caller(user_id=sch.owner_id, access_token=settings.dev_token or "")
+            model = model_for(caller, None)
+            token = request_token(
+                forwarded=caller.access_token,
+                user_id=caller.user_id,
+                dev_user=settings.dev_user,
+                dev_token=settings.dev_token,
+            )
+            databricks_cap = DatabricksCapability(user_token=token) if token else None
+            return TurnContext(
+                owner_id=sch.owner_id,
+                store=app.state.store,
+                model=model,
+                now=lambda: datetime.now(UTC),
+                workspace=app.state.workspace,
+                mcp_servers=settings.mcp_servers,
+                user_token=token,
+                sensitive_tools=settings.sensitive_tools,
+                mcp_toolset_factory=getattr(app.state, "mcp_toolset_factory", None),
+                databricks_capability=databricks_cap,
+            )
+
+        worker_task = asyncio.create_task(
+            schedule_worker(
+                store=app.state.store,
+                run_turn_fn=lambda s_id, prompt, ctx: run_turn(s_id, prompt, ctx=ctx),
+                make_turn_ctx=_make_turn_ctx,
+                poll_interval_seconds=15.0,
+                stop_event=stop_event,
+            )
+        )
+
+        try:
             yield
+        finally:
+            stop_event.set()
+            worker_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await worker_task
+            if store is None:
+                await app.state.store.close()
 
     app = FastAPI(title="Crabriks", lifespan=lifespan)
     app.state.store = store
@@ -215,6 +285,7 @@ def _routes(app: FastAPI) -> None:
     _approval_routes(app)
     _status_routes(app)
     _agent_routes(app)
+    _schedule_routes(app)
     _composer_routes(app)
 
 
@@ -554,6 +625,16 @@ def _agent_routes(app: FastAPI) -> None:
             signature_emoji=payload.signature_emoji,
         )
         saved = await app.state.store.create_custom_agent(custom)
+        settings: Settings = app.state.settings
+        provision_agent_workspace(
+            root=settings.agent_root,
+            agent_name=saved.name,
+            agents_text=saved.system_prompt,
+            identity_name=saved.name,
+            signature_emoji=saved.signature_emoji,
+            soul_text=payload.soul,
+            context_text=payload.context,
+        )
         return CustomAgentOut(
             id=saved.id,
             owner_id=saved.owner_id,
@@ -566,9 +647,95 @@ def _agent_routes(app: FastAPI) -> None:
 
     @app.delete("/api/agents/{agent_id}", status_code=204)
     async def delete_agent(agent_id: str, caller: Caller = _require_caller) -> Response:
+        agents = await app.state.store.list_custom_agents(caller.user_id)
+        matching = next((a for a in agents if a.id == agent_id), None)
         deleted = await app.state.store.delete_custom_agent(agent_id, caller.user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Agent not found")
+        if matching:
+            settings: Settings = app.state.settings
+            try:
+                paths = resolve_agent_workspace(settings.agent_root, matching.name)
+                if paths.directory.exists():
+                    shutil.rmtree(paths.directory)
+            except OSError:
+                pass
+        return Response(status_code=204)
+
+
+def _schedule_routes(app: FastAPI) -> None:
+    @app.post("/api/sessions/{session_id}/schedules", response_model=ScheduleOut, status_code=201)
+    async def create_session_schedule(
+        session_id: str,
+        body: ScheduleIn,
+        caller: Caller = _require_caller,
+    ) -> ScheduleOut:
+        canonical = canonical_session_id(session_id)
+        sessions = await app.state.store.list_sessions(caller.user_id)
+        if not any(s.id == canonical for s in sessions):
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        now = datetime.now(UTC)
+        try:
+            next_run = calculate_next_run(body.cron_expression, from_time=now)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        sch_id = str(uuid4())
+        entry = ScheduleEntry(
+            id=sch_id,
+            session_id=canonical,
+            owner_id=caller.user_id,
+            cron_expression=body.cron_expression,
+            prompt=body.prompt,
+            status="active",
+            next_run_at=next_run,
+            created_at=now,
+        )
+        saved = await app.state.store.create_schedule(entry)
+        return ScheduleOut(
+            id=saved.id,
+            session_id=saved.session_id,
+            owner_id=saved.owner_id,
+            cron_expression=saved.cron_expression,
+            prompt=saved.prompt,
+            status=saved.status,
+            next_run_at=saved.next_run_at.isoformat(),
+            created_at=saved.created_at.isoformat(),
+            last_run_at=saved.last_run_at.isoformat() if saved.last_run_at else None,
+        )
+
+    @app.get("/api/schedules", response_model=list[ScheduleOut])
+    async def list_user_schedules(
+        session_id: str | None = None,
+        caller: Caller = _require_caller,
+    ) -> list[ScheduleOut]:
+        schedules = await app.state.store.list_schedules(
+            caller.user_id,
+            session_id=canonical_session_id(session_id) if session_id else None,
+        )
+        return [
+            ScheduleOut(
+                id=s.id,
+                session_id=s.session_id,
+                owner_id=s.owner_id,
+                cron_expression=s.cron_expression,
+                prompt=s.prompt,
+                status=s.status,
+                next_run_at=s.next_run_at.isoformat(),
+                created_at=s.created_at.isoformat(),
+                last_run_at=s.last_run_at.isoformat() if s.last_run_at else None,
+            )
+            for s in schedules
+        ]
+
+    @app.delete("/api/schedules/{schedule_id}", status_code=204)
+    async def cancel_schedule_route(
+        schedule_id: str,
+        caller: Caller = _require_caller,
+    ) -> Response:
+        cancelled = await app.state.store.cancel_schedule(schedule_id, caller.user_id)
+        if not cancelled:
+            raise HTTPException(status_code=404, detail="Schedule not found")
         return Response(status_code=204)
 
 
@@ -579,6 +746,11 @@ def _slash_suggestions(app: FastAPI, q: str) -> dict[str, Any]:
             "id": "/compact",
             "label": "/compact",
             "description": "Compact conversation history using context compaction",
+        },
+        {
+            "id": "/schedule",
+            "label": "/schedule",
+            "description": 'Schedule recurring turn: /schedule cron "..." or every <N>m',
         },
         {"id": "/clear", "label": "/clear", "description": "Start a fresh conversation"},
         {"id": "/help", "label": "/help", "description": "Show available shortcuts and commands"},

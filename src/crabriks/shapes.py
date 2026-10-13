@@ -3,8 +3,11 @@
 from crabriks.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
+    CustomAgent,
     Role,
     RunState,
+    ScheduleEntry,
+    ScheduleStatus,
     SessionSummary,
     TranscriptEntry,
     TurnResult,
@@ -15,8 +18,11 @@ from crabriks.store.shapes import (
 __all__ = [
     "ApprovalEntry",
     "ApprovalStatus",
+    "CustomAgent",
     "Role",
     "RunState",
+    "ScheduleEntry",
+    "ScheduleStatus",
     "SessionSummary",
     "TranscriptEntry",
     "TurnResult",

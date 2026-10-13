@@ -7,8 +7,9 @@ from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaita
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic_ai import DeferredToolRequests, RunContext
 from pydantic_ai.capabilities import AbstractCapability, AgentCapability, CapabilityOrdering
@@ -42,6 +43,7 @@ from crabriks.agent.prompt import (
     ToolCard,
     build_system_prompt,
 )
+from crabriks.capabilities.agent_tools import AgentManagementCapability
 from crabriks.capabilities.bootstrap import (
     BootstrapContext,
     load_bootstrap,
@@ -50,10 +52,15 @@ from crabriks.capabilities.bootstrap import (
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from crabriks.capabilities.mentions import execute_compaction, resolve_mention_bundles
+from crabriks.capabilities.schedules import (
+    calculate_next_run,
+    parse_schedule_command,
+)
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
     ApprovalEntry,
+    ScheduleEntry,
     TranscriptEntry,
     TurnResult,
     TurnStatus,
@@ -125,6 +132,7 @@ class TurnContext:
     now: Callable[[], datetime]
     emit: Emit | None = None
     workspace: WorkspacePaths | None = None
+    workspace_root: Path | None = None
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     user_token: str = ""
     mcp_toolset_factory: MCPToolsetFactory | None = None
@@ -343,6 +351,12 @@ SAVE_PROFILE_DESCRIPTION = (
 )
 SAVE_PROFILE_TOOL_CARD = ToolCard(name=SAVE_PROFILE_NAME, description=SAVE_PROFILE_DESCRIPTION)
 
+CREATE_AGENT_NAME = "create_agent"
+CREATE_AGENT_DESCRIPTION = (
+    "Create a new specialized custom agent with its OpenClaw-compatible workspace folder."
+)
+CREATE_AGENT_TOOL_CARD = ToolCard(name=CREATE_AGENT_NAME, description=CREATE_AGENT_DESCRIPTION)
+
 
 def is_wake_up_message(text: str) -> bool:
     cleaned = text.strip().lower()
@@ -425,7 +439,14 @@ def _capabilities_for_turn(
     *,
     birth_ritual: bool = False,
 ) -> list[AgentCapability[TurnDeps]] | None:
-    capabilities: list[AgentCapability[TurnDeps]] = []
+    capabilities: list[AgentCapability[TurnDeps]] = [
+        AgentManagementCapability(
+            store=claimed.ctx.store,
+            owner_id=claimed.ctx.owner_id,
+            workspace=claimed.ctx.workspace,
+            workspace_root=claimed.ctx.workspace_root,
+        )
+    ]
     if birth_ritual:
         capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
     if claimed.ctx.databricks_capability is not None:
@@ -455,7 +476,8 @@ def _prompt_for(
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
     db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
-    builtin = (*BUILTIN_TOOLS, SAVE_PROFILE_TOOL_CARD) if birth_ritual else BUILTIN_TOOLS
+    base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD)
+    builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
     return build_system_prompt(
         tools=(*builtin, *db_cards, *mcp_cards),
@@ -482,6 +504,39 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     if claimed.user_message.strip() == "/compact":
         summary = await execute_compaction(ctx.store, claimed.session_id, ctx.owner_id, ctx.model)
         reply = f"Conversation history compacted successfully.\n\nSummary:\n{summary}"
+        await _append(claimed, TranscriptEntry(role="assistant", content=reply))
+        transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+        return TurnResult(
+            session_id=claimed.session_id,
+            status="ok",
+            reply=reply,
+            error=None,
+            transcript=transcript,
+        )
+
+    parsed_schedule = parse_schedule_command(claimed.user_message)
+    if parsed_schedule is not None:
+        now = ctx.now()
+        next_run = calculate_next_run(parsed_schedule.cron_expression, from_time=now)
+        sch_id = str(uuid4())
+        sch_entry = ScheduleEntry(
+            id=sch_id,
+            session_id=claimed.session_id,
+            owner_id=ctx.owner_id,
+            cron_expression=parsed_schedule.cron_expression,
+            prompt=parsed_schedule.prompt,
+            status="active",
+            next_run_at=next_run,
+            created_at=now,
+        )
+        await ctx.store.create_schedule(sch_entry)
+        reply = (
+            f"⏰ Scheduled automation created successfully!\n\n"
+            f"- **Schedule ID**: `{sch_id}`\n"
+            f"- **Cron Expression**: `{parsed_schedule.cron_expression}`\n"
+            f"- **First Run At**: `{next_run.isoformat()}`\n"
+            f"- **Instruction**: {parsed_schedule.prompt}"
+        )
         await _append(claimed, TranscriptEntry(role="assistant", content=reply))
         transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
         return TurnResult(
