@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -29,7 +30,7 @@ from crabriks.capabilities.sheets import (
 from crabriks.store import MemorySessionStore
 
 SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
-TOKEN = "secret-test-token"
+TOKEN = "forwarded-user-token"
 SESSION_ID = "11111111-2222-3333-4444-555555555555"
 OWNER = "analyst@example.com"
 NOW = datetime(2026, 10, 13, 15, 0, tzinfo=UTC)
@@ -278,8 +279,10 @@ async def test_auth_error_code_asks_to_authorize(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_gateway_403_is_reported_without_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    secret_body = f"secret body with token {TOKEN} and internal details"
+async def test_gateway_403_is_reported_without_the_body(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    opaque_body = f"upstream body with token {TOKEN} and internal details"
 
     def mock_post(_url: str, **kwargs: Any) -> _MockResponse:
         payload = kwargs.get("json", {})
@@ -287,14 +290,18 @@ async def test_gateway_403_is_reported_without_the_body(monkeypatch: pytest.Monk
             return _MockResponse(204)
         if payload.get("method") == "initialize":
             return _init_resp()
-        return _MockResponse(403, content=secret_body.encode("utf-8"))
+        return _MockResponse(403, content=opaque_body.encode("utf-8"))
 
     monkeypatch.setattr("requests.post", mock_post)
     sheet = NewSheet(title="test", rows=[[1]])
-    output = await write_new_sheet(TOKEN, sheet, host="https://adb-123.databricks.com")
+    with caplog.at_level(logging.WARNING, logger="crabriks.sheets"):
+        output = await write_new_sheet(TOKEN, sheet, host="https://adb-123.databricks.com")
     assert output["error"] == "Google Drive gateway returned HTTP 403. Check consent and access."
     assert TOKEN not in output["error"]
     assert "internal details" not in output["error"]
+    assert "Gateway returned HTTP 403" in caplog.text
+    assert TOKEN not in caplog.text
+    assert "internal details" not in caplog.text
 
 
 @pytest.mark.asyncio

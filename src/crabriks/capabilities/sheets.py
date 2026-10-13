@@ -172,14 +172,20 @@ def databricks_host() -> str:
     raise RuntimeError("Databricks workspace host is unavailable.")
 
 
+def _log_gateway_failure(resp: requests.Response) -> None:
+    """Log a redacted diagnostic: status, size, and request id, never the body."""
+    request_id = resp.headers.get("x-request-id", "")
+    logger.warning(
+        "Gateway returned HTTP %s (%s bytes%s)",
+        resp.status_code,
+        len(resp.content or b""),
+        f", request-id={request_id}" if request_id else "",
+    )
+
+
 def _validate_rpc_response(resp: requests.Response) -> None:
-    if resp.status_code in (401, 403):
-        text = getattr(resp, "text", "") or ""
-        logger.warning("Gateway returned HTTP %s: %s", resp.status_code, text)
-        raise GatewayStatusError(resp.status_code)
-    if resp.status_code >= 300:
-        text = getattr(resp, "text", "") or ""
-        logger.warning("Gateway returned HTTP %s: %s", resp.status_code, text)
+    if resp.status_code in (401, 403) or resp.status_code >= 300:
+        _log_gateway_failure(resp)
         raise GatewayStatusError(resp.status_code)
     if resp.status_code != 204 and resp.content:
         if len(resp.content) > MAX_RESPONSE_BYTES:
