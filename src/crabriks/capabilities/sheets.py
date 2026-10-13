@@ -174,8 +174,12 @@ def databricks_host() -> str:
 
 def _validate_rpc_response(resp: requests.Response) -> None:
     if resp.status_code in (401, 403):
+        text = getattr(resp, "text", "") or ""
+        logger.warning("Gateway returned HTTP %s: %s", resp.status_code, text)
         raise GatewayStatusError(resp.status_code)
     if resp.status_code >= 300:
+        text = getattr(resp, "text", "") or ""
+        logger.warning("Gateway returned HTTP %s: %s", resp.status_code, text)
         raise GatewayStatusError(resp.status_code)
     if resp.status_code != 204 and resp.content:
         if len(resp.content) > MAX_RESPONSE_BYTES:

@@ -52,6 +52,10 @@ class _MockResponse:
     def json(self) -> dict[str, Any]:
         return json.loads(self.content.decode("utf-8"))
 
+    @property
+    def text(self) -> str:
+        return self.content.decode("utf-8", errors="replace")
+
 
 def _init_resp() -> _MockResponse:
     return _MockResponse(
