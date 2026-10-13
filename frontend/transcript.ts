@@ -39,7 +39,8 @@ export function renderInlineApproval(
   container: HTMLElement,
   approvalId: string,
   toolName: string,
-  onResolved: (reply?: string) => void
+  onResolved: (reply?: string) => void,
+  toolArguments?: string,
 ): HTMLElement {
   const running = lastRunningTool(container);
   if (running) {
@@ -53,10 +54,11 @@ export function renderInlineApproval(
   }
 
   const card = el("div", "approval-action-bar");
+  const preview = writePreview(toolName, toolArguments);
   const msg = el(
     "span",
     "approval-msg",
-    `Approval required to execute ${toolName}.`
+    preview?.question ?? `Approval required to execute ${toolName}.`
   );
   const btns = el("div", "approval-buttons");
   const approveBtn = el("button", "btn-approve", "Approve");
@@ -113,7 +115,9 @@ export function renderInlineApproval(
   denyBtn.onclick = () => void resolve("denied");
 
   btns.append(approveBtn, denyBtn);
-  card.append(msg, btns);
+  card.append(msg);
+  if (preview) card.append(preview.note, preview.body);
+  card.append(btns);
 
   if (running) {
     const body = running.querySelector(".tool-body");
@@ -124,6 +128,118 @@ export function renderInlineApproval(
   }
   container.append(card);
   return card;
+}
+
+const SHEET_ID = /^[A-Za-z0-9_-]{20,100}$/;
+const SHEET_URL = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/[A-Za-z0-9_-]{20,100}$/;
+
+interface WritePreview {
+  question: string;
+  note: HTMLElement;
+  body: HTMLElement;
+}
+
+function writePreview(toolName: string, raw: string | undefined): WritePreview | null {
+  const input = parseObject(raw);
+  if (!input) return null;
+  if (toolName === "create_google_sheet") return sheetPreview(input, "create");
+  if (toolName === "update_google_sheet") return sheetPreview(input, "update");
+  return null;
+}
+
+function sheetPreview(
+  input: Record<string, unknown>,
+  action: "create" | "update",
+): WritePreview | null {
+  const sheet = sheetFields(input);
+  if (!sheet) return null;
+  const width = sheet.rows[0]?.length ?? 0;
+  const note = el(
+    "p",
+    "approval-note",
+    `${sheet.rows.length} rows × ${width} columns. These rows leave Databricks and then follow Google's sharing rules.`,
+  );
+  const body = el("div", "approval-sheet");
+  if (action === "update" && sheet.spreadsheetId) {
+    const link = el("a", "approval-link", "Open the destination spreadsheet");
+    link.href = `https://docs.google.com/spreadsheets/d/${sheet.spreadsheetId}`;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    body.append(link);
+  }
+  body.append(el("pre", "approval-preview", sheet.text));
+  const question =
+    action === "create"
+      ? `Create the spreadsheet "${sheet.title}" in your Google Drive?`
+      : `Overwrite ${sheet.rows.length} rows on tab "${sheet.tab}" starting at ${sheet.start}?`;
+  return { question, note, body };
+}
+
+interface SheetFields {
+  title: string;
+  tab: string;
+  start: string;
+  spreadsheetId?: string;
+  rows: unknown[][];
+  text: string;
+}
+
+function sheetFields(input: Record<string, unknown>): SheetFields | null {
+  const source = nestedSheet(input);
+  if (!Array.isArray(source.rows) || source.rows.length === 0) return null;
+  const rows = source.rows.filter((row): row is unknown[] => Array.isArray(row));
+  if (rows.length !== source.rows.length) return null;
+  const spreadsheetId = sheetId(source.spreadsheet_id);
+  return {
+    title: typeof source.title === "string" ? source.title : "Untitled",
+    tab: typeof source.tab === "string" ? source.tab : "first tab",
+    start: `${typeof source.first_column === "string" ? source.first_column : "A"}${
+      typeof source.first_row === "number" ? source.first_row : 1
+    }`,
+    spreadsheetId,
+    rows,
+    text: rows.map((row) => row.map(cellText).join("\t")).join("\n"),
+  };
+}
+
+function nestedSheet(input: Record<string, unknown>): Record<string, unknown> {
+  const sheet = input.sheet;
+  if (typeof sheet === "object" && sheet !== null) return sheet as Record<string, unknown>;
+  const update = input.update;
+  if (typeof update === "object" && update !== null) return update as Record<string, unknown>;
+  return input;
+}
+
+function sheetId(value: unknown): string | undefined {
+  return typeof value === "string" && SHEET_ID.test(value) ? value : undefined;
+}
+
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function parseObject(raw: string | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as unknown;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+    return data as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function sheetResultLink(output: string): HTMLAnchorElement | null {
+  const data = parseObject(output);
+  if (!data || data.written !== true || typeof data.url !== "string" || !SHEET_URL.test(data.url)) {
+    return null;
+  }
+  const link = el("a", "approval-link", "Open spreadsheet");
+  link.href = data.url;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  return link;
 }
 
 /**
@@ -196,6 +312,8 @@ function toolOutputSection(output: string): HTMLElement {
 
   const parsed = tryParseTabular(output);
   const job = parsed ? null : tryParseJobView(output);
+  const sheetLink = sheetResultLink(output);
+  if (sheetLink) section.append(sheetLink);
   if (parsed) {
     section.append(renderTabularView(parsed, output));
   } else if (job) {

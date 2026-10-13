@@ -53,6 +53,14 @@ resources:
       name: crabriks
       description: Databricks-native agent chat surface with a model picker.
       source_code_path: .
+      user_api_scopes:
+        - model-serving
+        - sql
+        - ai-functions
+        - genie
+        - workspace.workspace
+        - mcp.external
+        - ai-gateway
       config:
         command:
           - uvicorn
