@@ -85,6 +85,7 @@ ModelFor = Callable[[Caller, str | None], Model]
 class TurnIn(BaseModel):
     message: str
     model: str | None = None
+    agent: str | None = None
 
 
 class ModelOptionOut(BaseModel):
@@ -466,7 +467,14 @@ def _session_item_routes(app: FastAPI) -> None:
         message = body.message.strip()
         if not message:
             raise HTTPException(status_code=422, detail="message is empty")
-        return await _stream_turn(request, session_id, message, caller, model_id=body.model)
+        return await _stream_turn(
+            request,
+            session_id,
+            message,
+            caller,
+            model_id=body.model,
+            default_agent=body.agent,
+        )
 
 
 def _hatch_routes(app: FastAPI) -> None:
@@ -922,6 +930,7 @@ def _build_turn_context(
     request: Request,
     caller: Caller,
     model_id: str | None = None,
+    default_agent: str | None = None,
 ) -> TurnContext:
     model = _model_for_caller(request, caller, model_id)
     settings: Settings = request.app.state.settings
@@ -946,18 +955,20 @@ def _build_turn_context(
         sensitive_tools=settings.sensitive_tools,
         mcp_toolset_factory=getattr(request.app.state, "mcp_toolset_factory", None),
         databricks_capability=databricks_cap,
+        default_agent=default_agent,
     )
 
 
-async def _stream_turn(
+async def _stream_turn(  # noqa: PLR0913
     request: Request,
     session_id: str,
     message: str,
     caller: Caller,
     *,
     model_id: str | None,
+    default_agent: str | None = None,
 ) -> Response:
-    ctx = _build_turn_context(request, caller, model_id)
+    ctx = _build_turn_context(request, caller, model_id, default_agent=default_agent)
     iterator = iter_turn(session_id, message, ctx=ctx)
     first = await _first_item(iterator)
     if isinstance(first, JSONResponse):

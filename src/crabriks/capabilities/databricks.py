@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
-import base64
+import io
 import itertools
 import logging
 import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, TypeVar
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.jobs import JobSettings, SparkPythonTask, SqlTask, SqlTaskFile, Task
+from databricks.sdk.service.jobs import (
+    JobSettings,
+    Source,
+    SparkPythonTask,
+    SqlTask,
+    SqlTaskFile,
+    Task,
+)
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
-from databricks.sdk.service.workspace import ImportFormat, Language
+from databricks.sdk.service.workspace import ImportFormat
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.tools import ToolDefinition
@@ -318,6 +326,69 @@ class DatabricksTools:
             return {"error": f"Failed to run job {job_id}: {exc}"}
         return {"run_id": wait.run_id, "job_id": job_id}
 
+    def _save_workspace_sql_file(self, path: str, sql_text: str) -> None:
+        parent_dir = str(Path(path).parent)
+        content = sql_text.encode("utf-8")
+
+        def _do_upload(client: WorkspaceClient) -> None:
+            try:
+                client.workspace.mkdirs(parent_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("mkdirs %s: %s", parent_dir, exc)
+            client.workspace.upload(
+                path=path,
+                content=io.BytesIO(content),
+                overwrite=True,
+                format=ImportFormat.AUTO,
+            )
+
+        try:
+            self._call(_do_upload)
+        except Exception as exc:
+            fallback = self._fallback_client()
+            if fallback is not None:
+                try:
+                    _do_upload(fallback)
+                except Exception as fb_exc:  # noqa: BLE001
+                    raise RuntimeError(
+                        f"Failed to upload workspace SQL file to {path}: {fb_exc}"
+                    ) from exc
+                else:
+                    return
+            raise RuntimeError(f"Failed to upload workspace SQL file to {path}: {exc}") from exc
+
+    def _build_sql_task(
+        self,
+        task_key: str,
+        path: str,
+        query: str | None,
+        warehouse_id: str | None,
+    ) -> tuple[Task | None, str | None]:
+        sql_warehouse = warehouse_id or self.effective_warehouse_id
+        if not sql_warehouse:
+            return None, "A SQL job needs a SQL warehouse; none is available."
+        effective_path = path
+        sql_text = query or (
+            path if path and not path.endswith(".sql") and "select" in path.lower() else None
+        )
+        if sql_text:
+            if not effective_path or sql_text == effective_path:
+                effective_path = f"/Workspace/Shared/crabriks/{task_key}.sql"
+            try:
+                self._save_workspace_sql_file(effective_path, sql_text)
+            except Exception as exc:  # noqa: BLE001
+                return None, f"Failed to save SQL file to workspace: {exc}"
+        elif not effective_path:
+            return None, "A SQL job requires either a workspace file path or a SQL query."
+        task = Task(
+            task_key=task_key,
+            sql_task=SqlTask(
+                warehouse_id=sql_warehouse,
+                file=SqlTaskFile(path=effective_path, source=Source.WORKSPACE),
+            ),
+        )
+        return task, None
+
     async def jobs_create(  # noqa: PLR0913
         self,
         name: str,
@@ -331,8 +402,8 @@ class DatabricksTools:
         """Create a single-task Lakeflow job that runs a Python script or a SQL file/query.
 
         For `python`, `path` is a workspace file path.
-        For `sql`, provide `path` to a `.sql` file, or provide `query` with the SQL statement
-        which is automatically saved into a workspace SQL file.
+        For `sql`, pass the SQL statement in `query` (recommended) which is automatically saved
+        to workspace and executed, or pass `path` to an existing `.sql` file in the workspace.
         """
         task_key = _TASK_KEY_UNSAFE.sub("_", name)
         if task_type == "python":
@@ -341,34 +412,9 @@ class DatabricksTools:
                 spark_python_task=SparkPythonTask(python_file=path, parameters=parameters),
             )
         else:
-            sql_warehouse = warehouse_id or self.effective_warehouse_id
-            if not sql_warehouse:
-                return {"error": "A SQL job needs a SQL warehouse; none is available."}
-            effective_path = path
-            sql_text = query or (
-                path if path and not path.endswith(".sql") and "select" in path.lower() else None
-            )
-            if sql_text:
-                effective_path = f"/Workspace/Shared/crabriks/{task_key}.sql"
-                try:
-                    b64_content = base64.b64encode(sql_text.encode("utf-8")).decode("utf-8")
-                    self._call(
-                        lambda cl: cl.workspace.import_(
-                            path=effective_path,
-                            content=b64_content,
-                            format=ImportFormat.SOURCE,
-                            language=Language.SQL,
-                            overwrite=True,
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to auto-import SQL file to workspace: %s", exc)
-            elif not effective_path:
-                return {"error": "A SQL job requires either a workspace file path or a SQL query."}
-            task = Task(
-                task_key=task_key,
-                sql_task=SqlTask(warehouse_id=sql_warehouse, file=SqlTaskFile(path=effective_path)),
-            )
+            task, error = self._build_sql_task(task_key, path, query, warehouse_id)
+            if error or task is None:
+                return {"error": error or "Failed to build SQL task."}
         try:
             created = self._call(lambda cl: cl.jobs.create(name=name, tasks=[task]))
         except Exception as exc:  # noqa: BLE001

@@ -138,6 +138,7 @@ class TurnContext:
     mcp_toolset_factory: MCPToolsetFactory | None = None
     sensitive_tools: tuple[str, ...] = ()
     databricks_capability: DatabricksCapability | None = None
+    default_agent: str | None = None
 
 
 def canonical_session_id(value: str) -> str:
@@ -553,6 +554,7 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         owner_id=ctx.owner_id,
         workspace=ctx.workspace,
         databricks_cap=ctx.databricks_capability,
+        default_agent=ctx.default_agent,
     )
     user_prompt = claimed.user_message
     if bundle.injected_context:

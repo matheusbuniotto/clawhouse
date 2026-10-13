@@ -59,9 +59,11 @@ def extract_skill_mentions(text: str) -> list[str]:
 
 
 async def _resolve_agent_context(
-    text: str, store: SessionStore, owner_id: str
+    text: str, store: SessionStore, owner_id: str, default_agent: str | None = None
 ) -> tuple[CustomAgent | None, str | None]:
     agent_names = extract_agent_mentions(text)
+    if not agent_names and default_agent:
+        agent_names = [default_agent]
     if not agent_names:
         return None, None
     custom_agents = await store.list_custom_agents(owner_id)
@@ -69,13 +71,15 @@ async def _resolve_agent_context(
     for ca in custom_agents:
         if ca.name.lower() in lower_mentions:
             part = (
-                f"### Mentioned Agent: @{ca.name} (ALREADY EXISTS)\n"
+                f"### Delegated Agent Persona: @{ca.name} (ALREADY REGISTERED)\n"
                 f"- Name: {ca.name} {ca.signature_emoji}\n"
                 f"- Description: {ca.description}\n"
                 f"- Operating Instructions:\n{ca.system_prompt}\n\n"
-                f"IMPORTANT: The agent '@{ca.name}' is ALREADY REGISTERED in this workspace.\n"
-                f"- DO NOT call `create_agent` for '@{ca.name}'.\n"
-                "- Proceed directly with the requested task and delegate or carry out the analysis."
+                f"IMPORTANT INSTRUCTION: The user assigned this task to @{ca.name}.\n"
+                f"- You are executing this turn directly AS @{ca.name}.\n"
+                f"- Adopt @{ca.name}'s persona, instructions, and emoji {ca.signature_emoji}.\n"
+                f"- No separate delegation tool is needed; carry out analysis as @{ca.name}.\n"
+                f"- DO NOT call `create_agent` for '@{ca.name}' because it already exists."
             )
             return ca, part
     return None, None
@@ -93,13 +97,14 @@ def _resolve_skill_context(text: str, workspace: WorkspacePaths | None) -> list[
     return parts
 
 
-async def resolve_mention_bundles(
+async def resolve_mention_bundles(  # noqa: PLR0913
     text: str,
     *,
     store: SessionStore,
     owner_id: str,
     workspace: WorkspacePaths | None = None,
     databricks_cap: DatabricksCapability | None = None,
+    default_agent: str | None = None,
 ) -> MentionBundle:
     context_parts: list[str] = []
 
@@ -116,7 +121,9 @@ async def resolve_mention_bundles(
             context_parts.append(f"### File Context: {file_path}\n{content}")
 
     # 3. Resolve target agent mention
-    target_agent, agent_part = await _resolve_agent_context(text, store, owner_id)
+    target_agent, agent_part = await _resolve_agent_context(
+        text, store, owner_id, default_agent=default_agent
+    )
     if agent_part:
         context_parts.append(agent_part)
 

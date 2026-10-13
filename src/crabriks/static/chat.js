@@ -274,10 +274,15 @@ export function mount(root, ctx) {
         showThinking();
         transcript.scrollTop = transcript.scrollHeight;
         try {
+            const agent = ctx.url.searchParams.get("agent") || null;
             const response = await fetch(`/api/sessions/${sessionId()}/turns`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ message: text, model: modelPicker.value || null }),
+                body: JSON.stringify({
+                    message: text,
+                    model: modelPicker.value || null,
+                    agent,
+                }),
                 signal,
             });
             if (response.status === 409) {

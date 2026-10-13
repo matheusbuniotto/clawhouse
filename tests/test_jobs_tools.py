@@ -15,6 +15,7 @@ from databricks.sdk.service.jobs import (
     RunResultState,
     RunState,
     RunTask,
+    Source,
     SparkPythonTask,
     SqlTask,
     SqlTaskFile,
@@ -279,7 +280,9 @@ async def test_jobs_create_sql_task_uses_the_session_warehouse() -> None:
                 task_key="report",
                 sql_task=SqlTask(
                     warehouse_id="wh-1",
-                    file=SqlTaskFile(path="/Workspace/Users/a@x.com/report.sql"),
+                    file=SqlTaskFile(
+                        path="/Workspace/Users/a@x.com/report.sql", source=Source.WORKSPACE
+                    ),
                 ),
             )
         ],
@@ -302,10 +305,12 @@ async def test_jobs_create_sql_task_with_inline_query_imports_file_to_workspace(
 
     assert _tool_result(resumed) == {"job_id": 44, "name": "ny_taxi_outliers"}
     expected_path = "/Workspace/Shared/crabriks/ny_taxi_outliers.sql"
-    assert client.workspace.import_.call_args.kwargs["path"] == expected_path
+    assert client.workspace.upload.call_args.kwargs["path"] == expected_path
+    client.workspace.mkdirs.assert_called_once_with("/Workspace/Shared/crabriks")
     client.jobs.create.assert_called_once()
     task = client.jobs.create.call_args.kwargs["tasks"][0]
     assert task.sql_task.file.path == expected_path
+    assert task.sql_task.file.source == Source.WORKSPACE
 
 
 async def test_jobs_create_sql_task_without_a_warehouse_reports_an_error() -> None:
