@@ -57,11 +57,12 @@ Add external OpenAI-compatible endpoints via `CRABRIKS_MODELS`:
 ```bash
 export CRABRIKS_MODELS='[
   {
-    "id": "openrouter-llama-3.3-70b",
-    "label": "Llama 3.3 70B (OpenRouter)",
-    "model": "meta-llama/llama-3.3-70b-instruct",
+    "id": "openai-gpt-6-luna",
+    "label": "GPT-6 Luna (OpenRouter)",
+    "model": "openai/gpt-6-luna",
     "base_url": "https://openrouter.ai/api/v1",
-    "api_key_env": "OPENROUTER_API_KEY"
+    "api_key_env": "OPENROUTER_API_KEY",
+    "default": true
   }
 ]'
 export OPENROUTER_API_KEY=sk-or-...

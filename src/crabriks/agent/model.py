@@ -84,6 +84,6 @@ def select_model(models: tuple[ModelEntry, ...], model_id: str | None) -> ModelE
             return models[0]
         raise MissingModelConfig
     for entry in models:
-        if entry.id == model_id:
+        if model_id in (entry.id, entry.model):
             return entry
     raise UnknownModel(model_id)

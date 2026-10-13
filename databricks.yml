@@ -64,7 +64,7 @@ resources:
           - name: OPENROUTER_API_KEY
             value_from: openrouter-api-key
           - name: CRABRIKS_MODELS
-            value: '[{"id":"openrouter-llama","label":"Llama 3.3 70B (OpenRouter)","model":"meta-llama/llama-3.3-70b-instruct","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY"}]'
+            value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
       resources:
         - name: serving-endpoint
           serving_endpoint:

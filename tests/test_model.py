@@ -151,5 +151,30 @@ def test_select_model_defaults_then_matches_by_id() -> None:
 
     assert select_model(entries, None).id == "databricks"
     assert select_model(entries, "openrouter-llama").id == "openrouter-llama"
+    assert select_model(entries, "meta-llama/llama-3.3-70b-instruct").id == "openrouter-llama"
     with pytest.raises(UnknownModel):
         select_model(entries, "missing")
+
+
+def test_compatible_model_can_override_default() -> None:
+    luna = {
+        "id": "openai-gpt-6-luna",
+        "label": "GPT-6 Luna (OpenRouter)",
+        "model": "openai/gpt-6-luna",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "default": True,
+    }
+    models = models_from_env(
+        {
+            "SERVING_ENDPOINT": "databricks-meta-llama-3-3-70b-instruct",
+            "DATABRICKS_HOST": "https://adb-1.azuredatabricks.net",
+            "CRABRIKS_MODELS": json.dumps([luna]),
+        }
+    )
+
+    assert [entry.id for entry in models] == ["databricks", "openai-gpt-6-luna"]
+    assert models[0].is_default is False
+    assert models[1].is_default is True
+    assert select_model(models, None).id == "openai-gpt-6-luna"
+    assert select_model(models, "openai/gpt-6-luna").id == "openai-gpt-6-luna"

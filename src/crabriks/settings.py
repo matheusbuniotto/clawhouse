@@ -71,9 +71,10 @@ def models_from_env(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:
     `CRABRIKS_MODELS` is a JSON array of OpenAI-compatible models:
     `[{"id": "...", "label": "...", "model": "...", "base_url": "...", "api_key_env": "..."}]`.
     """
-    entries = list(_databricks_models(env))
-    entries.extend(_compatible_models(env.get(MODELS_ENV)))
-    return _mark_default(entries)
+    compat = list(_compatible_models(env.get(MODELS_ENV)))
+    has_compat_default = any(entry.is_default for entry in compat)
+    db_entries = list(_databricks_models(env, is_default=not has_compat_default))
+    return _mark_default(db_entries + compat)
 
 
 def request_token(
@@ -91,7 +92,9 @@ def request_token(
     return ""
 
 
-def _databricks_models(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:
+def _databricks_models(
+    env: Mapping[str, str], *, is_default: bool = True
+) -> tuple[ModelEntry, ...]:
     endpoint = env.get("SERVING_ENDPOINT") or env.get("DATABRICKS_MODEL")
     if not endpoint:
         return ()
@@ -101,7 +104,7 @@ def _databricks_models(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:
             label=f"Databricks · {endpoint}",
             provider="databricks",
             model=endpoint,
-            is_default=True,
+            is_default=is_default,
         ),
     )
 
@@ -109,18 +112,21 @@ def _databricks_models(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:
 def _compatible_models(raw: str | None) -> tuple[ModelEntry, ...]:
     if not raw:
         return ()
-    items: list[dict[str, str]] = json.loads(raw)
+    items: list[dict[str, object]] = json.loads(raw)
     return tuple(_compatible_entry(item) for item in items)
 
 
-def _compatible_entry(item: Mapping[str, str]) -> ModelEntry:
+def _compatible_entry(item: Mapping[str, object]) -> ModelEntry:
+    is_default = bool(item.get("default") or item.get("is_default"))
+    api_key_env_val = item.get("api_key_env")
     return ModelEntry(
-        id=item["id"],
-        label=item.get("label") or item["id"],
+        id=str(item["id"]),
+        label=str(item.get("label") or item["id"]),
         provider="openai_compatible",
-        model=item["model"],
-        base_url=item["base_url"],
-        api_key_env=item.get("api_key_env") or None,
+        model=str(item["model"]),
+        base_url=str(item["base_url"]),
+        api_key_env=str(api_key_env_val) if api_key_env_val else None,
+        is_default=is_default,
     )
 
 
