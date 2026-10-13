@@ -2,7 +2,7 @@
 
 import json
 import warnings
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -31,12 +31,16 @@ from crabriks.store.store import MemorySessionStore
 SESSION = "00000000-0000-4000-8000-0000000000a1"
 
 
+def _parts(messages: list[ModelMessage]) -> list[str]:
+    return [part.part_kind for message in messages for part in message.parts]
+
+
 async def _says_done(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
     del messages, info
     yield "done"
 
 
-def _calls_tool(name: str, args: dict[str, object]) -> FunctionModel:
+def _calls_tool(name: str, args: Mapping[str, object]) -> FunctionModel:
     async def stream(
         messages: list[ModelMessage], info: AgentInfo
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
@@ -48,6 +52,35 @@ def _calls_tool(name: str, args: dict[str, object]) -> FunctionModel:
             yield "done"
             return
         yield {0: DeltaToolCall(name=name, json_args=json.dumps(args), tool_call_id="call-1")}
+
+    return FunctionModel(stream_function=stream)
+
+
+def _has_tool_return(messages: list[ModelMessage], tool_name: str) -> bool:
+    return any(
+        getattr(p, "part_kind", "") == "tool-return" and getattr(p, "tool_name", "") == tool_name
+        for m in messages
+        for p in m.parts
+    )
+
+
+def _step_model(
+    tool_name: str, args: Mapping[str, object], tool_id: str, done_reply: str
+) -> FunctionModel:
+    async def stream(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        if not _has_tool_return(messages, tool_name):
+            yield {
+                0: DeltaToolCall(
+                    name=tool_name,
+                    json_args=json.dumps(args),
+                    tool_call_id=tool_id,
+                )
+            }
+            return
+        yield done_reply
 
     return FunctionModel(stream_function=stream)
 
@@ -373,3 +406,109 @@ async def test_lakeflow_jobs_skill_activates_in_a_turn_and_the_harness_loads_it(
     assert any("### Skill Instructions: lakeflow-jobs" in text for text in seen)
     assert any("jobs_run_now" in text for text in seen)
     assert [str(w.message) for w in caught if "lakeflow-jobs" in str(w.message)] == []
+
+
+async def test_chat_creates_agent_creates_job_and_delivers_deep_analysis(
+    tmp_path: Path,
+) -> None:
+    """Demonstrates the complete workflow:
+
+    1. User asks in chat to create an agent.
+    2. Agent is created in store and workspace provisioned.
+    3. User asks to create a Databricks Job to query samples.nyctaxi.trips and analyze it.
+    4. Mutating tool jobs_create requires approval -> approved -> job created.
+    5. Test run triggered -> jobs_run_now requires approval -> approved -> run starts.
+    6. jobs_get_run fetches status and deep analysis is delivered.
+    """
+    client = MagicMock()
+    client.jobs.create.return_value = MagicMock(job_id=99)
+    client.jobs.run_now.return_value = MagicMock(run_id=888)
+    client.jobs.get_run.return_value = Run(
+        run_id=888,
+        job_id=99,
+        run_page_url="https://workspace.databricks.com/#job/99/run/888",
+        state=RunState(
+            life_cycle_state=RunLifeCycleState.TERMINATED,
+            result_state=RunResultState.SUCCESS,
+        ),
+    )
+
+    store = MemorySessionStore()
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    workspace.directory.mkdir(parents=True)
+
+    # Step 1 & 2: Create Agent in chat
+    agent_args = {
+        "name": "NyTaxiAnalyst",
+        "description": "Specialist in NYC taxi ride anomalies and fare outliers",
+        "system_prompt": "Analyze taxi fares and trip distance distributions.",
+        "signature_emoji": "🚕",
+    }
+    m1 = _step_model(
+        "create_agent", agent_args, "call-create-taxi", "Agent NyTaxiAnalyst 🚕 created."
+    )
+    turn1 = await run_turn(
+        SESSION,
+        "Create an agent named NyTaxiAnalyst to analyze taxi trips",
+        ctx=_ctx(client, store, model=m1, workspace_root=tmp_path),
+    )
+    assert turn1.status == "ok"
+    assert "Agent NyTaxiAnalyst 🚕 created." in turn1.reply
+    created_agents = await store.list_custom_agents("user-1")
+    assert len(created_agents) == 1
+    assert created_agents[0].name == "NyTaxiAnalyst"
+
+    # Step 3 & 4: User asks to create a Databricks Job to query samples.nyctaxi.trips
+    job_args = {
+        "name": "nyctaxi_deep_analysis",
+        "task_type": "sql",
+        "path": "/Workspace/Shared/nyctaxi_analysis.sql",
+    }
+    m2 = _step_model("jobs_create", job_args, "call-create-job", "Job created with ID 99.")
+    turn2 = await run_turn(
+        SESSION,
+        "Create a job to query samples.nyctaxi.trips for NyTaxiAnalyst",
+        ctx=_ctx(client, store, model=m2, workspace_root=tmp_path),
+    )
+    assert turn2.status == "pending_approval"
+    assert turn2.approval_id is not None
+    client.jobs.create.assert_not_called()
+
+    # User approves job creation
+    resumed2 = await _approve(client, store, turn2.approval_id)
+    assert resumed2.status == "ok"
+    client.jobs.create.assert_called_once()
+
+    # Step 5: Trigger test run (jobs_run_now requires approval)
+    m3 = _step_model("jobs_run_now", {"job_id": 99}, "call-run-job", "Run 888 triggered.")
+    turn3 = await run_turn(
+        SESSION,
+        "Trigger a test run of job 99",
+        ctx=_ctx(client, store, model=m3, workspace_root=tmp_path),
+    )
+    assert turn3.status == "pending_approval"
+    assert turn3.approval_id is not None
+    client.jobs.run_now.assert_not_called()
+
+    # User approves run trigger
+    resumed3 = await _approve(client, store, turn3.approval_id)
+    assert resumed3.status == "ok"
+    client.jobs.run_now.assert_called_once_with(job_id=99, job_parameters=None)
+
+    # Step 6: Query run status and deliver deep analysis
+    report = (
+        "🚕 **NyTaxiAnalyst Deep Analysis Report** (Run #888 - SUCCESS)\n"
+        "- Analyzed: `samples.nyctaxi.trips`\n"
+        "- Identified 3.2% outlier fares exceeding $100.\n"
+        "- Average trip distance: 2.8 miles."
+    )
+    m4 = _step_model("jobs_get_run", {"run_id": 888}, "call-get-run", report)
+    turn4 = await run_turn(
+        SESSION,
+        "Check status and deliver deep analysis",
+        ctx=_ctx(client, store, model=m4, workspace_root=tmp_path),
+    )
+    assert turn4.status == "ok"
+    assert "NyTaxiAnalyst Deep Analysis Report" in turn4.reply
+    assert "samples.nyctaxi.trips" in turn4.reply
+    assert "Run #888" in turn4.reply

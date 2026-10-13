@@ -99,8 +99,11 @@ def _string_contents(messages: list[ModelMessage]) -> list[str]:
 async def _clock_then_reply(
     messages: list[ModelMessage], info: AgentInfo
 ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
-    assert [tool.name for tool in info.function_tools] == ["clock"]
-    assert info.function_tools[0].description == CLOCK_DESCRIPTION
+    tool_names = [tool.name for tool in info.function_tools]
+    assert "clock" in tool_names
+    assert "create_agent" in tool_names
+    clock_tool = next(t for t in info.function_tools if t.name == "clock")
+    assert clock_tool.description == CLOCK_DESCRIPTION
     assert info.instructions is not None
     assert info.instructions.startswith("# Identity\nYou are Crabriks, the platform agent main.")
     assert f"session_id: {SESSION}" in info.instructions
@@ -355,7 +358,7 @@ async def test_turn_shows_the_skill_catalog_without_the_body(tmp_path: Path) -> 
     assert "Full instructions here." not in seen[0]
     assert "# Identity\nYou are Crabriks, the platform agent main." in seen[0]
     assert f"# Workspace\n{paths.directory.as_posix()}" in seen[0]
-    assert offered[0] == ["load_capability", "clock"]
+    assert set(offered[0]) == {"load_capability", "clock", "create_agent"}
     assert not any(name in offered[0] for name in _FILE_TOOLS)
 
 
@@ -549,7 +552,7 @@ async def test_empty_skill_library_offers_only_builtin_tools(tmp_path: Path) -> 
     )
 
     assert result.status == "ok"
-    assert offered == [["clock"]]
+    assert set(offered[0]) == {"clock", "create_agent"}
 
 
 class _StubServerToolset(AbstractToolset[object]):
@@ -978,3 +981,69 @@ async def test_subsequent_turns_include_custom_identity_and_directives(
     assert "Prefers concise tables and Python." in prompt
     # Verified no birth ritual section
     assert "# Birth Ritual" not in prompt
+
+
+async def test_turn_creates_agent_in_chat_and_provisions_workspace(tmp_path: Path) -> None:
+    store = MemorySessionStore()
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    workspace.directory.mkdir(parents=True)
+
+    agent_created_call_id = "call-create-agent"
+
+    async def model_fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        tool_names = [tool.name for tool in info.function_tools]
+        assert "create_agent" in tool_names
+
+        if "tool-return" not in _parts(messages):
+            args = json.dumps(
+                {
+                    "name": "NyTaxiAnalyst",
+                    "description": "Analyzes NYC taxi rides and fare anomalies",
+                    "system_prompt": "You are NyTaxiAnalyst. Focus on sample dataset anomalies.",
+                    "signature_emoji": "🚕",
+                    "soul": "Detail-oriented statistician.",
+                    "context": "Working with samples.nyctaxi.trips.",
+                }
+            )
+            yield {
+                0: DeltaToolCall(
+                    name="create_agent",
+                    json_args=args,
+                    tool_call_id=agent_created_call_id,
+                )
+            }
+            return
+
+        yield "Agent NyTaxiAnalyst 🚕 has been successfully created and workspace provisioned!"
+
+    ctx = _ctx(store, FunctionModel(stream_function=model_fn), workspace=workspace)
+    result = await run_turn(
+        SESSION,
+        "Create an agent named NyTaxiAnalyst to analyze taxi rides",
+        ctx=ctx,
+    )
+
+    assert result.status == "ok"
+    assert "Agent NyTaxiAnalyst 🚕 has been successfully created" in result.reply
+
+    # Assert agent registered in store
+    agents = await store.list_custom_agents(OWNER)
+    assert len(agents) == 1
+    assert agents[0].name == "NyTaxiAnalyst"
+    assert agents[0].description == "Analyzes NYC taxi rides and fare anomalies"
+    assert agents[0].signature_emoji == "🚕"
+
+    # Assert agent physical workspace provisioned with OpenClaw files
+    agent_paths = resolve_agent_workspace(tmp_path, "NyTaxiAnalyst")
+    assert agent_paths.directory.is_dir()
+    assert agent_paths.workspace_dir.is_dir()
+    assert agent_paths.agents.read_text(encoding="utf-8") == (
+        "You are NyTaxiAnalyst. Focus on sample dataset anomalies."
+    )
+    assert agent_paths.identity.read_text(encoding="utf-8") == ("Name: NyTaxiAnalyst\nEmoji: 🚕\n")
+    assert agent_paths.soul.read_text(encoding="utf-8") == "Detail-oriented statistician."
+    assert agent_paths.context_file.read_text(encoding="utf-8") == (
+        "Working with samples.nyctaxi.trips."
+    )

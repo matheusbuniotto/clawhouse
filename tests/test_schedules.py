@@ -1,14 +1,21 @@
-"""Tests for schedule parsing and next run calculation."""
-
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+from pydantic_ai.models.function import FunctionModel
 
+from crabriks.agent.turn import TurnContext
+from crabriks.app import create_app
 from crabriks.capabilities.schedules import (
     InvalidScheduleCommand,
     calculate_next_run,
     parse_schedule_command,
+    run_scheduled_turn,
 )
+from crabriks.settings import Settings
+from crabriks.store.shapes import ScheduleEntry, TurnResult
+from crabriks.store.store import MemorySessionStore
 
 
 def test_parse_cron_syntax() -> None:
@@ -57,9 +64,6 @@ def test_calculate_next_run_advances_time() -> None:
 
 @pytest.mark.asyncio
 async def test_memory_store_schedule_crud_and_claim() -> None:
-    from crabriks.store.shapes import ScheduleEntry
-    from crabriks.store.store import MemorySessionStore
-
     store = MemorySessionStore()
     session = await store.create_session("ada@example.com")
     now = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
@@ -108,11 +112,6 @@ async def test_memory_store_schedule_crud_and_claim() -> None:
 
 @pytest.mark.asyncio
 async def test_run_scheduled_turn_executes_and_advances_schedule() -> None:
-    from crabriks.agent.turn import TurnContext
-    from crabriks.capabilities.schedules import run_scheduled_turn
-    from crabriks.store.shapes import ScheduleEntry, TurnResult
-    from crabriks.store.store import MemorySessionStore
-
     store = MemorySessionStore()
     session = await store.create_session("ada@example.com")
     now = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
@@ -170,15 +169,6 @@ async def test_run_scheduled_turn_executes_and_advances_schedule() -> None:
 
 @pytest.mark.asyncio
 async def test_schedule_api_endpoints_and_chat_turn(tmp_path) -> None:
-    from collections.abc import AsyncIterator
-
-    from httpx import ASGITransport, AsyncClient
-    from pydantic_ai.models.function import FunctionModel
-
-    from crabriks.app import create_app
-    from crabriks.settings import Settings
-    from crabriks.store import MemorySessionStore
-
     store = MemorySessionStore()
     settings = Settings(
         dev_user=None,

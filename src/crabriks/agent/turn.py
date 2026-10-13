@@ -55,9 +55,10 @@ from crabriks.capabilities.schedules import (
     parse_schedule_command,
 )
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
-from crabriks.capabilities.workspace import WorkspacePaths
+from crabriks.capabilities.workspace import WorkspacePaths, provision_agent_workspace
 from crabriks.store.shapes import (
     ApprovalEntry,
+    CustomAgent,
     ScheduleEntry,
     TranscriptEntry,
     TurnResult,
@@ -348,12 +349,77 @@ SAVE_PROFILE_DESCRIPTION = (
 )
 SAVE_PROFILE_TOOL_CARD = ToolCard(name=SAVE_PROFILE_NAME, description=SAVE_PROFILE_DESCRIPTION)
 
+CREATE_AGENT_NAME = "create_agent"
+CREATE_AGENT_DESCRIPTION = (
+    "Create a new specialized custom agent with its OpenClaw-compatible workspace folder."
+)
+CREATE_AGENT_TOOL_CARD = ToolCard(name=CREATE_AGENT_NAME, description=CREATE_AGENT_DESCRIPTION)
+
 
 def is_wake_up_message(text: str) -> bool:
     cleaned = text.strip().lower()
     if cleaned in ("wake up, my friend!", "wake up, my friend", "wake up my friend", "wake up"):
         return True
     return cleaned.startswith("wake up, my friend")
+
+
+@dataclass
+class AgentManagementCapability(AbstractCapability[TurnDeps]):
+    """Attached to allow the agent to create and configure other custom agents."""
+
+    store: SessionStore
+    owner_id: str
+    workspace: WorkspacePaths | None
+
+    def get_toolset(self) -> AgentToolset[TurnDeps] | None:
+        store = self.store
+        owner_id = self.owner_id
+        workspace = self.workspace
+
+        async def create_agent(  # noqa: PLR0913
+            name: str,
+            description: str,
+            system_prompt: str,
+            *,
+            signature_emoji: str = "🤖",
+            soul: str | None = None,
+            context: str | None = None,
+        ) -> dict[str, object]:
+            """Create a new custom agent and provision its workspace."""
+            agent_id = str(uuid4())
+            agent = CustomAgent(
+                id=agent_id,
+                owner_id=owner_id,
+                name=name,
+                description=description,
+                system_prompt=system_prompt,
+                signature_emoji=signature_emoji,
+            )
+            created = await store.create_custom_agent(agent)
+            provisioned_dir: str | None = None
+            if workspace is not None:
+                # Root is the parent of 'claw' directory
+                root = workspace.directory.parent.parent.parent
+                paths = provision_agent_workspace(
+                    root=root,
+                    agent_name=name,
+                    agents_text=system_prompt,
+                    identity_name=name,
+                    signature_emoji=signature_emoji,
+                    soul_text=soul,
+                    context_text=context,
+                )
+                provisioned_dir = paths.directory.as_posix()
+
+            return {
+                "id": created.id,
+                "name": created.name,
+                "description": created.description,
+                "signature_emoji": created.signature_emoji,
+                "workspace_directory": provisioned_dir,
+            }
+
+        return FunctionToolset([create_agent])
 
 
 @dataclass
@@ -430,7 +496,13 @@ def _capabilities_for_turn(
     *,
     birth_ritual: bool = False,
 ) -> list[AgentCapability[TurnDeps]] | None:
-    capabilities: list[AgentCapability[TurnDeps]] = []
+    capabilities: list[AgentCapability[TurnDeps]] = [
+        AgentManagementCapability(
+            store=claimed.ctx.store,
+            owner_id=claimed.ctx.owner_id,
+            workspace=claimed.ctx.workspace,
+        )
+    ]
     if birth_ritual:
         capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
     if claimed.ctx.databricks_capability is not None:
@@ -460,7 +532,8 @@ def _prompt_for(
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
     db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
-    builtin = (*BUILTIN_TOOLS, SAVE_PROFILE_TOOL_CARD) if birth_ritual else BUILTIN_TOOLS
+    base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD)
+    builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
     return build_system_prompt(
         tools=(*builtin, *db_cards, *mcp_cards),
