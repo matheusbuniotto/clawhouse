@@ -65,10 +65,18 @@ async def _resolve_agent_context(
     if not agent_names:
         return None, None
     custom_agents = await store.list_custom_agents(owner_id)
+    lower_mentions = {a.lower() for a in agent_names}
     for ca in custom_agents:
-        if ca.name in agent_names:
-            prompt_text = ca.system_prompt
-            part = f"### Agent Persona: {ca.name}\n{ca.description}\nInstructions:\n{prompt_text}"
+        if ca.name.lower() in lower_mentions:
+            part = (
+                f"### Mentioned Agent: @{ca.name} (ALREADY EXISTS)\n"
+                f"- Name: {ca.name} {ca.signature_emoji}\n"
+                f"- Description: {ca.description}\n"
+                f"- Operating Instructions:\n{ca.system_prompt}\n\n"
+                f"IMPORTANT: The agent '@{ca.name}' is ALREADY REGISTERED in this workspace.\n"
+                f"- DO NOT call `create_agent` for '@{ca.name}'.\n"
+                "- Proceed directly with the requested task and delegate or carry out the analysis."
+            )
             return ca, part
     return None, None
 

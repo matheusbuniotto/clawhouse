@@ -185,3 +185,29 @@ async def test_dbsql_query_read_vs_mutation_approval() -> None:
     result_mutate = await run_turn(session_id_2, "Delete users table", ctx=ctx_mutate)
     assert result_mutate.status == "pending_approval"
     assert result_mutate.approval_id is not None
+
+
+@pytest.mark.asyncio
+async def test_databricks_tools_fallback_when_user_client_lacks_scope() -> None:
+    user_client = MagicMock()
+    user_client.jobs.list.side_effect = PermissionError("missing jobs scope")
+    ambient_client = MagicMock()
+    settings = MagicMock()
+    settings.name = "backup"
+    ambient_job = MagicMock(
+        job_id=99,
+        settings=settings,
+        creator_user_name="admin",
+    )
+    ambient_client.jobs.list.return_value = [ambient_job]
+
+    from crabriks.capabilities.databricks import DatabricksTools
+
+    tools = DatabricksTools(user_client, warehouse_id="wh-1")
+    tools._fallback_client = lambda: ambient_client  # type: ignore[assignment]
+
+    result = await tools.jobs_list()
+    assert result == {
+        "jobs": [{"job_id": 99, "name": "backup", "creator": "admin"}],
+        "job_count": 1,
+    }

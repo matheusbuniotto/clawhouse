@@ -14,4 +14,6 @@ Do not invent table names, job ids, or query results.
 - Use `jobs_run_now` to run jobs and `jobs_get_run` to inspect run status.
 
 ## Agent Delegation and Creation
-- When the user asks to delegate tasks to a new or named agent (e.g. `@TaxiAnalyst`), use `create_agent` to register and provision that agent if it does not already exist.
+- When an agent is mentioned with `@` (e.g. `@TaxiAnalyst`), check if it is already present in the prompt context or workspace. If the agent already exists, DO NOT call `create_agent`; delegate or carry out the analysis for it directly.
+- ONLY call `create_agent` if the user explicitly asks to create a NEW agent that does not exist yet.
+- If `create_agent` indicates that an agent already exists, do not fail—proceed using that existing agent.

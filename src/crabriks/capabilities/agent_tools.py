@@ -68,13 +68,14 @@ class AgentManagementCapability(AbstractCapability[TurnDeps]):
             """Create a new custom agent and provision its workspace."""
             # UNWANT-01: Check for existing agent name to prevent duplicates
             existing_agents = await store.list_custom_agents(owner_id)
-            if any(a.name.lower() == name.lower() for a in existing_agents):
+            existing = next((a for a in existing_agents if a.name.lower() == name.lower()), None)
+            if existing is not None:
                 res = CreatedAgentResult(
-                    id="",
-                    name=name,
-                    description=description,
-                    signature_emoji=signature_emoji,
-                    error=f"Agent '{name}' already exists for this user.",
+                    id=existing.id,
+                    name=existing.name,
+                    description=existing.description,
+                    signature_emoji=existing.signature_emoji,
+                    error=f"Agent '{existing.name}' already exists for this user.",
                 )
                 return asdict(res)
 

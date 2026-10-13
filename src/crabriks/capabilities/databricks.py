@@ -8,7 +8,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import JobSettings, SparkPythonTask, SqlTask, SqlTaskFile, Task
@@ -127,6 +127,9 @@ def resolve_warehouse_id(client: WorkspaceClient, configured_id: str | None) -> 
     return None
 
 
+_T = TypeVar("_T")
+
+
 class DatabricksTools:
     """Methods exposed as agent tools for Unity Catalog and SQL execution."""
 
@@ -140,74 +143,54 @@ class DatabricksTools:
         except Exception:  # noqa: BLE001
             return None
 
+    def _call(self, fn: Callable[[WorkspaceClient], _T]) -> _T:
+        try:
+            return fn(self.client)
+        except Exception as exc:
+            fallback = self._fallback_client()
+            if fallback is not None and fallback is not self.client:
+                logger.info("Call on user client failed (%s); trying ambient client", exc)
+                return fn(fallback)
+            raise
+
     async def uc_list_catalogs(self) -> list[str]:
         """List available Unity Catalog catalogs."""
         try:
-            return [c.name for c in self.client.catalogs.list() if c.name]
+            return self._call(lambda cl: [c.name for c in cl.catalogs.list() if c.name])
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_list_catalogs failed with client: %s; trying ambient client", exc)
-            fallback = self._fallback_client()
-            if fallback is not None:
-                try:
-                    return [c.name for c in fallback.catalogs.list() if c.name]
-                except Exception as inner_exc:  # noqa: BLE001
-                    logger.warning("uc_list_catalogs fallback failed: %s", inner_exc)
+            logger.warning("uc_list_catalogs failed: %s", exc)
             return []
 
     async def uc_list_schemas(self, catalog_name: str) -> list[str]:
         """List schemas within a specific Unity Catalog catalog."""
         try:
-            return [s.name for s in self.client.schemas.list(catalog_name=catalog_name) if s.name]
+            return self._call(
+                lambda cl: [s.name for s in cl.schemas.list(catalog_name=catalog_name) if s.name]
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_list_schemas failed with client: %s; trying ambient client", exc)
-            fallback = self._fallback_client()
-            if fallback is not None:
-                try:
-                    return [
-                        s.name for s in fallback.schemas.list(catalog_name=catalog_name) if s.name
-                    ]
-                except Exception as inner_exc:  # noqa: BLE001
-                    logger.warning("uc_list_schemas fallback failed: %s", inner_exc)
+            logger.warning("uc_list_schemas failed: %s", exc)
             return []
 
     async def uc_list_tables(self, catalog_name: str, schema_name: str) -> list[str]:
         """List tables within a Unity Catalog schema."""
         try:
-            return [
-                t.name
-                for t in self.client.tables.list(catalog_name=catalog_name, schema_name=schema_name)
-                if t.name
-            ]
+            return self._call(
+                lambda cl: [
+                    t.name
+                    for t in cl.tables.list(catalog_name=catalog_name, schema_name=schema_name)
+                    if t.name
+                ]
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_list_tables failed with client: %s; trying ambient client", exc)
-            fallback = self._fallback_client()
-            if fallback is not None:
-                try:
-                    return [
-                        t.name
-                        for t in fallback.tables.list(
-                            catalog_name=catalog_name, schema_name=schema_name
-                        )
-                        if t.name
-                    ]
-                except Exception as inner_exc:  # noqa: BLE001
-                    logger.warning("uc_list_tables fallback failed: %s", inner_exc)
+            logger.warning("uc_list_tables failed: %s", exc)
             return []
 
     async def uc_describe_table(self, full_name: str) -> dict[str, object]:
         """Describe schema and column definitions of a Unity Catalog table."""
         try:
-            info = self.client.tables.get(full_name=full_name)
+            info = self._call(lambda cl: cl.tables.get(full_name=full_name))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("uc_describe_table failed with client: %s; trying ambient client", exc)
-            fallback = self._fallback_client()
-            if fallback is not None:
-                try:
-                    info = fallback.tables.get(full_name=full_name)
-                except Exception as inner_exc:  # noqa: BLE001
-                    return {"error": f"Failed to describe table {full_name}: {inner_exc}"}
-            else:
-                return {"error": f"Failed to describe table {full_name}: {exc}"}
+            return {"error": f"Failed to describe table {full_name}: {exc}"}
         cols = [
             {
                 "name": col.name,
@@ -224,16 +207,19 @@ class DatabricksTools:
 
     async def dbsql_query(self, query: str, max_rows: int = 100) -> dict[str, object]:
         """Execute a SQL query on a Databricks SQL Warehouse."""
-        if not self.warehouse_id:
+        wh_id = self.warehouse_id
+        if not wh_id:
             return {"error": "No Databricks SQL Warehouse available to execute queries."}
 
         effective_sql = enforce_query_limit(query, default_limit=max_rows)
         try:
-            resp = self.client.statement_execution.execute_statement(
-                statement=effective_sql,
-                warehouse_id=self.warehouse_id,
-                wait_timeout="30s",
-                row_limit=max_rows,
+            resp = self._call(
+                lambda cl: cl.statement_execution.execute_statement(
+                    statement=effective_sql,
+                    warehouse_id=wh_id,
+                    wait_timeout="30s",
+                    row_limit=max_rows,
+                )
             )
             columns: list[str] = []
             if resp.manifest and resp.manifest.schema and resp.manifest.schema.columns:
@@ -257,9 +243,11 @@ class DatabricksTools:
         """Invoke Databricks AI functions or foundation models."""
         target_endpoint = endpoint or "databricks-meta-llama-3-3-70b-instruct"
         try:
-            resp = self.client.serving_endpoints.query(
-                name=target_endpoint,
-                messages=[ChatMessage(role=ChatMessageRole.USER, content=prompt)],
+            resp = self._call(
+                lambda cl: cl.serving_endpoints.query(
+                    name=target_endpoint,
+                    messages=[ChatMessage(role=ChatMessageRole.USER, content=prompt)],
+                )
             )
             choices = getattr(resp, "choices", [])
             if choices:
@@ -272,7 +260,7 @@ class DatabricksTools:
         """List Lakeflow jobs in the workspace."""
         limit = max(1, min(limit, _JOBS_PAGE_MAX))
         try:
-            jobs = list(itertools.islice(self.client.jobs.list(limit=limit), limit))
+            jobs = self._call(lambda cl: list(itertools.islice(cl.jobs.list(limit=limit), limit)))
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to list jobs: {exc}"}
         return {
@@ -292,7 +280,7 @@ class DatabricksTools:
     ) -> dict[str, object]:
         """Trigger an immediate run of a Lakeflow job, optionally overriding job parameters."""
         try:
-            wait = self.client.jobs.run_now(job_id=job_id, job_parameters=parameters)
+            wait = self._call(lambda cl: cl.jobs.run_now(job_id=job_id, job_parameters=parameters))
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to run job {job_id}: {exc}"}
         return {"run_id": wait.run_id, "job_id": job_id}
@@ -331,12 +319,14 @@ class DatabricksTools:
                 effective_path = f"/Workspace/Shared/crabriks/{task_key}.sql"
                 try:
                     b64_content = base64.b64encode(sql_text.encode("utf-8")).decode("utf-8")
-                    self.client.workspace.import_(
-                        path=effective_path,
-                        content=b64_content,
-                        format=ImportFormat.SOURCE,
-                        language=Language.SQL,
-                        overwrite=True,
+                    self._call(
+                        lambda cl: cl.workspace.import_(
+                            path=effective_path,
+                            content=b64_content,
+                            format=ImportFormat.SOURCE,
+                            language=Language.SQL,
+                            overwrite=True,
+                        )
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed to auto-import SQL file to workspace: %s", exc)
@@ -347,7 +337,7 @@ class DatabricksTools:
                 sql_task=SqlTask(warehouse_id=sql_warehouse, file=SqlTaskFile(path=effective_path)),
             )
         try:
-            created = self.client.jobs.create(name=name, tasks=[task])
+            created = self._call(lambda cl: cl.jobs.create(name=name, tasks=[task]))
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to create job {name}: {exc}"}
         return {"job_id": created.job_id, "name": name}
@@ -355,7 +345,11 @@ class DatabricksTools:
     async def jobs_edit(self, job_id: int, new_settings: dict[str, Any]) -> dict[str, object]:
         """Update a Lakeflow job. `new_settings` holds the top-level job settings to change."""
         try:
-            self.client.jobs.update(job_id=job_id, new_settings=JobSettings.from_dict(new_settings))
+            self._call(
+                lambda cl: cl.jobs.update(
+                    job_id=job_id, new_settings=JobSettings.from_dict(new_settings)
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to update job {job_id}: {exc}"}
         return {"job_id": job_id, "updated": True}
@@ -363,7 +357,7 @@ class DatabricksTools:
     async def jobs_cancel_run(self, run_id: int) -> dict[str, object]:
         """Request cancellation of an active Lakeflow job run."""
         try:
-            self.client.jobs.cancel_run(run_id=run_id)
+            self._call(lambda cl: cl.jobs.cancel_run(run_id=run_id))
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to cancel run {run_id}: {exc}"}
         return {"run_id": run_id, "cancel_requested": True}
@@ -371,7 +365,7 @@ class DatabricksTools:
     async def jobs_get_run(self, run_id: int) -> dict[str, object]:
         """Get the state of a Lakeflow job run."""
         try:
-            run = self.client.jobs.get_run(run_id=run_id)
+            run = self._call(lambda cl: cl.jobs.get_run(run_id=run_id))
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to get run {run_id}: {exc}"}
         state = run.state
