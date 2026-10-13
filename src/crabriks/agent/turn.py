@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaita
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -42,6 +43,7 @@ from crabriks.agent.prompt import (
     ToolCard,
     build_system_prompt,
 )
+from crabriks.capabilities.agent_tools import AgentManagementCapability
 from crabriks.capabilities.bootstrap import (
     BootstrapContext,
     load_bootstrap,
@@ -55,10 +57,9 @@ from crabriks.capabilities.schedules import (
     parse_schedule_command,
 )
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
-from crabriks.capabilities.workspace import WorkspacePaths, provision_agent_workspace
+from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
     ApprovalEntry,
-    CustomAgent,
     ScheduleEntry,
     TranscriptEntry,
     TurnResult,
@@ -131,6 +132,7 @@ class TurnContext:
     now: Callable[[], datetime]
     emit: Emit | None = None
     workspace: WorkspacePaths | None = None
+    workspace_root: Path | None = None
     mcp_servers: tuple[MCPServerConfig, ...] = ()
     user_token: str = ""
     mcp_toolset_factory: MCPToolsetFactory | None = None
@@ -364,65 +366,6 @@ def is_wake_up_message(text: str) -> bool:
 
 
 @dataclass
-class AgentManagementCapability(AbstractCapability[TurnDeps]):
-    """Attached to allow the agent to create and configure other custom agents."""
-
-    store: SessionStore
-    owner_id: str
-    workspace: WorkspacePaths | None
-
-    def get_toolset(self) -> AgentToolset[TurnDeps] | None:
-        store = self.store
-        owner_id = self.owner_id
-        workspace = self.workspace
-
-        async def create_agent(  # noqa: PLR0913
-            name: str,
-            description: str,
-            system_prompt: str,
-            *,
-            signature_emoji: str = "🤖",
-            soul: str | None = None,
-            context: str | None = None,
-        ) -> dict[str, object]:
-            """Create a new custom agent and provision its workspace."""
-            agent_id = str(uuid4())
-            agent = CustomAgent(
-                id=agent_id,
-                owner_id=owner_id,
-                name=name,
-                description=description,
-                system_prompt=system_prompt,
-                signature_emoji=signature_emoji,
-            )
-            created = await store.create_custom_agent(agent)
-            provisioned_dir: str | None = None
-            if workspace is not None:
-                # Root is the parent of 'claw' directory
-                root = workspace.directory.parent.parent.parent
-                paths = provision_agent_workspace(
-                    root=root,
-                    agent_name=name,
-                    agents_text=system_prompt,
-                    identity_name=name,
-                    signature_emoji=signature_emoji,
-                    soul_text=soul,
-                    context_text=context,
-                )
-                provisioned_dir = paths.directory.as_posix()
-
-            return {
-                "id": created.id,
-                "name": created.name,
-                "description": created.description,
-                "signature_emoji": created.signature_emoji,
-                "workspace_directory": provisioned_dir,
-            }
-
-        return FunctionToolset([create_agent])
-
-
-@dataclass
 class HatchCapability(AbstractCapability[TurnDeps]):
     """Attached during the birth sequence ritual to persist caller's profile."""
 
@@ -501,6 +444,7 @@ def _capabilities_for_turn(
             store=claimed.ctx.store,
             owner_id=claimed.ctx.owner_id,
             workspace=claimed.ctx.workspace,
+            workspace_root=claimed.ctx.workspace_root,
         )
     ]
     if birth_ritual:

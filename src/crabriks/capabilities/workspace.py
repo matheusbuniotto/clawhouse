@@ -54,6 +54,7 @@ def provision_agent_workspace(  # noqa: PLR0913
     agent_name: str,
     agents_text: str,
     identity_name: str,
+    *,
     signature_emoji: str = "🤖",
     soul_text: str | None = None,
     context_text: str | None = None,

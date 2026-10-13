@@ -95,6 +95,7 @@ async def run_scheduled_turn(
     store: SessionStore,
     run_turn_fn: Callable[[str, str, TurnContext], Awaitable[TurnResult]],
     make_turn_ctx: Callable[[ScheduleEntry], TurnContext],
+    *,
     now_fn: Callable[[], datetime] | None = None,
 ) -> TurnResult | None:
     """Run one due schedule and advance its next_run_at timestamp."""

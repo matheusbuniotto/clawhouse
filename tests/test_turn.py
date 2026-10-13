@@ -16,7 +16,7 @@ from pydantic_core import SchemaValidator, core_schema
 
 from crabriks.mcp import InsecureMCPEndpoint, MCPServerConfig
 from crabriks.prompt import CLOCK_DESCRIPTION
-from crabriks.shapes import TranscriptEntry, UserProfile
+from crabriks.shapes import CustomAgent, TranscriptEntry, UserProfile
 from crabriks.skills import loaded_skill_text
 from crabriks.store import MemorySessionStore
 from crabriks.turn import (
@@ -47,6 +47,7 @@ def _ctx(  # noqa: PLR0913
     owner: str = OWNER,
     emit: list[TurnNotice] | None = None,
     workspace: WorkspacePaths | None = None,
+    workspace_root: Path | None = None,
     mcp_servers: tuple[MCPServerConfig, ...] = (),
     user_token: str = "dapi-" + "turn-user-token",
     mcp_toolset_factory: object = None,
@@ -62,6 +63,7 @@ def _ctx(  # noqa: PLR0913
         now=lambda: FROZEN,
         emit=capture,
         workspace=workspace,
+        workspace_root=workspace_root,
         mcp_servers=mcp_servers,
         user_token=user_token,
         mcp_toolset_factory=mcp_toolset_factory,  # type: ignore[arg-type]
@@ -1018,7 +1020,12 @@ async def test_turn_creates_agent_in_chat_and_provisions_workspace(tmp_path: Pat
 
         yield "Agent NyTaxiAnalyst 🚕 has been successfully created and workspace provisioned!"
 
-    ctx = _ctx(store, FunctionModel(stream_function=model_fn), workspace=workspace)
+    ctx = _ctx(
+        store,
+        FunctionModel(stream_function=model_fn),
+        workspace=workspace,
+        workspace_root=tmp_path,
+    )
     result = await run_turn(
         SESSION,
         "Create an agent named NyTaxiAnalyst to analyze taxi rides",
@@ -1047,3 +1054,58 @@ async def test_turn_creates_agent_in_chat_and_provisions_workspace(tmp_path: Pat
     assert agent_paths.context_file.read_text(encoding="utf-8") == (
         "Working with samples.nyctaxi.trips."
     )
+
+
+async def test_turn_create_agent_duplicate_name_returns_error(tmp_path: Path) -> None:
+    store = MemorySessionStore()
+    workspace = resolve_agent_workspace(tmp_path, "main")
+    workspace.directory.mkdir(parents=True)
+
+    await store.create_custom_agent(
+        CustomAgent(
+            id="agent-1",
+            owner_id=OWNER,
+            name="DuplicateAgent",
+            description="Existing agent",
+            system_prompt="Rule 1",
+            signature_emoji="🤖",
+        )
+    )
+
+    seen_return: list[object] = []
+
+    async def model_fn(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        for m in messages:
+            for p in m.parts:
+                if getattr(p, "part_kind", "") == "tool-return":
+                    seen_return.append(getattr(p, "content", ""))
+        if not seen_return:
+            yield {
+                0: DeltaToolCall(
+                    name="create_agent",
+                    json_args=json.dumps(
+                        {
+                            "name": "DuplicateAgent",
+                            "description": "Another copy",
+                            "system_prompt": "Rule 2",
+                        }
+                    ),
+                    tool_call_id="call-dup",
+                )
+            }
+            return
+        yield "Handled duplicate error."
+
+    ctx = _ctx(
+        store,
+        FunctionModel(stream_function=model_fn),
+        workspace=workspace,
+        workspace_root=tmp_path,
+    )
+    result = await run_turn(SESSION, "Create DuplicateAgent", ctx=ctx)
+    assert result.status == "ok"
+    assert len(seen_return) == 1
+    assert "already exists" in str(seen_return[0])

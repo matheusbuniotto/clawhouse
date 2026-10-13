@@ -98,6 +98,7 @@ def _ctx(
 ) -> TurnContext:
     return TurnContext(
         workspace=resolve_agent_workspace(workspace_root, "main") if workspace_root else None,
+        workspace_root=workspace_root,
         owner_id="user-1",
         store=store,
         model=model or FunctionModel(stream_function=_says_done),
