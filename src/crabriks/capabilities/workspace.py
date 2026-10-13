@@ -25,6 +25,8 @@ class WorkspacePaths:
     memory_dir: Path
     skills: Path
     context: Path
+    context_file: Path
+    workspace_dir: Path
 
 
 def resolve_agent_workspace(root: Path, agent_name: str) -> WorkspacePaths:
@@ -42,4 +44,35 @@ def resolve_agent_workspace(root: Path, agent_name: str) -> WorkspacePaths:
         memory_dir=directory / "memory",
         skills=directory / "skills",
         context=directory / "context",
+        context_file=directory / "CONTEXT.md",
+        workspace_dir=directory / "workspace",
     )
+
+
+def provision_agent_workspace(  # noqa: PLR0913
+    root: Path,
+    agent_name: str,
+    agents_text: str,
+    identity_name: str,
+    *,
+    signature_emoji: str = "🤖",
+    soul_text: str | None = None,
+    context_text: str | None = None,
+) -> WorkspacePaths:
+    """Provision a physical agent workspace folder and seed its bootstrap files."""
+    paths = resolve_agent_workspace(root, agent_name)
+    paths.directory.mkdir(parents=True, exist_ok=True)
+    paths.workspace_dir.mkdir(parents=True, exist_ok=True)
+    paths.skills.mkdir(parents=True, exist_ok=True)
+    paths.context.mkdir(parents=True, exist_ok=True)
+
+    paths.agents.write_text(agents_text, encoding="utf-8")
+    identity_content = f"Name: {identity_name}\nEmoji: {signature_emoji}\n"
+    paths.identity.write_text(identity_content, encoding="utf-8")
+
+    if soul_text is not None:
+        paths.soul.write_text(soul_text, encoding="utf-8")
+    if context_text is not None:
+        paths.context_file.write_text(context_text, encoding="utf-8")
+
+    return paths

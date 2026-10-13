@@ -1,11 +1,30 @@
 import { el } from "./dom.js";
 import type { ScreenContext } from "./shell.js";
 
+interface AgentItem {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string;
+  signature_emoji?: string;
+  is_platform?: boolean;
+}
+
 export function mount(root: HTMLElement, ctx: ScreenContext): void {
+  let selectedAgentName = "main";
+
+  const pickerSection = el("section", "agent-picker-section");
+  const pickerHeading = el("h2", "agent-picker-heading", "Choose Agent");
+  const agentCards = el("div", "agent-cards-grid");
+  pickerSection.append(pickerHeading, agentCards);
+  root.append(pickerSection);
+
   const form = document.createElement("form");
   form.id = "start";
   form.className = "start";
-  form.append(el("p", "agent", "Agent main · built-in, read-only"));
+  const startDesc = el("p", "agent", "Active: 🦀 main · platform workspace");
+  startDesc.id = "active-agent-desc";
+  form.append(startDesc);
 
   const button = el("button", "", "Start session");
   button.type = "submit";
@@ -20,7 +39,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   // Custom agents manager section
   const agentsSection = el("section", "custom-agents-section");
-  const agentsHeader = el("h2", "custom-agents-heading", "Custom Agents");
+  const agentsHeader = el("h2", "custom-agents-heading", "Create Workspace Agent");
   const agentsList = el("ul", "custom-agents-list");
   const emptyNote = el("p", "empty-agents", "No custom agents created yet.");
 
@@ -32,6 +51,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   nameInput.placeholder = "Agent name (e.g. data_analyst)";
   nameInput.required = true;
 
+  const emojiInput = document.createElement("input");
+  emojiInput.className = "agent-input";
+  emojiInput.placeholder = "Emoji (e.g. 📊, 🤖)";
+  emojiInput.maxLength = 4;
+  emojiInput.value = "🤖";
+
   const descInput = document.createElement("input");
   descInput.className = "agent-input";
   descInput.placeholder = "Description";
@@ -39,9 +64,19 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   const promptArea = document.createElement("textarea");
   promptArea.className = "agent-prompt";
-  promptArea.placeholder = "System prompt / instructions";
+  promptArea.placeholder = "Operating rules / AGENTS.md instructions";
   promptArea.rows = 2;
   promptArea.required = true;
+
+  const soulArea = document.createElement("textarea");
+  soulArea.className = "agent-prompt";
+  soulArea.placeholder = "Optional SOUL.md (persona, voice)";
+  soulArea.rows = 2;
+
+  const contextArea = document.createElement("textarea");
+  contextArea.className = "agent-prompt";
+  contextArea.placeholder = "Optional CONTEXT.md (domain & project context)";
+  contextArea.rows = 2;
 
   const createBtn = el("button", "btn-create-agent", "Create Agent");
   createBtn.type = "submit";
@@ -50,9 +85,41 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   agentStatusLine.id = "agent-status";
   agentStatusLine.setAttribute("role", "status");
 
-  createForm.append(nameInput, descInput, promptArea, createBtn);
+  createForm.append(
+    nameInput,
+    emojiInput,
+    descInput,
+    promptArea,
+    soulArea,
+    contextArea,
+    createBtn
+  );
   agentsSection.append(agentsHeader, agentsList, createForm, agentStatusLine);
   root.append(agentsSection);
+
+  function renderCards(agents: AgentItem[]): void {
+    agentCards.replaceChildren();
+    for (const ag of agents) {
+      const card = el(
+        "div",
+        `agent-card${ag.name === selectedAgentName ? " selected" : ""}`
+      );
+      const header = el("div", "agent-card-header");
+      const emojiSpan = el("span", "agent-card-emoji", ag.signature_emoji || (ag.is_platform ? "🦀" : "🤖"));
+      const nameSpan = el("strong", "agent-card-name", `@${ag.name}`);
+      header.append(emojiSpan, nameSpan);
+
+      const descP = el("p", "agent-card-desc", ag.description);
+      card.append(header, descP);
+
+      card.addEventListener("click", () => {
+        selectedAgentName = ag.name;
+        startDesc.textContent = `Active: ${ag.signature_emoji || (ag.is_platform ? "🦀" : "🤖")} ${ag.name} · ${ag.is_platform ? "platform workspace" : "custom agent workspace"}`;
+        renderCards(agents);
+      });
+      agentCards.append(card);
+    }
+  }
 
   async function loadAgents(): Promise<void> {
     try {
@@ -61,13 +128,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         agentStatusLine.textContent = "Failed to load custom agents.";
         return;
       }
-      const agents = (await res.json()) as {
-        id: string;
-        name: string;
-        description: string;
-        system_prompt: string;
-        is_platform?: boolean;
-      }[];
+      const agents = (await res.json()) as AgentItem[];
+      renderCards(agents);
+
       agentsList.replaceChildren();
       const customOnly = agents.filter((ag) => !ag.is_platform);
       if (customOnly.length === 0) {
@@ -91,6 +154,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
               agentStatusLine.textContent = `Failed to delete agent @${ag.name}.`;
               delBtn.disabled = false;
               return;
+            }
+            if (selectedAgentName === ag.name) {
+              selectedAgentName = "main";
+              startDesc.textContent = "Active: 🦀 main · platform workspace";
             }
             void loadAgents();
           } catch {
@@ -116,8 +183,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: nameInput.value.trim(),
+          signature_emoji: emojiInput.value.trim() || "🤖",
           description: descInput.value.trim(),
           system_prompt: promptArea.value.trim(),
+          soul: soulArea.value.trim() || null,
+          context: contextArea.value.trim() || null,
         }),
       });
       if (!res.ok) {
@@ -125,8 +195,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         return;
       }
       nameInput.value = "";
+      emojiInput.value = "🤖";
       descInput.value = "";
       promptArea.value = "";
+      soulArea.value = "";
+      contextArea.value = "";
       void loadAgents();
     } catch {
       agentStatusLine.textContent = "Failed to create custom agent.";
@@ -147,7 +220,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       return;
     }
     const body = (await response.json()) as { id: string };
-    ctx.navigate(`/chat?session=${body.id}`);
+    const agentParam = selectedAgentName !== "main" ? `&agent=${encodeURIComponent(selectedAgentName)}` : "";
+    ctx.navigate(`/chat?session=${body.id}${agentParam}`);
   }
 
   form.addEventListener("submit", (event) => {

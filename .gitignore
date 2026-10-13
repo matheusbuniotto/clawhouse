@@ -33,6 +33,8 @@ htmlcov/
 .mypy_cache/
 .pyright/
 .ruff_cache/
+test-results/
+playwright-report/
 
 # Frontend dependencies
 node_modules/
@@ -47,6 +49,7 @@ Thumbs.db
 
 # Agent run logs
 logs/
+.pi/
 
 # Databricks Asset Bundle state
 .databricks/

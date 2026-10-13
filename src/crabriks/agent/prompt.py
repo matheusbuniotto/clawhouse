@@ -10,7 +10,7 @@ AGENT_NAME = "main"
 CLOCK_NAME = "clock"
 CLOCK_DESCRIPTION = "Return the current UTC time as an ISO-8601 timestamp."
 _IDENTITY_FILES = ("SOUL.md", "IDENTITY.md")
-_PROJECT_FILES = ("AGENTS.md", "USER.md", "MEMORY.md")
+_PROJECT_FILES = ("AGENTS.md", "USER.md", "MEMORY.md", "CONTEXT.md")
 
 
 @dataclass(frozen=True, slots=True)
