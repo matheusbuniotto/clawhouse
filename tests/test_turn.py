@@ -360,7 +360,13 @@ async def test_turn_shows_the_skill_catalog_without_the_body(tmp_path: Path) -> 
     assert "Full instructions here." not in seen[0]
     assert "# Identity\nYou are Crabriks, the platform agent main." in seen[0]
     assert f"# Workspace\n{paths.directory.as_posix()}" in seen[0]
-    assert set(offered[0]) == {"load_capability", "clock", "create_agent"}
+    assert set(offered[0]) == {
+        "load_capability",
+        "clock",
+        "create_agent",
+        "create_google_sheet",
+        "update_google_sheet",
+    }
     assert not any(name in offered[0] for name in _FILE_TOOLS)
 
 
@@ -554,7 +560,12 @@ async def test_empty_skill_library_offers_only_builtin_tools(tmp_path: Path) -> 
     )
 
     assert result.status == "ok"
-    assert set(offered[0]) == {"clock", "create_agent"}
+    assert set(offered[0]) == {
+        "clock",
+        "create_agent",
+        "create_google_sheet",
+        "update_google_sheet",
+    }
 
 
 class _StubServerToolset(AbstractToolset[object]):

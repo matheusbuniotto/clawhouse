@@ -205,7 +205,7 @@ export function mount(root, ctx) {
                     transcript.scrollTop = transcript.scrollHeight;
                 }
                 setStatus("");
-            });
+            }, payload.arguments);
             transcript.scrollTop = transcript.scrollHeight;
             return;
         }

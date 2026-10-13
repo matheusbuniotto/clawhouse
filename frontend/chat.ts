@@ -260,7 +260,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
             transcript.scrollTop = transcript.scrollHeight;
           }
           setStatus("");
-        }
+        },
+        payload.arguments
       );
       transcript.scrollTop = transcript.scrollHeight;
       return;

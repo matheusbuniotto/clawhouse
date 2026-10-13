@@ -334,3 +334,99 @@ test("renders inline approval card and handles approval resolution", async () =>
 
   vi.unstubAllGlobals();
 });
+
+const SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+
+test("a create sheet approval card shows the question, exact rows, and warning", () => {
+  const container = document.createElement("div");
+  renderInlineApproval(
+    container,
+    "appr-sheet-1",
+    "create_google_sheet",
+    () => {},
+    JSON.stringify({
+      title: "Top Products",
+      rows: [
+        ["product", "sales"],
+        ["Widget", 100],
+      ],
+    }),
+  );
+
+  const card = container.querySelector(".approval-action-bar");
+  expect(card).not.toBeNull();
+  expect(card?.querySelector(".approval-msg")?.textContent).toBe(
+    'Create the spreadsheet "Top Products" in your Google Drive?',
+  );
+  expect(card?.textContent).toContain("2 rows × 2 columns");
+  expect(card?.textContent).toContain("leave Databricks");
+  expect(card?.querySelector(".approval-preview")?.textContent).toBe(
+    "product\tsales\nWidget\t100",
+  );
+});
+
+test("an update sheet approval links the spreadsheet and bounds the preview", () => {
+  const container = document.createElement("div");
+  renderInlineApproval(
+    container,
+    "appr-sheet-2",
+    "update_google_sheet",
+    () => {},
+    JSON.stringify({
+      spreadsheet_id: SHEET_ID,
+      tab: "Página1",
+      first_column: "B",
+      first_row: 4,
+      rows: [["x", "y"]],
+    }),
+  );
+
+  const card = container.querySelector(".approval-action-bar");
+  expect(card?.querySelector(".approval-msg")?.textContent).toBe(
+    'Overwrite 1 rows on tab "Página1" starting at B4?',
+  );
+  expect(card?.textContent).toContain("leave Databricks");
+  const link = card?.querySelector("a");
+  expect(link?.getAttribute("href")).toBe(`https://docs.google.com/spreadsheets/d/${SHEET_ID}`);
+
+  const bad = document.createElement("div");
+  renderInlineApproval(
+    bad,
+    "appr-bad",
+    "update_google_sheet",
+    () => {},
+    JSON.stringify({ spreadsheet_id: "../../evil", tab: "Página1", rows: [["x"]] }),
+  );
+  expect(bad.querySelector("a")).toBeNull();
+});
+
+test("a sheets result links only a docs.google.com spreadsheet url", () => {
+  const container = document.createElement("div");
+  appendToolActivity(container, {
+    event: "tool_call",
+    name: "create_google_sheet",
+    arguments: "{}",
+  });
+  appendToolActivity(container, {
+    event: "tool_result",
+    content: JSON.stringify({
+      written: true,
+      url: `https://docs.google.com/spreadsheets/d/${SHEET_ID}`,
+    }),
+  });
+  expect(container.querySelector("a")?.getAttribute("href")).toBe(
+    `https://docs.google.com/spreadsheets/d/${SHEET_ID}`,
+  );
+
+  const evil = document.createElement("div");
+  appendToolActivity(evil, {
+    event: "tool_call",
+    name: "create_google_sheet",
+    arguments: "{}",
+  });
+  appendToolActivity(evil, {
+    event: "tool_result",
+    content: JSON.stringify({ written: true, url: "https://evil.test/x" }),
+  });
+  expect(evil.querySelector(".approval-link")).toBeNull();
+});

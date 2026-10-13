@@ -56,6 +56,7 @@ from crabriks.capabilities.schedules import (
     calculate_next_run,
     parse_schedule_command,
 )
+from crabriks.capabilities.sheets import GOOGLE_SHEETS_TOOL_CARDS, GoogleSheetsCapability
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
@@ -474,6 +475,7 @@ def _capabilities_for_turn(
     ]
     if birth_ritual:
         capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
+    capabilities.append(GoogleSheetsCapability(user_token=claimed.ctx.user_token))
     if claimed.ctx.databricks_capability is not None:
         cap = claimed.ctx.databricks_capability
         if not cap.user_token and claimed.ctx.user_token:
@@ -501,7 +503,7 @@ def _prompt_for(
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
     db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
-    base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD)
+    base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD, *GOOGLE_SHEETS_TOOL_CARDS)
     builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
     return build_system_prompt(
