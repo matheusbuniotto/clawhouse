@@ -15,7 +15,90 @@ const STATUS_LABEL = {
     ok: "OK",
     error: "Error",
     idle: "Idle",
+    pending: "Approval Needed",
 };
+/**
+ * Render an inline approval card with Approve/Deny actions directly inside
+ * the active tool activity row or container.
+ */
+export function renderInlineApproval(container, approvalId, toolName, onResolved) {
+    const running = lastRunningTool(container);
+    if (running) {
+        running.dataset.state = "pending";
+        running.open = true;
+        const chip = running.querySelector(".tool-status");
+        if (chip) {
+            chip.dataset.state = "pending";
+            chip.textContent = STATUS_LABEL.pending;
+        }
+    }
+    const card = el("div", "approval-action-bar");
+    const msg = el("span", "approval-msg", `Approval required to execute ${toolName}.`);
+    const btns = el("div", "approval-buttons");
+    const approveBtn = el("button", "btn-approve", "Approve");
+    const denyBtn = el("button", "btn-deny", "Deny");
+    async function resolve(decision) {
+        approveBtn.disabled = true;
+        denyBtn.disabled = true;
+        approveBtn.textContent = decision === "approved" ? "Approving…" : "Approve";
+        denyBtn.textContent = decision === "denied" ? "Denying…" : "Deny";
+        try {
+            const endpoint = decision === "approved" ? "approve" : "deny";
+            const resp = await fetch(`/api/approvals/${approvalId}/${endpoint}`, {
+                method: "POST",
+            });
+            if (!resp.ok) {
+                msg.textContent = `Action failed: ${resp.statusText}`;
+                approveBtn.disabled = false;
+                denyBtn.disabled = false;
+                return;
+            }
+            const data = (await resp.json());
+            btns.remove();
+            if (decision === "approved") {
+                msg.textContent = `✓ Approved ${toolName}`;
+                if (running) {
+                    running.dataset.state = "ok";
+                    const chip = running.querySelector(".tool-status");
+                    if (chip) {
+                        chip.dataset.state = "ok";
+                        chip.textContent = STATUS_LABEL.ok;
+                    }
+                }
+            }
+            else {
+                msg.textContent = `✕ Denied ${toolName}`;
+                if (running) {
+                    running.dataset.state = "error";
+                    const chip = running.querySelector(".tool-status");
+                    if (chip) {
+                        chip.dataset.state = "error";
+                        chip.textContent = "Denied";
+                    }
+                }
+            }
+            onResolved(data.reply);
+        }
+        catch {
+            msg.textContent = "Network error while resolving approval.";
+            approveBtn.disabled = false;
+            denyBtn.disabled = false;
+        }
+    }
+    approveBtn.onclick = () => void resolve("approved");
+    denyBtn.onclick = () => void resolve("denied");
+    btns.append(approveBtn, denyBtn);
+    card.append(msg, btns);
+    if (running) {
+        const body = running.querySelector(".tool-body");
+        if (body) {
+            body.append(card);
+            return card;
+        }
+    }
+    container.append(card);
+    return card;
+}
 /**
  * One activity row per call: a `tool_call` opens it running, a following
  * `tool_result` completes the same row. Rows are `<details>` so input and

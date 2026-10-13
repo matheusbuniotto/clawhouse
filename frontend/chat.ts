@@ -4,6 +4,7 @@ import {
   appendToolActivity,
   markRunningToolsError,
   renderAssistantTurn,
+  renderInlineApproval,
   renderUserTurn,
 } from "./transcript.js";
 
@@ -224,6 +225,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       content?: string;
       reply?: string;
       error?: string;
+      status?: string;
+      approval_id?: string;
     };
     if (frame.event === "token" && payload.text) {
       draftText += payload.text;
@@ -243,6 +246,25 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       transcript.scrollTop = transcript.scrollHeight;
       return;
     }
+    if (frame.event === "approval_required") {
+      if (draft?.classList.contains("thinking")) {
+        dropDraft();
+      }
+      renderInlineApproval(
+        transcript,
+        payload.approval_id ?? "",
+        payload.name ?? "tool",
+        (reply) => {
+          if (reply) {
+            transcript.append(renderAssistantTurn(reply));
+            transcript.scrollTop = transcript.scrollHeight;
+          }
+          setStatus("");
+        }
+      );
+      transcript.scrollTop = transcript.scrollHeight;
+      return;
+    }
     if (frame.event === "tool_result") {
       appendToolActivity(transcript, {
         event: "tool_result",
@@ -255,7 +277,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     if (frame.event === "done") {
       commitReply(payload.reply ?? "");
-      setStatus("");
+      if (payload.status === "pending_approval") {
+        setStatus("Action paused waiting for approval above.");
+      } else {
+        setStatus("");
+      }
       return;
     }
     if (frame.event === "error") {

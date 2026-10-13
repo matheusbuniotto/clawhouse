@@ -43,6 +43,9 @@ variables:
   provider_secret_key:
     description: Secret key holding the extra-provider API key.
     default: openrouter-api-key
+  sql_warehouse_id:
+    description: Databricks SQL Warehouse ID for SQL queries and SQL job tasks.
+    default: "95a46431cf830347"
 
 resources:
   apps:
@@ -65,6 +68,8 @@ resources:
             value_from: openrouter-api-key
           - name: CRABRIKS_MODELS
             value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
+          - name: DATABRICKS_WAREHOUSE_ID
+            value: ${var.sql_warehouse_id}
       resources:
         - name: serving-endpoint
           serving_endpoint:
@@ -80,3 +85,7 @@ resources:
             scope: ${var.provider_secret_scope}
             key: ${var.provider_secret_key}
             permission: READ
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.sql_warehouse_id}
+            permission: CAN_USE

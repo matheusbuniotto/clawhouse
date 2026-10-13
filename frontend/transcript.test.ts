@@ -4,6 +4,7 @@ import {
   appendToolActivity,
   markRunningToolsError,
   renderAssistantTurn,
+  renderInlineApproval,
   renderMarkdown,
   renderUserTurn,
 } from "./transcript";
@@ -291,4 +292,45 @@ test("a created or edited job shows its id chip", () => {
   expect([...created.querySelectorAll(".job-chip")].map((c) => c.textContent)).toEqual(["Job 42"]);
   expect(created.querySelector(".job-name")?.textContent).toBe("etl");
   expect([...edited.querySelectorAll(".job-chip")].map((c) => c.textContent)).toEqual(["Job 5"]);
+});
+
+test("renders inline approval card and handles approval resolution", async () => {
+  const container = document.createElement("div");
+  appendToolActivity(container, { event: "tool_call", name: "jobs_create" });
+
+  const toolRow = container.querySelector<HTMLDetailsElement>(".tool-row");
+  expect(toolRow?.dataset.state).toBe("running");
+
+  let resolvedReply: string | undefined;
+  const onResolved = (reply?: string) => {
+    resolvedReply = reply;
+  };
+
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ status: "approved", reply: "Created job" }),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderInlineApproval(container, "appr-123", "jobs_create", onResolved);
+
+  expect(toolRow?.dataset.state).toBe("pending");
+  expect(toolRow?.querySelector(".tool-status")?.textContent).toBe("Approval Needed");
+  expect(container.querySelector(".approval-action-bar")).not.toBeNull();
+  expect(container.querySelector(".approval-msg")?.textContent).toContain(
+    "Approval required to execute jobs_create",
+  );
+
+  const approveBtn = container.querySelector<HTMLButtonElement>(".btn-approve");
+  approveBtn?.click();
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(fetchMock).toHaveBeenCalledWith("/api/approvals/appr-123/approve", { method: "POST" });
+  expect(resolvedReply).toBe("Created job");
+  expect(toolRow?.dataset.state).toBe("ok");
+  expect(container.querySelector(".approval-msg")?.textContent).toContain("✓ Approved jobs_create");
+
+  vi.unstubAllGlobals();
 });

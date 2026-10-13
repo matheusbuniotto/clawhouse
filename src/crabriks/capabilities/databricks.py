@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import itertools
 import logging
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -110,21 +111,40 @@ def _enum_value(value: Any) -> str | None:
     return str(getattr(value, "value", value))
 
 
+def _find_running_or_first(warehouses: list[Any]) -> str | None:
+    for wh in warehouses:
+        state = getattr(wh, "state", None)
+        val = getattr(state, "value", str(state)) if state else ""
+        if val.upper() == "RUNNING" and wh.id:
+            return wh.id
+    if warehouses and warehouses[0].id:
+        return warehouses[0].id
+    return None
+
+
+def _list_warehouses(client: WorkspaceClient) -> list[Any] | None:
+    try:
+        return list(client.warehouses.list())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to list Databricks SQL warehouses: %s", exc)
+        return None
+
+
 def resolve_warehouse_id(client: WorkspaceClient, configured_id: str | None) -> str | None:
     if configured_id:
         return configured_id
-    try:
-        warehouses = list(client.warehouses.list())
-        for wh in warehouses:
-            state = getattr(wh, "state", None)
-            val = getattr(state, "value", str(state)) if state else ""
-            if val.upper() == "RUNNING" and wh.id:
-                return wh.id
-        if warehouses and warehouses[0].id:
-            return warehouses[0].id
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to auto-discover Databricks SQL warehouse: %s", exc)
-    return None
+    env_id = os.environ.get("DATABRICKS_WAREHOUSE_ID") or os.environ.get("SQL_WAREHOUSE_ID")
+    if env_id:
+        return env_id
+    warehouses = _list_warehouses(client)
+    if warehouses is None:
+        try:
+            warehouses = _list_warehouses(WorkspaceClient())
+        except Exception:  # noqa: BLE001
+            return None
+    if not warehouses:
+        return None
+    return _find_running_or_first(warehouses)
 
 
 _T = TypeVar("_T")
@@ -142,6 +162,19 @@ class DatabricksTools:
             return WorkspaceClient()
         except Exception:  # noqa: BLE001
             return None
+
+    @property
+    def effective_warehouse_id(self) -> str | None:
+        if self.warehouse_id:
+            return self.warehouse_id
+        try:
+            wh = self._call(lambda cl: resolve_warehouse_id(cl, None))
+            if wh:
+                self.warehouse_id = wh
+                return wh
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to lazily resolve warehouse id: %s", exc)
+        return None
 
     def _call(self, fn: Callable[[WorkspaceClient], _T]) -> _T:
         try:
@@ -207,7 +240,7 @@ class DatabricksTools:
 
     async def dbsql_query(self, query: str, max_rows: int = 100) -> dict[str, object]:
         """Execute a SQL query on a Databricks SQL Warehouse."""
-        wh_id = self.warehouse_id
+        wh_id = self.effective_warehouse_id
         if not wh_id:
             return {"error": "No Databricks SQL Warehouse available to execute queries."}
 
@@ -308,7 +341,7 @@ class DatabricksTools:
                 spark_python_task=SparkPythonTask(python_file=path, parameters=parameters),
             )
         else:
-            sql_warehouse = warehouse_id or self.warehouse_id
+            sql_warehouse = warehouse_id or self.effective_warehouse_id
             if not sql_warehouse:
                 return {"error": "A SQL job needs a SQL warehouse; none is available."}
             effective_path = path

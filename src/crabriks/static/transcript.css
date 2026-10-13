@@ -321,7 +321,8 @@
   letter-spacing: 0.04em;
 }
 
-.tool-status[data-state="running"] {
+.tool-status[data-state="running"],
+.tool-status[data-state="pending"] {
   background: var(--warn-subtle);
   color: var(--warn);
 }
@@ -453,4 +454,36 @@
   margin-left: auto;
   font-size: var(--font-size-xs);
   color: var(--accent);
+}
+
+/* Inline human approval action bar */
+.approval-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-subtle);
+}
+
+.approval-msg {
+  color: var(--text-strong);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.approval-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-action-bar .btn-approve,
+.approval-action-bar .btn-deny {
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--font-size-xs);
 }

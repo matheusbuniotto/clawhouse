@@ -5,7 +5,7 @@
  * and tool outcomes (`running`/`ok`/`error`). One union so the rail, the
  * status badges, and the tool rows agree on the vocabulary.
  */
-export type ActivityState = "running" | "idle" | "ok" | "error";
+export type ActivityState = "running" | "idle" | "ok" | "error" | "pending";
 
 export function isRunning(state: ActivityState | string | null | undefined): boolean {
   return state === "running";

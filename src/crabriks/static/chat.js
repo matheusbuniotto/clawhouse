@@ -1,5 +1,5 @@
 import { el } from "./dom.js";
-import { appendToolActivity, markRunningToolsError, renderAssistantTurn, renderUserTurn, } from "./transcript.js";
+import { appendToolActivity, markRunningToolsError, renderAssistantTurn, renderInlineApproval, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "crabriks.session";
 const MODEL_KEY = "crabriks.model";
 export function mount(root, ctx) {
@@ -195,6 +195,20 @@ export function mount(root, ctx) {
             transcript.scrollTop = transcript.scrollHeight;
             return;
         }
+        if (frame.event === "approval_required") {
+            if (draft?.classList.contains("thinking")) {
+                dropDraft();
+            }
+            renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", (reply) => {
+                if (reply) {
+                    transcript.append(renderAssistantTurn(reply));
+                    transcript.scrollTop = transcript.scrollHeight;
+                }
+                setStatus("");
+            });
+            transcript.scrollTop = transcript.scrollHeight;
+            return;
+        }
         if (frame.event === "tool_result") {
             appendToolActivity(transcript, {
                 event: "tool_result",
@@ -208,7 +222,12 @@ export function mount(root, ctx) {
         }
         if (frame.event === "done") {
             commitReply(payload.reply ?? "");
-            setStatus("");
+            if (payload.status === "pending_approval") {
+                setStatus("Action paused waiting for approval above.");
+            }
+            else {
+                setStatus("");
+            }
             return;
         }
         if (frame.event === "error") {
