@@ -9,6 +9,20 @@ jobs:
   quality:
     name: Code Quality & Complexity Gate
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crabriks
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +36,15 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
 
       - name: Ruff Lint & Format Check
         run: |
@@ -37,6 +60,17 @@ jobs:
       - name: Dead Code Audit (Vulture)
         run: uv run vulture src --min-confidence 80
 
+      - name: Frontend Type Check (tsc)
+        run: npm run typecheck
+
+      - name: Frontend Compiled Output Drift Check
+        run: |
+          npm run build
+          git diff --exit-code -- src/crabriks/static
+
+      - name: Frontend Component Tests (vitest)
+        run: npm test
+
       - name: Duplicate Code Check (jscpd)
         run: |
           npx jscpd@5 src \
@@ -44,3 +78,8 @@ jobs:
             --min-lines 5 \
             --min-tokens 50 \
             --reporters console
+
+      - name: Tests
+        env:
+          CRABRIKS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/crabriks
+        run: uv run pytest -q --tb=short

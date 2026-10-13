@@ -1,0 +1,82 @@
+bundle:
+  name: crabriks
+
+sync:
+  exclude:
+    - .venv/
+    - .git/
+    - .agents/
+    - .github/
+    - .pytest_cache/
+    - .ruff_cache/
+    - .complexipy_cache/
+    - logs/
+    - tests/
+    - docs/
+    - frontend/
+    - "**/__pycache__/"
+    - "**/*.pyc"
+    # Root guide only. claw/agents/main/AGENTS.md is the platform agent file and must sync.
+    - /AGENTS.md
+    - README.md
+    - pyproject.toml
+    - uv.lock
+    - skills-lock.json
+    - .pre-commit-config.yaml
+    - .gitignore
+    - .python-version
+    - databricks.yml
+
+variables:
+  serving_endpoint:
+    description: Model Serving endpoint used as the default chat model.
+    default: databricks-meta-llama-3-3-70b-instruct
+  postgres_branch:
+    description: Lakebase Autoscaling branch that stores sessions and transcripts.
+    default: projects/crabriks/branches/production
+  postgres_database:
+    description: Lakebase database that stores sessions and transcripts.
+    default: projects/crabriks/branches/production/databases/databricks-postgres
+  provider_secret_scope:
+    description: Secret scope holding the extra-provider API key.
+    default: claw
+  provider_secret_key:
+    description: Secret key holding the extra-provider API key.
+    default: openrouter-api-key
+
+resources:
+  apps:
+    crabriks:
+      name: crabriks
+      description: Databricks-native agent chat surface with a model picker.
+      source_code_path: .
+      config:
+        command:
+          - uvicorn
+          - crabriks.app:app
+        env:
+          - name: PYTHONPATH
+            value: src
+          - name: SERVING_ENDPOINT
+            value_from: serving-endpoint
+          - name: LAKEBASE_ENDPOINT
+            value_from: postgres
+          - name: OPENROUTER_API_KEY
+            value_from: openrouter-api-key
+          - name: CRABRIKS_MODELS
+            value: '[{"id":"openrouter-llama","label":"Llama 3.3 70B (OpenRouter)","model":"meta-llama/llama-3.3-70b-instruct","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY"}]'
+      resources:
+        - name: serving-endpoint
+          serving_endpoint:
+            name: ${var.serving_endpoint}
+            permission: CAN_QUERY
+        - name: postgres
+          postgres:
+            branch: ${var.postgres_branch}
+            database: ${var.postgres_database}
+            permission: CAN_CONNECT_AND_CREATE
+        - name: openrouter-api-key
+          secret:
+            scope: ${var.provider_secret_scope}
+            key: ${var.provider_secret_key}
+            permission: READ

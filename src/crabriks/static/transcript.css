@@ -1,0 +1,408 @@
+/* transcript.css — chat transcript, assistant document, and tool activity. Owner: #46. */
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 0 16px;
+}
+
+.empty {
+  margin: 18vh 0 0;
+  color: var(--muted);
+  font-size: var(--font-size-lg);
+  font-style: italic;
+}
+
+/* User turns stay a bounded, right-aligned, tinted bubble. */
+.bubble {
+  max-width: 38rem;
+  margin: 0 0 14px;
+  font-family: var(--font-chat);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.bubble.user {
+  margin-left: auto;
+  width: fit-content;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm);
+  background: var(--accent-subtle);
+  color: var(--text-strong);
+}
+
+/* Assistant turns are a full-width document with no bubble chrome. */
+.assistant {
+  max-width: 44rem;
+  margin: 0 0 18px;
+  color: var(--text);
+  font-family: var(--font-chat);
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.assistant.draft {
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.assistant > :first-child {
+  margin-top: 0;
+}
+
+.assistant > :last-child {
+  margin-bottom: 0;
+}
+
+.assistant h1,
+.assistant h2,
+.assistant h3,
+.assistant h4,
+.assistant h5,
+.assistant h6 {
+  margin: 1.4em 0 0.5em;
+  color: var(--text-strong);
+  line-height: 1.3;
+}
+
+.assistant h1 {
+  font-size: calc(var(--font-size-lg) * 1.6);
+}
+
+.assistant h2 {
+  font-size: calc(var(--font-size-lg) * 1.3);
+}
+
+.assistant h3 {
+  font-size: var(--font-size-lg);
+}
+
+.assistant h4 {
+  font-size: var(--font-size-md);
+}
+
+.assistant h5 {
+  font-size: var(--font-size-sm);
+}
+
+.assistant h6 {
+  font-size: var(--font-size-xs);
+}
+
+.assistant p {
+  margin: 0 0 0.85em;
+}
+
+.assistant ul,
+.assistant ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.4em;
+}
+
+.assistant li {
+  margin: 0 0 0.25em;
+}
+
+.assistant blockquote {
+  margin: 0 0 0.85em;
+  padding: 0.25em 0 0.25em 14px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--muted);
+}
+
+.assistant a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.assistant a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.assistant code {
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.assistant table {
+  width: 100%;
+  margin: 0 0 14px;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.assistant th,
+.assistant td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.assistant th {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+/* Fenced code: one rounded container with a language tag and a copy control. */
+.code-block {
+  margin: 0 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-accent);
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+
+.code-lang {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.code-copy {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.code-copy:hover {
+  border-color: var(--border-hover);
+  color: var(--text-strong);
+}
+
+.code-copy:focus-visible {
+  outline: var(--focus-ring);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+.code-block code {
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* Tool activity: one collapsible row per call, with a state chip. */
+.tool-row {
+  margin: 0 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.tool-head:hover {
+  background: var(--bg-hover);
+}
+
+.tool-head::-webkit-details-marker {
+  display: none;
+}
+
+.tool-head::after {
+  content: "";
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--duration) var(--ease);
+}
+
+.tool-row[open] .tool-head::after {
+  transform: rotate(45deg);
+}
+
+.tool-name {
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.tool-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-status[data-state="running"] {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.tool-status[data-state="ok"] {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.tool-status[data-state="error"] {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.tool-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.tool-section {
+  margin-top: 10px;
+}
+
+.tool-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tool-io {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Syntax highlighting tokens — colours come from tokens.css. */
+.tok-keyword {
+  color: var(--syntax-keyword);
+}
+
+.tok-string {
+  color: var(--syntax-string);
+}
+
+.tok-number {
+  color: var(--syntax-number);
+}
+
+.tok-comment {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.tok-key {
+  color: var(--syntax-key);
+}
+
+.tok-literal {
+  color: var(--syntax-literal);
+}
+
+.tok-variable {
+  color: var(--syntax-variable);
+}
+
+/* Lakeflow job results: run cards with a state badge, and job lists. */
+.job-list {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.job-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.job-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.job-chip {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.job-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.job-badge[data-state="pending"],
+.job-badge[data-state="running"] {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.job-badge[data-state="success"] {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.job-badge[data-state="failed"] {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.job-link {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--accent);
+}

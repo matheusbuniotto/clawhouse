@@ -34,6 +34,9 @@ htmlcov/
 .pyright/
 .ruff_cache/
 
+# Frontend dependencies
+node_modules/
+
 # Pre-commit & prek
 .pre-commit-config.yaml.cache
 .prek/
@@ -44,3 +47,6 @@ Thumbs.db
 
 # Agent run logs
 logs/
+
+# Databricks Asset Bundle state
+.databricks/

@@ -9,14 +9,40 @@ description = "Crabriks"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "asyncpg>=0.32.0",
     "databricks-sdk>=0.151.0",
+    "fastapi>=0.143.0",
+    "pydantic-ai>=2.55.0",
+    "pydantic-ai-harness[skills]==0.55.0",
+    "uvicorn[standard]>=0.54.0",
 ]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/crabriks/static/approvals.js" = "crabriks/static/approvals.js"
+"src/crabriks/static/boot.js" = "crabriks/static/boot.js"
+"src/crabriks/static/chat.js" = "crabriks/static/chat.js"
+"src/crabriks/static/dom.js" = "crabriks/static/dom.js"
+"src/crabriks/static/highlight.js" = "crabriks/static/highlight.js"
+"src/crabriks/static/index.html" = "crabriks/static/index.html"
+"src/crabriks/static/jobs.js" = "crabriks/static/jobs.js"
+"src/crabriks/static/new.js" = "crabriks/static/new.js"
+"src/crabriks/static/screens.css" = "crabriks/static/screens.css"
+"src/crabriks/static/sessions.js" = "crabriks/static/sessions.js"
+"src/crabriks/static/shell.css" = "crabriks/static/shell.css"
+"src/crabriks/static/shell.js" = "crabriks/static/shell.js"
+"src/crabriks/static/status.js" = "crabriks/static/status.js"
+"src/crabriks/static/tokens.css" = "crabriks/static/tokens.css"
+"src/crabriks/static/transcript.css" = "crabriks/static/transcript.css"
+"src/crabriks/static/transcript.js" = "crabriks/static/transcript.js"
 
 [dependency-groups]
 dev = [
     "complexipy>=0.4.0",
+    "httpx>=0.28.1",
     "pre-commit>=4.6.2",
     "pyright>=1.1.395",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.9.9",
     "vulture>=2.14",
 ]
@@ -34,8 +60,8 @@ exclude = [
     "__pycache__",
     "build",
     "dist",
-    # Vendored upstream skills (databricks-agent-skills v0.2.10): lint upstream, not here
-    ".agents/skills/databricks-*",
+    # Vendored upstream skills: lint upstream, not here
+    ".agents/skills/**",
 ]
 
 [tool.ruff.format]
@@ -105,10 +131,19 @@ max-public-methods = 15
 ]
 
 # ==============================================================================
+# PYTEST
+# ==============================================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+# ==============================================================================
 # PYRIGHT CONFIGURATION
 # ==============================================================================
 [tool.pyright]
-include = ["src"]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
 exclude = ["**/node_modules", "**/__pycache__", ".venv"]
 typeCheckingMode = "standard"
 reportMissingImports = true

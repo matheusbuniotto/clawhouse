@@ -1,0 +1,20 @@
+# Uvicorn reads UVICORN_HOST and UVICORN_PORT, which the Apps runtime sets.
+# Add a serving endpoint (key serving-endpoint) and a Lakebase Autoscaling
+# database (key postgres) in the app UI. The platform injects PGHOST, PGPORT,
+# PGUSER, PGDATABASE, and PGSSLMODE. Do not set CRABRIKS_DEV_USER or
+# DATABRICKS_TOKEN here. Create the app with user-authorization scope
+# `model-serving`, or the forwarded user token cannot call the endpoint.
+command:
+  - uvicorn
+  - crabriks.app:app
+env:
+  - name: PYTHONPATH
+    value: src
+  - name: SERVING_ENDPOINT
+    valueFrom: serving-endpoint
+  - name: LAKEBASE_ENDPOINT
+    valueFrom: postgres
+  - name: OPENROUTER_API_KEY
+    valueFrom: openrouter-api-key
+  - name: CRABRIKS_MODELS
+    value: '[{"id":"openrouter-llama","label":"Llama 3.3 70B (OpenRouter)","model":"meta-llama/llama-3.3-70b-instruct","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY"}]'

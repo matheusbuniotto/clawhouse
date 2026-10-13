@@ -23,11 +23,11 @@ Manual equivalents when prek is unavailable:
 
 ```bash
 uv run ruff check --fix . && uv run ruff format .
-uv run complexipy src -c 15
+uv run complexipy src --max-complexity-allowed 15
 uv run pyright
 ```
 
-CI (`quality.yml`) runs ruff, complexipy, pyright, vulture, jscpd on push/PR to main. Keep `main` green: small commits, gates passing locally first.
+CI (`quality.yml`) runs ruff, complexipy, pyright, vulture, jscpd, and pytest on push/PR to main. Keep `main` green: small commits, gates passing locally first.
 
 ## Patterns
 
