@@ -60,6 +60,7 @@ resources:
         - genie
         - workspace.workspace
         - mcp.external
+        - ai-gateway
       config:
         command:
           - uvicorn
