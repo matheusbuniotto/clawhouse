@@ -1,6 +1,7 @@
 # Databricks Apps runtime. Pinned to the versions exercised locally.
 # The Apps image ships older fastapi, uvicorn, and databricks-sdk.
 asyncpg==0.32.0
+croniter==6.2.4
 databricks-sdk==0.151.0
 fastapi==0.143.0
 pydantic-ai==2.55.0
