@@ -17,6 +17,7 @@ from databricks.sdk.service.jobs import (
     CronSchedule,
     JobSettings,
     PauseStatus,
+    RunTask,
     Source,
     SparkPythonTask,
     SqlTask,
@@ -641,6 +642,7 @@ class DatabricksTools:
             "tasks": [
                 {
                     "task_key": task.task_key,
+                    "run_id": task.run_id,
                     "life_cycle_state": _enum_value(
                         task.state.life_cycle_state if task.state else None
                     ),
@@ -650,19 +652,82 @@ class DatabricksTools:
             ],
         }
 
+    def _format_task_output(self, task_key: str, task_run_id: int, out: Any) -> dict[str, object]:
+        sql_out = out.sql_output.as_dict() if getattr(out, "sql_output", None) else None
+        return {
+            "task_key": task_key,
+            "run_id": task_run_id,
+            "logs": getattr(out, "logs", None),
+            "error": getattr(out, "error", None) or getattr(out, "error_trace", None),
+            "sql_output": sql_out,
+        }
+
+    def _fetch_single_task_output(self, task: RunTask) -> dict[str, object]:
+        tid = task.run_id
+        if tid is None:
+            return {"task_key": task.task_key, "error": "No run_id for task"}
+        try:
+            out = self._call(lambda cl, task_id=tid: cl.jobs.get_run_output(run_id=task_id))
+            return self._format_task_output(task.task_key or "", tid, out)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "task_key": task.task_key,
+                "run_id": tid,
+                "error": f"Failed to get output: {exc}",
+            }
+
+    def _aggregate_task_outputs(
+        self, parent_run_id: int, task_outputs: list[dict[str, object]]
+    ) -> dict[str, object]:
+        if not task_outputs:
+            return {"run_id": parent_run_id, "tasks": []}
+        if len(task_outputs) == 1:
+            first = task_outputs[0]
+            return {
+                "run_id": parent_run_id,
+                "logs": first.get("logs"),
+                "error": first.get("error"),
+                "sql_output": first.get("sql_output"),
+                "tasks": task_outputs,
+            }
+        all_logs = [f"[{t.get('task_key')}]: {t['logs']}" for t in task_outputs if t.get("logs")]
+        all_errors = [
+            f"[{t.get('task_key')}]: {t['error']}" for t in task_outputs if t.get("error")
+        ]
+        return {
+            "run_id": parent_run_id,
+            "logs": "\n\n".join(all_logs) if all_logs else None,
+            "error": "\n\n".join(all_errors) if all_errors else None,
+            "tasks": task_outputs,
+        }
+
+    def _fetch_tasks_output(self, parent_run_id: int) -> dict[str, object] | None:
+        try:
+            run = self._call(lambda cl: cl.jobs.get_run(run_id=parent_run_id))
+        except Exception:  # noqa: BLE001
+            return None
+        tasks = run.tasks or []
+        if not tasks:
+            return None
+        task_outputs = [self._fetch_single_task_output(t) for t in tasks]
+        return self._aggregate_task_outputs(parent_run_id, task_outputs)
+
     async def jobs_get_run_output(self, run_id: int) -> dict[str, object]:
         """Get the execution output and logs of a Lakeflow job run."""
         try:
             out = self._call(lambda cl: cl.jobs.get_run_output(run_id=run_id))
+            sql_out = out.sql_output.as_dict() if out.sql_output else None
+            return {
+                "run_id": run_id,
+                "logs": out.logs,
+                "error": out.error or getattr(out, "error_trace", None),
+                "sql_output": sql_out,
+            }
         except Exception as exc:  # noqa: BLE001
+            resolved = self._fetch_tasks_output(run_id)
+            if resolved is not None:
+                return resolved
             return {"error": f"Failed to get output for run {run_id}: {exc}"}
-        sql_out = out.sql_output.as_dict() if out.sql_output else None
-        return {
-            "run_id": run_id,
-            "logs": out.logs,
-            "error": out.error,
-            "sql_output": sql_out,
-        }
 
     def all_tools(self) -> list[Callable[..., Any]]:
         return [

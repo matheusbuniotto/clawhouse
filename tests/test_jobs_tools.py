@@ -386,20 +386,30 @@ async def test_jobs_get_run_reports_each_task_of_a_multi_task_run() -> None:
         tasks=[
             RunTask(
                 task_key="extract",
+                run_id=81,
                 state=RunState(
                     life_cycle_state=RunLifeCycleState.TERMINATED,
                     result_state=RunResultState.SUCCESS,
                 ),
             ),
-            RunTask(task_key="load", state=RunState(life_cycle_state=RunLifeCycleState.RUNNING)),
+            RunTask(
+                task_key="load",
+                run_id=82,
+                state=RunState(life_cycle_state=RunLifeCycleState.RUNNING),
+            ),
         ],
     )
 
     result = await _turn(client, "jobs_get_run", {"run_id": 80})
 
     assert _tool_result(result)["tasks"] == [
-        {"task_key": "extract", "life_cycle_state": "TERMINATED", "result_state": "SUCCESS"},
-        {"task_key": "load", "life_cycle_state": "RUNNING", "result_state": None},
+        {
+            "task_key": "extract",
+            "run_id": 81,
+            "life_cycle_state": "TERMINATED",
+            "result_state": "SUCCESS",
+        },
+        {"task_key": "load", "run_id": 82, "life_cycle_state": "RUNNING", "result_state": None},
     ]
 
 
@@ -662,3 +672,74 @@ async def test_jobs_get_run_output_returns_output_without_approval() -> None:
         "sql_output": None,
     }
     client.jobs.get_run_output.assert_called_once_with(run_id=99)
+
+
+async def test_jobs_get_run_output_resolves_single_task_parent_run() -> None:
+    client = MagicMock()
+    client.jobs.get_run_output.side_effect = [
+        Exception("Retrieving the output of runs with multiple tasks is not supported."),
+        RunOutput(logs="Analysis output from agent", error=None),
+    ]
+    client.jobs.get_run.return_value = Run(
+        run_id=500,
+        job_id=42,
+        tasks=[RunTask(task_key="analyze_task", run_id=501)],
+    )
+
+    result = await _turn(client, "jobs_get_run_output", {"run_id": 500})
+    assert result.status == "ok"
+    assert _tool_result(result) == {
+        "run_id": 500,
+        "logs": "Analysis output from agent",
+        "error": None,
+        "sql_output": None,
+        "tasks": [
+            {
+                "task_key": "analyze_task",
+                "run_id": 501,
+                "logs": "Analysis output from agent",
+                "error": None,
+                "sql_output": None,
+            }
+        ],
+    }
+
+
+async def test_jobs_get_run_output_resolves_multi_task_parent_run() -> None:
+    client = MagicMock()
+    client.jobs.get_run_output.side_effect = [
+        Exception("Retrieving the output of runs with multiple tasks is not supported."),
+        RunOutput(logs="Step 1 complete", error=None),
+        RunOutput(logs="Step 2 complete", error=None),
+    ]
+    client.jobs.get_run.return_value = Run(
+        run_id=600,
+        job_id=42,
+        tasks=[
+            RunTask(task_key="step1", run_id=601),
+            RunTask(task_key="step2", run_id=602),
+        ],
+    )
+
+    result = await _turn(client, "jobs_get_run_output", {"run_id": 600})
+    assert result.status == "ok"
+    tool_res = _tool_result(result)
+    assert tool_res["run_id"] == 600
+    assert tool_res["logs"] == "[step1]: Step 1 complete\n\n[step2]: Step 2 complete"
+    assert tool_res["error"] is None
+    assert tool_res["tasks"] == [
+        {
+            "task_key": "step1",
+            "run_id": 601,
+            "logs": "Step 1 complete",
+            "error": None,
+            "sql_output": None,
+        },
+        {
+            "task_key": "step2",
+            "run_id": 602,
+            "logs": "Step 2 complete",
+            "error": None,
+            "sql_output": None,
+        },
+    ]

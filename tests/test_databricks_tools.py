@@ -15,6 +15,7 @@ from crabriks.agent.turn import (
 )
 from crabriks.capabilities.databricks import (
     DatabricksCapability,
+    DatabricksTools,
     enforce_query_limit,
     is_readonly_query,
     resolve_warehouse_id,
@@ -200,8 +201,6 @@ async def test_databricks_tools_fallback_when_user_client_lacks_scope() -> None:
         creator_user_name="admin",
     )
     ambient_client.jobs.list.return_value = [ambient_job]
-
-    from crabriks.capabilities.databricks import DatabricksTools
 
     tools = DatabricksTools(user_client, warehouse_id="wh-1")
     tools._fallback_client = lambda: ambient_client  # type: ignore[assignment]
