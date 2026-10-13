@@ -245,3 +245,10 @@ async def test_schedule_api_endpoints_and_chat_turn(tmp_path) -> None:
         items_3 = list_resp_3.json()
         target = next(s for s in items_3 if s["id"] == schedule_id)
         assert target["status"] == "cancelled"
+
+        # Verify creating schedule for nonexistent session returns 404
+        bad_resp = await client.post(
+            "/api/sessions/99999999-9999-4999-8999-999999999999/schedules",
+            json={"cron_expression": "*/5 * * * *", "prompt": "Check"},
+        )
+        assert bad_resp.status_code == 404

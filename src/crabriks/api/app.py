@@ -671,6 +671,10 @@ def _schedule_routes(app: FastAPI) -> None:
         caller: Caller = _require_caller,
     ) -> ScheduleOut:
         canonical = canonical_session_id(session_id)
+        sessions = await app.state.store.list_sessions(caller.user_id)
+        if not any(s.id == canonical for s in sessions):
+            raise HTTPException(status_code=404, detail="Session not found")
+
         now = datetime.now(UTC)
         try:
             next_run = calculate_next_run(body.cron_expression, from_time=now)
