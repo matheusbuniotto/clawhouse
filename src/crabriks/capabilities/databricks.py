@@ -14,7 +14,9 @@ from typing import Any, Literal, TypeVar
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import (
+    CronSchedule,
     JobSettings,
+    PauseStatus,
     Source,
     SparkPythonTask,
     SqlTask,
@@ -51,7 +53,7 @@ _READONLY_KEYWORDS = {"select", "show", "describe", "desc", "explain"}
 _JOBS_PAGE_MAX = 100  # the Jobs API rejects a page limit above 100
 _TASK_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _APPROVAL_REQUIRED_TOOLS = frozenset(
-    {"jobs_run_now", "jobs_cancel_run", "jobs_create", "jobs_edit"}
+    {"jobs_run_now", "jobs_cancel_run", "jobs_create", "jobs_edit", "jobs_delete"}
 )
 
 
@@ -111,6 +113,78 @@ def enforce_query_limit(sql: str, default_limit: int = 100) -> str:
     if re.search(r"\blimit\s+\d+", sql, re.IGNORECASE):
         return sql
     return f"{sql.strip()}\nLIMIT {default_limit}"
+
+
+def to_quartz_cron(cron: str) -> str:
+    """Convert standard 5-field cron or preserve 6/7-field Quartz cron."""
+    tokens = cron.strip().split()
+    if len(tokens) in (6, 7):
+        return cron.strip()
+    if len(tokens) == 5:
+        m, h, dom, mon, dow = tokens
+        if dow == "*":
+            dow = "?"
+        elif dom == "*":
+            dom = "?"
+        return f"0 {m} {h} {dom} {mon} {dow}"
+    return cron.strip()
+
+
+def build_cron_schedule(
+    cron_expression: str | None,
+    timezone_id: str = "UTC",
+    pause_status: str | None = "UNPAUSED",
+) -> CronSchedule | None:
+    """Build a Databricks Job CronSchedule from a cron expression."""
+    if not cron_expression:
+        return None
+    quartz = to_quartz_cron(cron_expression)
+    status = (
+        PauseStatus.PAUSED
+        if pause_status and pause_status.upper() == "PAUSED"
+        else PauseStatus.UNPAUSED
+    )
+    return CronSchedule(
+        quartz_cron_expression=quartz,
+        timezone_id=timezone_id,
+        pause_status=status,
+    )
+
+
+def build_agentic_query(
+    query: str,
+    *,
+    agent_name: str = "Agent",
+    instructions: str | None = None,
+    endpoint: str = "databricks-meta-llama-3-3-70b-instruct",
+    sample_limit: int = 100,
+) -> str:
+    """Wrap a SQL query into an agentic DBSQL query using ai_query."""
+    cleaned = strip_sql_comments(query).strip().rstrip(";")
+    agent_clean = agent_name.lstrip("@").strip()
+    prompt = f"You are @{agent_clean}."
+    if instructions:
+        prompt += f" {instructions.strip()}"
+    else:
+        prompt += " Analyze these query results and provide key insights, anomalies, and metrics."
+    escaped = prompt.replace("'", "''")
+    return (
+        f"WITH source_query AS (\n"
+        f"  {cleaned}\n"
+        f"),\n"
+        f"sample_data AS (\n"
+        f"  SELECT * FROM source_query LIMIT {sample_limit}\n"
+        f"),\n"
+        f"encoded_summary AS (\n"
+        f"  SELECT to_json(collect_list(struct(*))) AS data_json\n"
+        f"  FROM sample_data\n"
+        f")\n"
+        f"SELECT ai_query(\n"
+        f"  '{endpoint}',\n"
+        f"  '{escaped}\\n\\nQuery Results:\\n' || data_json\n"
+        f") AS agent_analysis\n"
+        f"FROM encoded_summary"
+    )
 
 
 def _enum_value(value: Any) -> str | None:
@@ -357,12 +431,15 @@ class DatabricksTools:
                     return
             raise RuntimeError(f"Failed to upload workspace SQL file to {path}: {exc}") from exc
 
-    def _build_sql_task(
+    def _build_sql_task(  # noqa: PLR0913
         self,
         task_key: str,
         path: str,
+        *,
         query: str | None,
         warehouse_id: str | None,
+        agent_name: str | None = None,
+        instructions: str | None = None,
     ) -> tuple[Task | None, str | None]:
         sql_warehouse = warehouse_id or self.effective_warehouse_id
         if not sql_warehouse:
@@ -371,8 +448,14 @@ class DatabricksTools:
         sql_text = query or (
             path if path and not path.endswith(".sql") and "select" in path.lower() else None
         )
+        if sql_text and agent_name:
+            sql_text = build_agentic_query(
+                query=sql_text,
+                agent_name=agent_name,
+                instructions=instructions,
+            )
         if sql_text:
-            if not effective_path or sql_text == effective_path:
+            if not effective_path or sql_text == effective_path or agent_name:
                 effective_path = f"/Workspace/Shared/crabriks/{task_key}.sql"
             try:
                 self._save_workspace_sql_file(effective_path, sql_text)
@@ -392,46 +475,144 @@ class DatabricksTools:
     async def jobs_create(  # noqa: PLR0913
         self,
         name: str,
-        task_type: Literal["python", "sql"],
+        task_type: Literal["python", "sql", "agentic"] = "sql",
         path: str = "",
         *,
         parameters: list[str] | None = None,
         warehouse_id: str | None = None,
         query: str | None = None,
+        agent_name: str | None = None,
+        instructions: str | None = None,
+        cron_expression: str | None = None,
+        timezone_id: str = "UTC",
+        pause_status: Literal["PAUSED", "UNPAUSED"] = "UNPAUSED",
     ) -> dict[str, object]:
-        """Create a single-task Lakeflow job that runs a Python script or a SQL file/query.
+        """Create a single-task Lakeflow job running SQL, Python, or an Agentic query.
 
-        For `python`, `path` is a workspace file path.
-        For `sql`, pass the SQL statement in `query` (recommended) which is automatically saved
-        to workspace and executed, or pass `path` to an existing `.sql` file in the workspace.
+        For `agentic`: runs query, feeds results to agent via ai_query, and outputs report.
+        For `python`: `path` is a workspace Python file.
+        For `sql`: pass SQL statement in `query` or workspace file in `path`.
+        For scheduling: pass `cron_expression` (e.g. '0 0 12 * * ?' or '0 12 * * *').
         """
         task_key = _TASK_KEY_UNSAFE.sub("_", name)
+        effective_agent = agent_name or (name if task_type == "agentic" else None)
         if task_type == "python":
             task = Task(
                 task_key=task_key,
                 spark_python_task=SparkPythonTask(python_file=path, parameters=parameters),
             )
         else:
-            task, error = self._build_sql_task(task_key, path, query, warehouse_id)
+            task, error = self._build_sql_task(
+                task_key,
+                path,
+                query=query,
+                warehouse_id=warehouse_id,
+                agent_name=effective_agent,
+                instructions=instructions,
+            )
             if error or task is None:
                 return {"error": error or "Failed to build SQL task."}
+
+        schedule = build_cron_schedule(cron_expression, timezone_id, pause_status)
+        create_kwargs: dict[str, Any] = {"name": name, "tasks": [task]}
+        if schedule is not None:
+            create_kwargs["schedule"] = schedule
         try:
-            created = self._call(lambda cl: cl.jobs.create(name=name, tasks=[task]))
+            created = self._call(lambda cl: cl.jobs.create(**create_kwargs))
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to create job {name}: {exc}"}
-        return {"job_id": created.job_id, "name": name}
+        result: dict[str, object] = {"job_id": created.job_id, "name": name}
+        if task_type == "agentic" or effective_agent:
+            result["task_type"] = task_type
+            result["agent_name"] = effective_agent
+        if schedule:
+            result["scheduled"] = True
+        return result
 
-    async def jobs_edit(self, job_id: int, new_settings: dict[str, Any]) -> dict[str, object]:
-        """Update a Lakeflow job. `new_settings` holds the top-level job settings to change."""
+    def _update_job_sql_file(
+        self,
+        job_id: int,
+        query: str,
+        agent_name: str | None = None,
+        instructions: str | None = None,
+    ) -> str | None:
+        sql_text = (
+            build_agentic_query(query, agent_name=agent_name or "Agent", instructions=instructions)
+            if agent_name
+            else query
+        )
         try:
-            self._call(
-                lambda cl: cl.jobs.update(
-                    job_id=job_id, new_settings=JobSettings.from_dict(new_settings)
-                )
-            )
+            self._save_workspace_sql_file(f"/Workspace/Shared/crabriks/job_{job_id}.sql", sql_text)
         except Exception as exc:  # noqa: BLE001
-            return {"error": f"Failed to update job {job_id}: {exc}"}
+            return f"Failed to save updated SQL file: {exc}"
+        else:
+            return None
+
+    def _prepare_edit_settings(
+        self,
+        new_settings: dict[str, Any] | None,
+        *,
+        name: str | None,
+        cron_expression: str | None,
+        timezone_id: str,
+        pause_status: str | None,
+    ) -> dict[str, Any]:
+        settings_dict = dict(new_settings or {})
+        if name:
+            settings_dict["name"] = name
+        if cron_expression or pause_status:
+            schedule = build_cron_schedule(cron_expression, timezone_id, pause_status or "UNPAUSED")
+            if schedule:
+                settings_dict["schedule"] = schedule.as_dict()
+        return settings_dict
+
+    async def jobs_edit(  # noqa: PLR0913
+        self,
+        job_id: int,
+        new_settings: dict[str, Any] | None = None,
+        *,
+        name: str | None = None,
+        cron_expression: str | None = None,
+        timezone_id: str = "UTC",
+        pause_status: Literal["PAUSED", "UNPAUSED"] | None = None,
+        query: str | None = None,
+        agent_name: str | None = None,
+        instructions: str | None = None,
+    ) -> dict[str, object]:
+        """Update a Lakeflow job settings, schedule, or query."""
+        if query:
+            err = self._update_job_sql_file(job_id, query, agent_name, instructions)
+            if err:
+                return {"error": err}
+
+        settings_dict = self._prepare_edit_settings(
+            new_settings,
+            name=name,
+            cron_expression=cron_expression,
+            timezone_id=timezone_id,
+            pause_status=pause_status,
+        )
+        if not settings_dict and not query:
+            return {"job_id": job_id, "updated": False, "message": "No settings to update"}
+
+        if settings_dict:
+            try:
+                self._call(
+                    lambda cl: cl.jobs.update(
+                        job_id=job_id, new_settings=JobSettings.from_dict(settings_dict)
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                return {"error": f"Failed to update job {job_id}: {exc}"}
         return {"job_id": job_id, "updated": True}
+
+    async def jobs_delete(self, job_id: int) -> dict[str, object]:
+        """Delete a Lakeflow job from the workspace."""
+        try:
+            self._call(lambda cl: cl.jobs.delete(job_id=job_id))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to delete job {job_id}: {exc}"}
+        return {"job_id": job_id, "deleted": True}
 
     async def jobs_cancel_run(self, run_id: int) -> dict[str, object]:
         """Request cancellation of an active Lakeflow job run."""
@@ -469,6 +650,20 @@ class DatabricksTools:
             ],
         }
 
+    async def jobs_get_run_output(self, run_id: int) -> dict[str, object]:
+        """Get the execution output and logs of a Lakeflow job run."""
+        try:
+            out = self._call(lambda cl: cl.jobs.get_run_output(run_id=run_id))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Failed to get output for run {run_id}: {exc}"}
+        sql_out = out.sql_output.as_dict() if out.sql_output else None
+        return {
+            "run_id": run_id,
+            "logs": out.logs,
+            "error": out.error,
+            "sql_output": sql_out,
+        }
+
     def all_tools(self) -> list[Callable[..., Any]]:
         return [
             self.uc_list_catalogs,
@@ -479,10 +674,12 @@ class DatabricksTools:
             self.system_ai_query,
             self.jobs_list,
             self.jobs_get_run,
+            self.jobs_get_run_output,
             self.jobs_run_now,
             self.jobs_cancel_run,
             self.jobs_create,
             self.jobs_edit,
+            self.jobs_delete,
         ]
 
 

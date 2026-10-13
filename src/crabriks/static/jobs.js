@@ -1,7 +1,16 @@
 /** Lakeflow job tool results: run cards with a state badge, and job lists. */
 import { el, rawJsonDisclosure } from "./dom.js";
 function parseJobRow(obj) {
-    return { jobId: asNumber(obj.job_id), name: asString(obj.name) ?? "(unnamed job)" };
+    let name = asString(obj.name);
+    if (!name) {
+        if (obj.deleted === true)
+            name = "(deleted job)";
+        else if (obj.updated === true)
+            name = "(updated job)";
+        else
+            name = "(unnamed job)";
+    }
+    return { jobId: asNumber(obj.job_id), name };
 }
 const IN_FLIGHT = {
     PENDING: "pending",

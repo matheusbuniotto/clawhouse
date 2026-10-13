@@ -420,16 +420,28 @@ DATABRICKS_TOOL_CARDS = (
     ToolCard(name="jobs_list", description="List Lakeflow jobs in the workspace."),
     ToolCard(name="jobs_get_run", description="Get the state of a Lakeflow job run."),
     ToolCard(
+        name="jobs_get_run_output",
+        description="Get execution output and logs of a Lakeflow job run.",
+    ),
+    ToolCard(
         name="jobs_run_now",
         description="Trigger a Lakeflow job run (needs approval); optional parameter overrides.",
     ),
     ToolCard(
         name="jobs_create",
-        description="Create a Lakeflow job from a script or SQL query (needs approval).",
+        description="Create a Lakeflow job (SQL/Python/Agentic) with schedule (needs approval).",
     ),
-    ToolCard(name="jobs_edit", description="Update Lakeflow job settings (needs approval)."),
     ToolCard(
-        name="jobs_cancel_run", description="Cancel an active Lakeflow job run (needs approval)."
+        name="jobs_edit",
+        description="Update Lakeflow job settings, schedule, or query (needs approval).",
+    ),
+    ToolCard(
+        name="jobs_delete",
+        description="Delete a Lakeflow job from the workspace (needs approval).",
+    ),
+    ToolCard(
+        name="jobs_cancel_run",
+        description="Cancel an active Lakeflow job run (needs approval).",
     ),
 )
 

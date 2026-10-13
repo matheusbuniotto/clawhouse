@@ -39,6 +39,8 @@ CI (`quality.yml`) runs ruff, complexipy, pyright, vulture, jscpd, and pytest on
 - Lakeflow Jobs workspace file format: Lakeflow Jobs SQL tasks (`SqlTaskFile`) strictly require workspace items of `Type: FILE`. `workspace.import_` creates a `NOTEBOOK` (causing fetch failure). Always use `workspace.upload(...)` with `format=ImportFormat.AUTO` and ensure parent directories exist via `workspace.mkdirs(...)`.
 - Inline human approvals: Mutating tool calls pause turn execution and emit `approval_required` SSE events to the UI. The UI renders inline `[Approve]` / `[Deny]` action buttons in the transcript stream.
 - Single-turn agent delegation: In chat turns mentioning `@AgentName`, delegation is prompt persona injection in the active turn, not multi-process spawning. The active agent directly adopts the target persona, system prompt, and emoji.
+- Agentic Jobs & DBSQL `ai_query`: Autonomous analytical workflows (`Query => Agent analysis => Output`) execute directly inside Lakeflow Jobs using DBSQL `ai_query` on the SQL Warehouse, eliminating dedicated cluster provisioning and producing agent analysis in task outputs.
+- Lakeflow Job Lifecycle: `jobs_create` supports `task_type="agentic"`, `task_type="sql"`, and `task_type="python"`, plus Quartz cron schedules. `jobs_edit` updates settings/schedules/queries, `jobs_delete` removes jobs, and `jobs_get_run_output` retrieves execution logs and analytical reports.
 - Issues carry behavior and acceptance criteria, never file paths or code snippets (they rot).
 - Vertical slices: each ticket is demoable end to end through every layer it touches, sized for one fresh context.
 

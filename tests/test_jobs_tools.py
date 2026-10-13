@@ -10,8 +10,10 @@ from unittest.mock import MagicMock
 from databricks.sdk.service.jobs import (
     BaseJob,
     JobSettings,
+    PauseStatus,
     Run,
     RunLifeCycleState,
+    RunOutput,
     RunResultState,
     RunState,
     RunTask,
@@ -365,9 +367,11 @@ async def test_system_prompt_lists_every_jobs_tool() -> None:
     for tool in (
         "jobs_list",
         "jobs_get_run",
+        "jobs_get_run_output",
         "jobs_run_now",
         "jobs_create",
         "jobs_edit",
+        "jobs_delete",
         "jobs_cancel_run",
     ):
         assert tool in seen[0]
@@ -540,3 +544,121 @@ async def test_chat_creates_agent_creates_job_and_delivers_deep_analysis(
     assert "NyTaxiAnalyst Deep Analysis Report" in turn4.reply
     assert "samples.nyctaxi.trips" in turn4.reply
     assert "Run #888" in turn4.reply
+
+
+async def test_jobs_create_agentic_task_builds_ai_query() -> None:
+    client = MagicMock()
+    client.jobs.create.return_value = MagicMock(job_id=101)
+    store = MemorySessionStore()
+    args: dict[str, object] = {
+        "name": "nyctaxi_agentic",
+        "task_type": "agentic",
+        "agent_name": "TaxiAnalyst",
+        "query": "SELECT * FROM samples.nyctaxi.trips WHERE fare_amount > 100",
+        "instructions": "Identify outlier fares and anomalous pickup locations",
+    }
+
+    paused = await _turn(client, "jobs_create", args, store)
+    assert paused.status == "pending_approval"
+    assert paused.approval_id is not None
+    resumed = await _approve(client, store, paused.approval_id)
+    assert resumed.status == "ok"
+
+    result = _tool_result(resumed)
+    assert result["job_id"] == 101
+    assert result["task_type"] == "agentic"
+    assert result["agent_name"] == "TaxiAnalyst"
+
+    client.workspace.upload.assert_called_once()
+    uploaded_content = client.workspace.upload.call_args.kwargs["content"].getvalue().decode()
+    assert "ai_query" in uploaded_content
+    assert "You are @TaxiAnalyst" in uploaded_content
+    assert "samples.nyctaxi.trips" in uploaded_content
+
+
+async def test_jobs_create_with_cron_schedule() -> None:
+    client = MagicMock()
+    client.jobs.create.return_value = MagicMock(job_id=102)
+    store = MemorySessionStore()
+    args: dict[str, object] = {
+        "name": "daily_report",
+        "task_type": "sql",
+        "path": "/Workspace/Shared/report.sql",
+        "cron_expression": "0 0 12 * * ?",
+        "timezone_id": "UTC",
+    }
+
+    paused = await _turn(client, "jobs_create", args, store)
+    assert paused.status == "pending_approval"
+    assert paused.approval_id is not None
+    resumed = await _approve(client, store, paused.approval_id)
+    assert resumed.status == "ok"
+
+    result = _tool_result(resumed)
+    assert result["job_id"] == 102
+    assert result["scheduled"] is True
+
+    client.jobs.create.assert_called_once()
+    sched = client.jobs.create.call_args.kwargs["schedule"]
+    assert sched.quartz_cron_expression == "0 0 12 * * ?"
+    assert sched.timezone_id == "UTC"
+    assert sched.pause_status == PauseStatus.UNPAUSED
+
+
+async def test_jobs_edit_schedule_and_name_updates_job_settings() -> None:
+    client = MagicMock()
+    store = MemorySessionStore()
+    args: dict[str, object] = {
+        "job_id": 5,
+        "name": "nightly-renamed",
+        "cron_expression": "0 0 18 * * ?",
+        "pause_status": "PAUSED",
+    }
+
+    paused = await _turn(client, "jobs_edit", args, store)
+    assert paused.status == "pending_approval"
+    assert paused.approval_id is not None
+    resumed = await _approve(client, store, paused.approval_id)
+    assert resumed.status == "ok"
+    assert _tool_result(resumed) == {"job_id": 5, "updated": True}
+
+    client.jobs.update.assert_called_once()
+    call = client.jobs.update.call_args
+    assert call.kwargs["job_id"] == 5
+    settings = call.kwargs["new_settings"]
+    assert settings.name == "nightly-renamed"
+    assert settings.schedule.quartz_cron_expression == "0 0 18 * * ?"
+    assert settings.schedule.pause_status == PauseStatus.PAUSED
+
+
+async def test_jobs_delete_waits_for_approval_then_deletes() -> None:
+    client = MagicMock()
+    store = MemorySessionStore()
+
+    paused = await _turn(client, "jobs_delete", {"job_id": 55}, store)
+    assert paused.status == "pending_approval"
+    assert paused.approval_id is not None
+    client.jobs.delete.assert_not_called()
+
+    resumed = await _approve(client, store, paused.approval_id)
+    assert resumed.status == "ok"
+    assert _tool_result(resumed) == {"job_id": 55, "deleted": True}
+    client.jobs.delete.assert_called_once_with(job_id=55)
+
+
+async def test_jobs_get_run_output_returns_output_without_approval() -> None:
+    client = MagicMock()
+    client.jobs.get_run_output.return_value = RunOutput(
+        logs="Analysis complete: found 12 outliers.",
+        error=None,
+    )
+
+    result = await _turn(client, "jobs_get_run_output", {"run_id": 99})
+    assert result.status == "ok"
+    assert _tool_result(result) == {
+        "run_id": 99,
+        "logs": "Analysis complete: found 12 outliers.",
+        "error": None,
+        "sql_output": None,
+    }
+    client.jobs.get_run_output.assert_called_once_with(run_id=99)

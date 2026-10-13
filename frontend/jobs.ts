@@ -21,7 +21,13 @@ interface JobRow {
 export type JobView = { kind: "run"; run: JobRun } | { kind: "list"; jobs: JobRow[] };
 
 function parseJobRow(obj: Record<string, unknown>): JobRow {
-  return { jobId: asNumber(obj.job_id), name: asString(obj.name) ?? "(unnamed job)" };
+  let name = asString(obj.name);
+  if (!name) {
+    if (obj.deleted === true) name = "(deleted job)";
+    else if (obj.updated === true) name = "(updated job)";
+    else name = "(unnamed job)";
+  }
+  return { jobId: asNumber(obj.job_id), name };
 }
 
 const IN_FLIGHT: Record<string, JobBadgeState> = {
