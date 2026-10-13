@@ -10,21 +10,25 @@ Work with Lakeflow Jobs through these tools. Never guess a job id or run id: fin
 | Tool | Effect | Approval |
 | --- | --- | --- |
 | `jobs_list(limit)` | Lists jobs (id, name, creator). Max 100, no paging. | no |
-| `jobs_get_run(run_id)` | State of one run, plus each task's state. | no |
-| `jobs_get_run_output(run_id)` | Execution output, logs, and query results of a run. | no |
-| `jobs_run_now(job_id, parameters)` | Starts a run. `parameters` overrides job parameters. | **yes** |
+| `jobs_get_run(run_id)` | State of one run, plus each task's state and task `run_id`. | no |
+| `jobs_get_run_output(run_id)` | Execution output, logs, and query results of a run or task. | no |
+| `jobs_wait_run(run_id, timeout)` | Polls and awaits run completion, returning final state + output. | no |
+| `jobs_run_now(job_id, ...)` | Starts a run. Pass `wait=True` to await completion. | **yes** |
 | `jobs_create(name, task_type, ...)` | Creates a SQL, Python, or Agentic job (with optional schedule). | **yes** |
 | `jobs_edit(job_id, ...)` | Updates job name, schedule, query, or settings. | **yes** |
 | `jobs_delete(job_id)` | Deletes a job from the workspace. | **yes** |
 | `jobs_cancel_run(run_id)` | Requests cancellation of an active run. | **yes** |
+| `system_ai_format_delivery(content, ...)` | Formats reports for Slack mrkdwn or Sheets JSON. | no |
+| `delivery_send_webhook(url, payload)` | Sends formatted payload to external Slack / Sheets webhook. | **yes** |
 
 ## Workflow
 
 1. **Find the job.** Call `jobs_list` and match by name. If several jobs match or none do, say so and ask. Do not pick one silently.
 2. **Look before you act.** For "why did it fail" or "is it done", call `jobs_get_run` and read the `tasks` states. Use `jobs_get_run_output` to read the task logs and agent analysis.
 3. **Say what you are about to do, then call the mutating tool.** The turn pauses until the user approves. State the job, the parameters, and the effect in one sentence so the approval card makes sense.
-4. **After approval, report the result.** `jobs_run_now` returns a `run_id`: tell the user it was triggered, not that it finished. Offer to check it with `jobs_get_run`.
-5. **If the call is denied or returns `error`,** report that plainly. Do not retry a mutating call on your own.
+4. **Await completion or report.** Use `jobs_run_now(..., wait=True)` or `jobs_wait_run(run_id)` to await terminal state and retrieve the output in one turn.
+5. **Delivery**: Format output with `system_ai_format_delivery(destination="slack" | "sheets")` and deliver via `delivery_send_webhook`.
+6. **If the call is denied or returns `error`,** report that plainly. Do not retry a mutating call on your own.
 
 ## Reading Run State & Output
 

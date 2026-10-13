@@ -743,3 +743,114 @@ async def test_jobs_get_run_output_resolves_multi_task_parent_run() -> None:
             "sql_output": None,
         },
     ]
+
+
+async def test_jobs_wait_run_polls_until_terminated_and_returns_output() -> None:
+    client = MagicMock()
+    # First poll: RUNNING; second poll: TERMINATED
+    client.jobs.get_run.side_effect = [
+        Run(
+            run_id=700,
+            job_id=10,
+            state=RunState(life_cycle_state=RunLifeCycleState.RUNNING),
+            tasks=[RunTask(task_key="step", run_id=701)],
+        ),
+        Run(
+            run_id=700,
+            job_id=10,
+            state=RunState(
+                life_cycle_state=RunLifeCycleState.TERMINATED,
+                result_state=RunResultState.SUCCESS,
+            ),
+            tasks=[RunTask(task_key="step", run_id=701)],
+        ),
+    ]
+    client.jobs.get_run_output.return_value = RunOutput(logs="Run complete!", error=None)
+
+    result = await _turn(
+        client,
+        "jobs_wait_run",
+        {"run_id": 700, "timeout_seconds": 10, "poll_interval_seconds": 0},
+    )
+    assert result.status == "ok"
+    tool_res = _tool_result(result)
+    assert tool_res["run_id"] == 700
+    assert tool_res["life_cycle_state"] == "TERMINATED"
+    assert tool_res["result_state"] == "SUCCESS"
+    out = tool_res.get("output")
+    assert isinstance(out, dict)
+    assert out.get("logs") == "Run complete!"
+
+
+async def test_jobs_run_now_with_wait_flag_awaits_completion() -> None:
+    client = MagicMock()
+    client.jobs.run_now.return_value = MagicMock(run_id=888)
+    client.jobs.get_run.return_value = Run(
+        run_id=888,
+        job_id=5,
+        state=RunState(
+            life_cycle_state=RunLifeCycleState.TERMINATED,
+            result_state=RunResultState.SUCCESS,
+        ),
+        tasks=[RunTask(task_key="t1", run_id=889)],
+    )
+    client.jobs.get_run_output.return_value = RunOutput(logs="Done in one turn", error=None)
+    store = MemorySessionStore()
+
+    paused = await _turn(
+        client,
+        "jobs_run_now",
+        {"job_id": 5, "wait": True, "timeout_seconds": 10},
+        store,
+    )
+    assert paused.status == "pending_approval"
+    assert paused.approval_id is not None
+
+    resumed = await _approve(client, store, paused.approval_id)
+    assert resumed.status == "ok"
+    tool_res = _tool_result(resumed)
+    assert tool_res["run_id"] == 888
+    assert tool_res["life_cycle_state"] == "TERMINATED"
+    res_out = tool_res.get("output")
+    assert isinstance(res_out, dict)
+    assert res_out.get("logs") == "Done in one turn"
+
+
+async def test_system_ai_format_delivery_slack_and_sheets() -> None:
+    client = MagicMock()
+    mock_choice = MagicMock()
+    mock_choice.message.content = "*NYC Taxi Outliers*\n- 7 trips > $100"
+    client.serving_endpoints.query.return_value = MagicMock(choices=[mock_choice])
+
+    result_slack = await _turn(
+        client,
+        "system_ai_format_delivery",
+        {"content": "Found 7 outlier trips", "destination": "slack", "title": "NYC Taxi Outliers"},
+    )
+    assert result_slack.status == "ok"
+    assert _tool_result(result_slack)["destination"] == "slack"
+    assert "*NYC Taxi Outliers*" in str(_tool_result(result_slack)["formatted_text"])
+
+    mock_choice.message.content = '{"sheet_name": "Outliers", "headers": ["Fare"], "rows": [[105]]}'
+    result_sheets = await _turn(
+        client,
+        "system_ai_format_delivery",
+        {"content": "Found 7 outlier trips", "destination": "sheets"},
+    )
+    assert result_sheets.status == "ok"
+    assert _tool_result(result_sheets)["destination"] == "sheets"
+    assert "Outliers" in str(_tool_result(result_sheets)["raw_json"])
+
+
+async def test_delivery_send_webhook_requires_approval() -> None:
+    client = MagicMock()
+    store = MemorySessionStore()
+
+    paused = await _turn(
+        client,
+        "delivery_send_webhook",
+        {"url": "https://hooks.slack.com/services/test", "payload": {"text": "hello"}},
+        store,
+    )
+    assert paused.status == "pending_approval"
+    assert paused.approval_id is not None

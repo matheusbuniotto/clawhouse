@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import itertools
+import json
 import logging
 import os
 import re
+import time
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,7 +58,14 @@ _READONLY_KEYWORDS = {"select", "show", "describe", "desc", "explain"}
 _JOBS_PAGE_MAX = 100  # the Jobs API rejects a page limit above 100
 _TASK_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _APPROVAL_REQUIRED_TOOLS = frozenset(
-    {"jobs_run_now", "jobs_cancel_run", "jobs_create", "jobs_edit", "jobs_delete"}
+    {
+        "jobs_run_now",
+        "jobs_cancel_run",
+        "jobs_create",
+        "jobs_edit",
+        "jobs_delete",
+        "delivery_send_webhook",
+    }
 )
 
 
@@ -392,14 +403,26 @@ class DatabricksTools:
         }
 
     async def jobs_run_now(
-        self, job_id: int, parameters: dict[str, str] | None = None
+        self,
+        job_id: int,
+        parameters: dict[str, str] | None = None,
+        *,
+        wait: bool = False,
+        timeout_seconds: int = 120,
     ) -> dict[str, object]:
-        """Trigger an immediate run of a Lakeflow job, optionally overriding job parameters."""
+        """Trigger an immediate run of a Lakeflow job, optionally overriding job parameters.
+
+        Pass `wait=True` to poll until the run finishes and return its final status and output.
+        """
         try:
-            wait = self._call(lambda cl: cl.jobs.run_now(job_id=job_id, job_parameters=parameters))
+            wait_handle = self._call(
+                lambda cl: cl.jobs.run_now(job_id=job_id, job_parameters=parameters)
+            )
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to run job {job_id}: {exc}"}
-        return {"run_id": wait.run_id, "job_id": job_id}
+        if wait:
+            return await self.jobs_wait_run(wait_handle.run_id, timeout_seconds=timeout_seconds)
+        return {"run_id": wait_handle.run_id, "job_id": job_id}
 
     def _save_workspace_sql_file(self, path: str, sql_text: str) -> None:
         parent_dir = str(Path(path).parent)
@@ -729,6 +752,98 @@ class DatabricksTools:
                 return resolved
             return {"error": f"Failed to get output for run {run_id}: {exc}"}
 
+    async def jobs_wait_run(
+        self,
+        run_id: int,
+        timeout_seconds: int = 120,
+        poll_interval_seconds: int = 5,
+    ) -> dict[str, object]:
+        """Poll and wait for a job run to complete, returning final status and output."""
+        deadline = time.monotonic() + max(1, timeout_seconds)
+        interval = max(1, poll_interval_seconds)
+        last_info: dict[str, object] = {}
+
+        while time.monotonic() < deadline:
+            last_info = await self.jobs_get_run(run_id)
+            if "error" in last_info:
+                return last_info
+            state = str(last_info.get("life_cycle_state", ""))
+            if state in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
+                output = await self.jobs_get_run_output(run_id)
+                return {
+                    "run_id": run_id,
+                    "job_id": last_info.get("job_id"),
+                    "life_cycle_state": state,
+                    "result_state": last_info.get("result_state"),
+                    "duration_ms": last_info.get("duration_ms"),
+                    "url": last_info.get("url"),
+                    "tasks": last_info.get("tasks", []),
+                    "output": output,
+                }
+            await asyncio.sleep(interval)
+
+        return {
+            "run_id": run_id,
+            "job_id": last_info.get("job_id"),
+            "life_cycle_state": last_info.get("life_cycle_state", "RUNNING"),
+            "status": "TIMED_OUT_WAITING",
+            "message": f"Run {run_id} is still in progress after {timeout_seconds}s.",
+            "url": last_info.get("url"),
+            "tasks": last_info.get("tasks", []),
+        }
+
+    async def system_ai_format_delivery(
+        self,
+        content: str,
+        destination: Literal["slack", "sheets"],
+        title: str | None = None,
+    ) -> dict[str, object]:
+        """Format analytical outputs or reports for Slack or Google Sheets using Databricks AI."""
+        if destination == "slack":
+            prompt = (
+                "You are a technical delivery formatter. Format this report into a clean, "
+                "engaging Slack message using Slack mrkdwn syntax (bold, bullet points, emoji).\n"
+                f"Include a headline{f' ({title})' if title else ''}, Key Findings, "
+                f"and Action Items. Output ONLY the formatted text.\n\nReport:\n{content}"
+            )
+            formatted = await self.system_ai_query(prompt)
+            return {
+                "destination": "slack",
+                "formatted_text": formatted,
+                "preview": formatted[:200],
+            }
+        prompt = (
+            "You are a data transformation assistant. Convert these findings into a structured "
+            "tabular JSON for a spreadsheet with: 'sheet_name' (str), 'headers' (list[str]), "
+            f"and 'rows' (list of lists). Output ONLY valid JSON.\n\nReport:\n{content}"
+        )
+        formatted = await self.system_ai_query(prompt)
+        return {
+            "destination": "sheets",
+            "raw_json": formatted,
+        }
+
+    async def delivery_send_webhook(
+        self,
+        url: str,
+        payload: dict[str, Any] | str,
+    ) -> dict[str, object]:
+        """Send a formatted payload or notification to an external webhook (Slack, Sheets)."""
+        data = payload if isinstance(payload, str) else json.dumps(payload)
+        req = urllib.request.Request(
+            url,
+            data=data.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                code = resp.status
+                body = resp.read().decode("utf-8", errors="replace")
+                return {"delivered": True, "status_code": code, "response": body[:200]}
+        except Exception as exc:  # noqa: BLE001
+            return {"delivered": False, "error": f"Webhook delivery failed: {exc}"}
+
     def all_tools(self) -> list[Callable[..., Any]]:
         return [
             self.uc_list_catalogs,
@@ -737,9 +852,12 @@ class DatabricksTools:
             self.uc_describe_table,
             self.dbsql_query,
             self.system_ai_query,
+            self.system_ai_format_delivery,
+            self.delivery_send_webhook,
             self.jobs_list,
             self.jobs_get_run,
             self.jobs_get_run_output,
+            self.jobs_wait_run,
             self.jobs_run_now,
             self.jobs_cancel_run,
             self.jobs_create,

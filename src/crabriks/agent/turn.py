@@ -443,6 +443,18 @@ DATABRICKS_TOOL_CARDS = (
         name="jobs_cancel_run",
         description="Cancel an active Lakeflow job run (needs approval).",
     ),
+    ToolCard(
+        name="jobs_wait_run",
+        description="Wait/poll for a job run to finish and return final status and output.",
+    ),
+    ToolCard(
+        name="system_ai_format_delivery",
+        description="Format analytical reports for Slack or Sheets using Databricks AI.",
+    ),
+    ToolCard(
+        name="delivery_send_webhook",
+        description="Send formatted report to external webhook (needs approval).",
+    ),
 )
 
 
