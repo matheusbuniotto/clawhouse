@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
@@ -56,10 +57,6 @@ CREATE TABLE IF NOT EXISTS crabriks.runs (
     finished_at timestamptz,
     CONSTRAINT runs_status_known CHECK (status IN ('running', 'ok', 'error', 'pending_approval'))
 );
-
-ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
-ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
-    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS runs_one_running_per_session
     ON crabriks.runs (session_id)
@@ -497,19 +494,23 @@ class LakebaseSessionStore:
         self._pool = pool
 
     async def migrate(self) -> None:
-        await self._pool.execute(SCHEMA)
-        await self._pool.execute(
-            """
-            DO $$
-            BEGIN
-                ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
-                ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
-                    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
-            EXCEPTION
-                WHEN undefined_table THEN NULL;
-            END $$;
-            """
-        )
+        try:
+            await self._pool.execute(SCHEMA)
+        except asyncpg.InsufficientPrivilegeError:
+            logger.info("Skipping SCHEMA creation: insufficient privilege (tables already exist)")
+        with suppress(asyncpg.InsufficientPrivilegeError):
+            await self._pool.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+                    ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+                        CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+                EXCEPTION
+                    WHEN undefined_table OR insufficient_privilege THEN NULL;
+                END $$;
+                """
+            )
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
         session = _uuid(session_id)
