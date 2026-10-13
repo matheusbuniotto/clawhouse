@@ -178,6 +178,17 @@ def test_user_directives_populate_missing_user_file_and_respect_caps(tmp_path: P
     assert loaded_capped.notice == "Bootstrap context was truncated to fit the budget."
 
 
+def test_optional_context_file_loaded_when_present(tmp_path: Path) -> None:
+    paths = resolve_agent_workspace(tmp_path, "main")
+    paths.directory.mkdir(parents=True)
+    paths.agents.write_text("Agents.\n", encoding="utf-8")
+    paths.context_file.write_text("Context documentation.\n", encoding="utf-8")
+
+    loaded = load_bootstrap(paths)
+    by_name = {item.name: item.text for item in loaded.files}
+    assert by_name.get("CONTEXT.md") == "Context documentation.\n"
+
+
 def _write(root: Path, contents: dict[str, str]):
     paths = resolve_agent_workspace(root, "main")
     paths.directory.mkdir(parents=True)

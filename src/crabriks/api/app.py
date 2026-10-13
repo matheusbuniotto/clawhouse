@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -42,7 +43,10 @@ from crabriks.agent.turn import (
 )
 from crabriks.api.identity import Caller, Unauthenticated, resolve_caller
 from crabriks.capabilities.databricks import DatabricksCapability
-from crabriks.capabilities.workspace import resolve_agent_workspace
+from crabriks.capabilities.workspace import (
+    provision_agent_workspace,
+    resolve_agent_workspace,
+)
 from crabriks.settings import Settings, request_token, settings_from_env
 from crabriks.store.shapes import (
     ApprovalEntry,
@@ -109,6 +113,8 @@ class CustomAgentIn(BaseModel):
     description: str
     system_prompt: str
     signature_emoji: str = "🤖"
+    soul: str | None = None
+    context: str | None = None
 
 
 class CustomAgentOut(BaseModel):
@@ -554,6 +560,16 @@ def _agent_routes(app: FastAPI) -> None:
             signature_emoji=payload.signature_emoji,
         )
         saved = await app.state.store.create_custom_agent(custom)
+        settings: Settings = app.state.settings
+        provision_agent_workspace(
+            root=settings.agent_root,
+            agent_name=saved.name,
+            agents_text=saved.system_prompt,
+            identity_name=saved.name,
+            signature_emoji=saved.signature_emoji,
+            soul_text=payload.soul,
+            context_text=payload.context,
+        )
         return CustomAgentOut(
             id=saved.id,
             owner_id=saved.owner_id,
@@ -566,9 +582,19 @@ def _agent_routes(app: FastAPI) -> None:
 
     @app.delete("/api/agents/{agent_id}", status_code=204)
     async def delete_agent(agent_id: str, caller: Caller = _require_caller) -> Response:
+        agents = await app.state.store.list_custom_agents(caller.user_id)
+        matching = next((a for a in agents if a.id == agent_id), None)
         deleted = await app.state.store.delete_custom_agent(agent_id, caller.user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Agent not found")
+        if matching:
+            settings: Settings = app.state.settings
+            try:
+                paths = resolve_agent_workspace(settings.agent_root, matching.name)
+                if paths.directory.exists():
+                    shutil.rmtree(paths.directory)
+            except OSError:
+                pass
         return Response(status_code=204)
 
 
