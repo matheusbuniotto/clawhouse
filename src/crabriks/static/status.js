@@ -27,6 +27,11 @@ export function mount(root) {
     const sessionsList = el("ul", "sessions-list");
     sessionsList.id = "sessions-list";
     runs.append(sessionsList);
+    const schedules = el("section", "status-section");
+    schedules.append(el("h2", "", "Scheduled Automations"));
+    const schedulesList = el("ul", "schedules-list");
+    schedulesList.id = "schedules-list";
+    schedules.append(schedulesList);
     const diagnostics = el("section", "status-section");
     diagnostics.append(el("h2", "", "Diagnostics & Logs"));
     const logCard = el("div", "status-card");
@@ -42,7 +47,7 @@ export function mount(root) {
     const statusLine = el("p", "status");
     statusLine.id = "status";
     statusLine.setAttribute("role", "status");
-    root.append(connection, runs, diagnostics, statusLine);
+    root.append(connection, runs, schedules, diagnostics, statusLine);
     function set(id, text) {
         const node = values.get(id);
         if (node)
@@ -77,6 +82,55 @@ export function mount(root) {
             sessionsList.append(row);
         }
     }
+    function renderSchedules(items) {
+        schedulesList.replaceChildren();
+        if (items.length === 0) {
+            schedulesList.append(el("li", "empty", "No scheduled automations."));
+            return;
+        }
+        for (const item of items) {
+            const row = el("li", "schedule-status-row");
+            const info = el("div", "schedule-info");
+            const cronBadge = el("code", "schedule-cron", item.cron_expression);
+            const promptSpan = el("span", "schedule-prompt", item.prompt);
+            info.append(cronBadge, promptSpan);
+            const meta = el("div", "schedule-meta");
+            const statusBadge = el("span", `schedule-badge ${item.status}`, item.status);
+            const nextRun = el("span", "when", `Next: ${relativeTime(item.next_run_at)}`);
+            meta.append(statusBadge, nextRun);
+            if (item.status === "active") {
+                const cancelBtn = el("button", "btn-cancel-schedule", "Cancel");
+                cancelBtn.type = "button";
+                cancelBtn.addEventListener("click", async () => {
+                    cancelBtn.disabled = true;
+                    try {
+                        const res = await fetch(`/api/schedules/${item.id}`, { method: "DELETE" });
+                        if (res.ok) {
+                            void loadSchedules();
+                        }
+                    }
+                    catch {
+                        cancelBtn.disabled = false;
+                    }
+                });
+                meta.append(cancelBtn);
+            }
+            row.append(info, meta);
+            schedulesList.append(row);
+        }
+    }
+    async function loadSchedules() {
+        try {
+            const resp = await fetch("/api/schedules");
+            if (resp.ok) {
+                const items = (await resp.json());
+                renderSchedules(items);
+            }
+        }
+        catch {
+            // Non-blocking
+        }
+    }
     async function load() {
         try {
             const resp = await fetch("/api/status");
@@ -89,6 +143,7 @@ export function mount(root) {
             renderSessions(data.sessions);
             if (data.log_tail_url)
                 logTailLink.href = data.log_tail_url;
+            void loadSchedules();
         }
         catch {
             statusLine.textContent = "Network error while loading status.";

@@ -71,3 +71,39 @@ test("reports a failed status request inline", async () => {
     expect(document.querySelector("#status")?.textContent).toBe("The status could not be loaded.");
   });
 });
+
+test("renders scheduled automations and handles cancel action", async () => {
+  const schedulesData = [
+    {
+      id: "sch-1",
+      session_id: "sess-1",
+      cron_expression: "*/15 * * * *",
+      prompt: "Check Lakeflow jobs status",
+      status: "active",
+      next_run_at: "2026-10-12T12:15:00Z",
+      created_at: "2026-10-12T12:00:00Z",
+    },
+  ];
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/status")) return jsonResponse(DATA);
+    if (url.includes("/api/schedules/sch-1")) return { ok: true } as Response;
+    if (url.includes("/api/schedules")) return jsonResponse(schedulesData);
+    return { ok: false } as Response;
+  });
+
+  await import("./status").then((module) => module.mount(document.body));
+
+  await vi.waitFor(() => {
+    expect(document.querySelector(".schedule-cron")?.textContent).toBe("*/15 * * * *");
+    expect(document.querySelector(".schedule-prompt")?.textContent).toBe(
+      "Check Lakeflow jobs status",
+    );
+    expect(document.querySelector(".schedule-badge")?.textContent).toBe("active");
+  });
+
+  const cancelBtn = document.querySelector(".btn-cancel-schedule") as HTMLButtonElement;
+  expect(cancelBtn).not.toBeNull();
+  cancelBtn.click();
+});

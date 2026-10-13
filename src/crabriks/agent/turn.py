@@ -8,7 +8,7 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic_ai import DeferredToolRequests, RunContext
 from pydantic_ai.capabilities import AbstractCapability, AgentCapability, CapabilityOrdering
@@ -50,10 +50,15 @@ from crabriks.capabilities.bootstrap import (
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from crabriks.capabilities.mentions import execute_compaction, resolve_mention_bundles
+from crabriks.capabilities.schedules import (
+    calculate_next_run,
+    parse_schedule_command,
+)
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
     ApprovalEntry,
+    ScheduleEntry,
     TranscriptEntry,
     TurnResult,
     TurnStatus,
@@ -482,6 +487,39 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     if claimed.user_message.strip() == "/compact":
         summary = await execute_compaction(ctx.store, claimed.session_id, ctx.owner_id, ctx.model)
         reply = f"Conversation history compacted successfully.\n\nSummary:\n{summary}"
+        await _append(claimed, TranscriptEntry(role="assistant", content=reply))
+        transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+        return TurnResult(
+            session_id=claimed.session_id,
+            status="ok",
+            reply=reply,
+            error=None,
+            transcript=transcript,
+        )
+
+    parsed_schedule = parse_schedule_command(claimed.user_message)
+    if parsed_schedule is not None:
+        now = ctx.now()
+        next_run = calculate_next_run(parsed_schedule.cron_expression, from_time=now)
+        sch_id = str(uuid4())
+        sch_entry = ScheduleEntry(
+            id=sch_id,
+            session_id=claimed.session_id,
+            owner_id=ctx.owner_id,
+            cron_expression=parsed_schedule.cron_expression,
+            prompt=parsed_schedule.prompt,
+            status="active",
+            next_run_at=next_run,
+            created_at=now,
+        )
+        await ctx.store.create_schedule(sch_entry)
+        reply = (
+            f"⏰ Scheduled automation created successfully!\n\n"
+            f"- **Schedule ID**: `{sch_id}`\n"
+            f"- **Cron Expression**: `{parsed_schedule.cron_expression}`\n"
+            f"- **First Run At**: `{next_run.isoformat()}`\n"
+            f"- **Instruction**: {parsed_schedule.prompt}"
+        )
         await _append(claimed, TranscriptEntry(role="assistant", content=reply))
         transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
         return TurnResult(

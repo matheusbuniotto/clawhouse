@@ -26,6 +26,7 @@ from crabriks.store.shapes import (
     ApprovalStatus,
     CustomAgent,
     RunState,
+    ScheduleEntry,
     SessionSummary,
     TranscriptEntry,
     TurnStatus,
@@ -118,6 +119,26 @@ CREATE TABLE IF NOT EXISTS crabriks.custom_agents (
 
 CREATE INDEX IF NOT EXISTS custom_agents_owner_idx
     ON crabriks.custom_agents (owner_id);
+
+CREATE TABLE IF NOT EXISTS crabriks.schedules (
+    id uuid PRIMARY KEY,
+    session_id uuid NOT NULL REFERENCES crabriks.sessions (id),
+    owner_id text NOT NULL,
+    cron_expression text NOT NULL,
+    prompt text NOT NULL,
+    status text NOT NULL DEFAULT 'active',
+    last_run_at timestamptz,
+    next_run_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT schedules_status_known CHECK (status IN ('active', 'paused', 'cancelled'))
+);
+
+CREATE INDEX IF NOT EXISTS schedules_owner_idx
+    ON crabriks.schedules (owner_id);
+
+CREATE INDEX IF NOT EXISTS schedules_due_idx
+    ON crabriks.schedules (status, next_run_at)
+    WHERE status = 'active';
 """
 
 
@@ -180,6 +201,20 @@ class SessionStore(Protocol):
 
     async def delete_custom_agent(self, agent_id: str, owner_id: str) -> bool: ...
 
+    async def create_schedule(self, schedule: ScheduleEntry) -> ScheduleEntry: ...
+
+    async def list_schedules(
+        self, owner_id: str, session_id: str | None = None
+    ) -> tuple[ScheduleEntry, ...]: ...
+
+    async def cancel_schedule(self, schedule_id: str, owner_id: str) -> bool: ...
+
+    async def claim_due_schedules(self, now: datetime) -> tuple[ScheduleEntry, ...]: ...
+
+    async def update_schedule_run(
+        self, schedule_id: str, last_run_at: datetime, next_run_at: datetime
+    ) -> ScheduleEntry | None: ...
+
     async def close(self) -> None: ...
 
 
@@ -220,6 +255,7 @@ class MemorySessionStore:
         self._approvals: dict[str, ApprovalEntry] = {}
         self._profiles: dict[str, UserProfile] = {}
         self._custom_agents: dict[str, list[CustomAgent]] = {}
+        self._schedules: dict[str, ScheduleEntry] = {}
         self._lock = asyncio.Lock()
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
@@ -406,6 +442,49 @@ class MemorySessionStore:
             initial_len = len(agents)
             self._custom_agents[owner_id] = [a for a in agents if a.id != agent_id]
             return len(self._custom_agents[owner_id]) < initial_len
+
+    async def create_schedule(self, schedule: ScheduleEntry) -> ScheduleEntry:
+        async with self._lock:
+            self._schedules[schedule.id] = schedule
+            return schedule
+
+    async def list_schedules(
+        self, owner_id: str, session_id: str | None = None
+    ) -> tuple[ScheduleEntry, ...]:
+        async with self._lock:
+            results = [
+                s
+                for s in self._schedules.values()
+                if s.owner_id == owner_id and (session_id is None or s.session_id == session_id)
+            ]
+            results.sort(key=lambda s: s.created_at, reverse=True)
+            return tuple(results)
+
+    async def cancel_schedule(self, schedule_id: str, owner_id: str) -> bool:
+        async with self._lock:
+            schedule = self._schedules.get(schedule_id)
+            if schedule is None or schedule.owner_id != owner_id:
+                return False
+            self._schedules[schedule_id] = replace(schedule, status="cancelled")
+            return True
+
+    async def claim_due_schedules(self, now: datetime) -> tuple[ScheduleEntry, ...]:
+        async with self._lock:
+            due = [
+                s for s in self._schedules.values() if s.status == "active" and s.next_run_at <= now
+            ]
+            return tuple(due)
+
+    async def update_schedule_run(
+        self, schedule_id: str, last_run_at: datetime, next_run_at: datetime
+    ) -> ScheduleEntry | None:
+        async with self._lock:
+            schedule = self._schedules.get(schedule_id)
+            if schedule is None:
+                return None
+            updated = replace(schedule, last_run_at=last_run_at, next_run_at=next_run_at)
+            self._schedules[schedule_id] = updated
+            return updated
 
     async def close(self) -> None:
         return None
@@ -830,6 +909,93 @@ class LakebaseSessionStore:
         )
         return res.startswith("DELETE 1")
 
+    async def create_schedule(self, schedule: ScheduleEntry) -> ScheduleEntry:
+        now = datetime.now(UTC)
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO crabriks.schedules (
+                id, session_id, owner_id, cron_expression, prompt,
+                status, next_run_at, created_at, last_run_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING
+                id, session_id, owner_id, cron_expression, prompt,
+                status, next_run_at, created_at, last_run_at
+            """,
+            _uuid(schedule.id),
+            _uuid(schedule.session_id),
+            schedule.owner_id,
+            schedule.cron_expression,
+            schedule.prompt,
+            schedule.status,
+            schedule.next_run_at,
+            schedule.created_at or now,
+            schedule.last_run_at,
+        )
+        if row is None:
+            raise RuntimeError("failed to create schedule")
+        return _schedule_from_row(row)
+
+    async def list_schedules(
+        self, owner_id: str, session_id: str | None = None
+    ) -> tuple[ScheduleEntry, ...]:
+        query = """
+            SELECT
+                id, session_id, owner_id, cron_expression, prompt,
+                status, next_run_at, created_at, last_run_at
+            FROM crabriks.schedules
+            WHERE owner_id = $1 AND ($2::uuid IS NULL OR session_id = $2::uuid)
+            ORDER BY created_at DESC
+        """
+        rows = await self._pool.fetch(query, owner_id, _uuid(session_id) if session_id else None)
+        return tuple(_schedule_from_row(r) for r in rows)
+
+    async def cancel_schedule(self, schedule_id: str, owner_id: str) -> bool:
+        res = await self._pool.execute(
+            """
+            UPDATE crabriks.schedules
+            SET status = 'cancelled'
+            WHERE id = $1 AND owner_id = $2 AND status != 'cancelled'
+            """,
+            _uuid(schedule_id),
+            owner_id,
+        )
+        return res.startswith("UPDATE 1")
+
+    async def claim_due_schedules(self, now: datetime) -> tuple[ScheduleEntry, ...]:
+        rows = await self._pool.fetch(
+            """
+            SELECT
+                id, session_id, owner_id, cron_expression, prompt,
+                status, next_run_at, created_at, last_run_at
+            FROM crabriks.schedules
+            WHERE status = 'active' AND next_run_at <= $1
+            ORDER BY next_run_at ASC
+            """,
+            now,
+        )
+        return tuple(_schedule_from_row(r) for r in rows)
+
+    async def update_schedule_run(
+        self, schedule_id: str, last_run_at: datetime, next_run_at: datetime
+    ) -> ScheduleEntry | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE crabriks.schedules
+            SET last_run_at = $2, next_run_at = $3
+            WHERE id = $1
+            RETURNING
+                id, session_id, owner_id, cron_expression, prompt,
+                status, next_run_at, created_at, last_run_at
+            """,
+            _uuid(schedule_id),
+            last_run_at,
+            next_run_at,
+        )
+        if row is None:
+            return None
+        return _schedule_from_row(row)
+
 
 def _custom_agent_from_row(row: asyncpg.Record) -> CustomAgent:
     return CustomAgent(
@@ -867,6 +1033,20 @@ def _approval_from_row(row: asyncpg.Record) -> ApprovalEntry:
         created_at=row["created_at"],
         resolved_at=row["resolved_at"],
         resolved_by=row["resolved_by"],
+    )
+
+
+def _schedule_from_row(row: asyncpg.Record) -> ScheduleEntry:
+    return ScheduleEntry(
+        id=str(row["id"]),
+        session_id=str(row["session_id"]),
+        owner_id=row["owner_id"],
+        cron_expression=row["cron_expression"],
+        prompt=row["prompt"],
+        status=row["status"],
+        next_run_at=row["next_run_at"],
+        created_at=row["created_at"],
+        last_run_at=row["last_run_at"],
     )
 
 

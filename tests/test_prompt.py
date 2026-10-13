@@ -199,6 +199,22 @@ def test_birth_ritual_section_injected_when_requested() -> None:
     assert "save_profile" in prompt.prefix
 
 
+def test_context_file_rendered_in_project_context() -> None:
+    bootstrap = BootstrapContext(
+        files=(
+            BootstrapFile(name="AGENTS.md", text="Operating rules."),
+            BootstrapFile(name="CONTEXT.md", text="Domain and architecture notes."),
+        ),
+        notice=None,
+    )
+    prompt = build_system_prompt(
+        tools=(CLOCK,),
+        runtime=RuntimeMeta(session_id=SESSION_A),
+        bootstrap=bootstrap,
+    )
+    assert "## CONTEXT.md\nDomain and architecture notes." in prompt.prefix
+
+
 _NAMES = ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")
 
 

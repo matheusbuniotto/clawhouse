@@ -99,11 +99,13 @@ async def test_composer_suggestions_at_prefix(test_app) -> None:
 
 
 @pytest.mark.asyncio
-async def test_custom_agents_lifecycle_and_inclusion_in_suggestions(test_app) -> None:
+async def test_custom_agents_lifecycle_and_inclusion_in_suggestions(
+    test_app, tmp_path: Path
+) -> None:
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test", headers=HEADERS
     ) as client:
-        # 1. Create a custom agent
+        # 1. Create a custom agent with optional context
         create_resp = await client.post(
             "/api/agents",
             json={
@@ -111,6 +113,7 @@ async def test_custom_agents_lifecycle_and_inclusion_in_suggestions(test_app) ->
                 "description": "SQL and Data Specialist",
                 "system_prompt": "You specialize in writing and optimizing SQL queries.",
                 "signature_emoji": "📊",
+                "context": "Customer and analytics table definitions.",
             },
         )
         assert create_resp.status_code == 201
@@ -118,6 +121,16 @@ async def test_custom_agents_lifecycle_and_inclusion_in_suggestions(test_app) ->
         assert created["name"] == "sql_analyst"
         assert created["signature_emoji"] == "📊"
         agent_id = created["id"]
+
+        # Check physical workspace folder was provisioned
+        agent_dir = tmp_path / "claw" / "agents" / "sql_analyst"
+        assert agent_dir.is_dir()
+        assert (agent_dir / "workspace").is_dir()
+        assert (agent_dir / "AGENTS.md").is_file()
+        assert (agent_dir / "IDENTITY.md").is_file()
+        assert (agent_dir / "CONTEXT.md").read_text(encoding="utf-8") == (
+            "Customer and analytics table definitions."
+        )
 
         # 2. List agents
         list_resp = await client.get("/api/agents")
@@ -138,7 +151,8 @@ async def test_custom_agents_lifecycle_and_inclusion_in_suggestions(test_app) ->
         del_resp = await client.delete(f"/api/agents/{agent_id}")
         assert del_resp.status_code == 204
 
-        # 5. Confirm deletion
+        # 5. Confirm deletion from store and workspace
         list_resp_2 = await client.get("/api/agents")
         agent_names_2 = [a["name"] for a in list_resp_2.json()]
         assert "sql_analyst" not in agent_names_2
+        assert not agent_dir.exists()

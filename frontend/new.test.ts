@@ -100,11 +100,47 @@ test("creates a new custom agent and refreshes list", async () => {
 
   const form = document.querySelector(".create-agent-form") as HTMLFormElement;
   const inputs = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+  // inputs: [nameInput, emojiInput, descInput, promptArea, soulArea, contextArea]
   inputs[0].value = "writer";
-  inputs[1].value = "Writer agent";
-  inputs[2].value = "Write docs";
+  inputs[1].value = "✍️";
+  inputs[2].value = "Writer agent";
+  inputs[3].value = "Write docs";
 
   form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
 
   await vi.waitFor(() => expect(document.querySelector(".agent-name")?.textContent).toBe("@writer"));
+});
+
+test("renders agent picker cards and selects agent", async () => {
+  const agents = [
+    {
+      id: "platform-main",
+      name: "main",
+      description: "Platform agent",
+      system_prompt: "",
+      is_platform: true,
+      signature_emoji: "🦀",
+    },
+    {
+      id: "agent-123",
+      name: "analyst",
+      description: "Data Analyst",
+      system_prompt: "Analyst prompt",
+      is_platform: false,
+      signature_emoji: "📊",
+    },
+  ];
+
+  vi.stubGlobal("fetch", async () => jsonResponse(agents));
+
+  await import("./new").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelectorAll(".agent-card").length).toBe(2));
+
+  const cards = document.querySelectorAll<HTMLElement>(".agent-card");
+  expect(cards[0].textContent).toContain("@main");
+  expect(cards[1].textContent).toContain("@analyst");
+
+  // Click analyst card
+  cards[1].click();
+  expect(document.querySelector("#active-agent-desc")?.textContent).toContain("📊 analyst");
 });
