@@ -72,3 +72,19 @@ class CustomAgent:
     system_prompt: str
     signature_emoji: str = "🤖"
     created_at: datetime | None = None
+
+
+ScheduleStatus = Literal["active", "paused", "cancelled"]
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleEntry:
+    id: str
+    session_id: str
+    owner_id: str
+    cron_expression: str
+    prompt: str
+    status: ScheduleStatus
+    next_run_at: datetime
+    created_at: datetime
+    last_run_at: datetime | None = None

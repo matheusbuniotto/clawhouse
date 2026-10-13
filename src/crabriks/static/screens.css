@@ -301,6 +301,99 @@
   margin-left: auto;
 }
 
+.schedules-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.schedule-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  background: var(--card);
+}
+
+.schedule-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-cron {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.schedule-prompt {
+  color: var(--text-strong);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.schedule-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.schedule-badge.active {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.schedule-badge.cancelled {
+  background: var(--bg-hover);
+  color: var(--muted);
+}
+
+.schedule-badge.paused {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.btn-cancel-schedule {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.btn-cancel-schedule:hover {
+  border-color: var(--danger);
+  background: var(--danger-subtle);
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
