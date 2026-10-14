@@ -47,7 +47,7 @@ from crabriks.agent.turn import (
 from crabriks.api.identity import Caller, Unauthenticated, resolve_caller
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.schedules import (
-    calculate_next_run,
+    create_schedule_entry,
     schedule_worker,
 )
 from crabriks.capabilities.workspace import (
@@ -686,21 +686,16 @@ def _schedule_routes(app: FastAPI) -> None:
 
         now = datetime.now(UTC)
         try:
-            next_run = calculate_next_run(body.cron_expression, from_time=now)
+            saved = await create_schedule_entry(
+                app.state.store,
+                session_id=canonical,
+                owner_id=caller.user_id,
+                cron_expression=body.cron_expression,
+                prompt=body.prompt,
+                now=now,
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        sch_id = str(uuid4())
-        entry = ScheduleEntry(
-            id=sch_id,
-            session_id=canonical,
-            owner_id=caller.user_id,
-            cron_expression=body.cron_expression,
-            prompt=body.prompt,
-            status="active",
-            next_run_at=next_run,
-            created_at=now,
-        )
-        saved = await app.state.store.create_schedule(entry)
         return ScheduleOut(
             id=saved.id,
             session_id=saved.session_id,
@@ -1098,7 +1093,6 @@ def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
             "usage",
             {
                 "input_tokens": item.input_tokens,
-                "output_tokens": item.output_tokens,
                 "context_window": item.context_window,
             },
         )

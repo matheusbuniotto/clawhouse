@@ -10,14 +10,17 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from croniter import croniter
+
+from crabriks.store.shapes import ScheduleEntry
 
 logger = logging.getLogger("crabriks.schedules")
 
 if TYPE_CHECKING:
     from crabriks.agent.turn import TurnContext
-    from crabriks.store.shapes import ScheduleEntry, TurnResult
+    from crabriks.store.shapes import TurnResult
     from crabriks.store.store import SessionStore
 
 
@@ -88,6 +91,30 @@ def calculate_next_run(cron_expression: str, from_time: datetime | None = None) 
     itr = croniter(cron_expression, now)
     next_ts = itr.get_next(float)
     return datetime.fromtimestamp(next_ts, tz=UTC)
+
+
+async def create_schedule_entry(  # noqa: PLR0913
+    store: SessionStore,
+    *,
+    session_id: str,
+    owner_id: str,
+    cron_expression: str,
+    prompt: str,
+    now: datetime,
+) -> ScheduleEntry:
+    """Persist an active schedule and return the stored row."""
+    return await store.create_schedule(
+        ScheduleEntry(
+            id=str(uuid4()),
+            session_id=session_id,
+            owner_id=owner_id,
+            cron_expression=cron_expression,
+            prompt=prompt,
+            status="active",
+            next_run_at=calculate_next_run(cron_expression, from_time=now),
+            created_at=now,
+        )
+    )
 
 
 async def run_scheduled_turn(
