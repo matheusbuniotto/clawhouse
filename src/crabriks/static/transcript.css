@@ -487,3 +487,37 @@
   padding: 0 12px;
   font-size: var(--font-size-xs);
 }
+
+.approval-note {
+  width: 100%;
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+}
+
+.approval-sheet {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.approval-preview {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-accent);
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.approval-link {
+  font-size: var(--font-size-xs);
+  color: var(--accent);
+  text-decoration: underline;
+}

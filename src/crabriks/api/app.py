@@ -38,6 +38,7 @@ from crabriks.agent.turn import (
     TurnContext,
     TurnNotice,
     TurnResult,
+    UsageNotice,
     canonical_session_id,
     iter_turn,
     resume_turn,
@@ -46,7 +47,7 @@ from crabriks.agent.turn import (
 from crabriks.api.identity import Caller, Unauthenticated, resolve_caller
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.schedules import (
-    calculate_next_run,
+    create_schedule_entry,
     schedule_worker,
 )
 from crabriks.capabilities.workspace import (
@@ -685,21 +686,16 @@ def _schedule_routes(app: FastAPI) -> None:
 
         now = datetime.now(UTC)
         try:
-            next_run = calculate_next_run(body.cron_expression, from_time=now)
+            saved = await create_schedule_entry(
+                app.state.store,
+                session_id=canonical,
+                owner_id=caller.user_id,
+                cron_expression=body.cron_expression,
+                prompt=body.prompt,
+                now=now,
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        sch_id = str(uuid4())
-        entry = ScheduleEntry(
-            id=sch_id,
-            session_id=canonical,
-            owner_id=caller.user_id,
-            cron_expression=body.cron_expression,
-            prompt=body.prompt,
-            status="active",
-            next_run_at=next_run,
-            created_at=now,
-        )
-        saved = await app.state.store.create_schedule(entry)
         return ScheduleOut(
             id=saved.id,
             session_id=saved.session_id,
@@ -1075,23 +1071,37 @@ def _encode(item: TurnNotice | TurnResult) -> bytes:
     return f"event: {event}\ndata: {data}\n\n".encode()
 
 
-def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, str]]:
+def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
+    frame: tuple[str, dict[str, object]]
     if isinstance(item, Token):
-        return "token", {"text": item.text}
-    if isinstance(item, ToolCallNotice):
-        return "tool_call", {"name": item.name, "arguments": item.arguments}
-    if isinstance(item, ToolResultNotice):
-        return "tool_result", {"name": item.name, "content": item.content}
-    if isinstance(item, ApprovalNotice):
-        return "approval_required", {
-            "approval_id": item.approval_id,
-            "name": item.name,
-            "arguments": item.arguments,
-        }
-    return "error", {"status": "error", "reply": "", "error": FAILED_TURN}
+        frame = "token", {"text": item.text}
+    elif isinstance(item, ToolCallNotice):
+        frame = "tool_call", {"name": item.name, "arguments": item.arguments}
+    elif isinstance(item, ToolResultNotice):
+        frame = "tool_result", {"name": item.name, "content": item.content}
+    elif isinstance(item, ApprovalNotice):
+        frame = (
+            "approval_required",
+            {
+                "approval_id": item.approval_id,
+                "name": item.name,
+                "arguments": item.arguments,
+            },
+        )
+    elif isinstance(item, UsageNotice):
+        frame = (
+            "usage",
+            {
+                "input_tokens": item.input_tokens,
+                "context_window": item.context_window,
+            },
+        )
+    else:
+        frame = "error", {"status": "error", "reply": "", "error": FAILED_TURN}
+    return frame
 
 
-def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, str]]:
+def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, object]]:
     if isinstance(item, TurnNotice):
         return _notice_frame(item)
     if item.status == "ok":

@@ -10,6 +10,12 @@ export function el(tag, className, text) {
         node.textContent = text;
     return node;
 }
+export function svgEl(tag, attrs = {}) {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [name, value] of Object.entries(attrs))
+        node.setAttribute(name, value);
+    return node;
+}
 export function relativeTime(iso, now = Date.now()) {
     const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
     if (seconds < 45)

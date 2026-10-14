@@ -6,10 +6,24 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
-from pydantic_ai_harness.compaction import SummarizingCompaction, compact_now
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
+from pydantic_ai_harness.compaction import (
+    ClearToolResults,
+    SummarizingCompaction,
+    TieredCompaction,
+    compact_now,
+)
 
 from crabriks.store.shapes import CustomAgent, TranscriptEntry
 
@@ -23,6 +37,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("crabriks.mentions")
 
 _TABLE_REGEX = re.compile(r"@([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+)")
+_SUMMARY_PREFIX = "Summary of previous conversation:\n\n"
 _FILE_PREFIX_REGEX = re.compile(r"@file:([^\s]+)")
 _FILE_EXT_REGEX = re.compile(r"@([a-zA-Z0-9_\-\./]+\.(?:md|py|json|txt|ya?ml|sql))")
 _AGENT_REGEX = re.compile(r"@([a-zA-Z0-9_]+)(?![\.\:\/])")
@@ -200,13 +215,95 @@ def _transcript_to_messages(transcript: Sequence[TranscriptEntry]) -> list[Model
     return messages
 
 
+@dataclass(frozen=True, slots=True)
+class CompactionResult:
+    """A compacted transcript: the summary checkpoint plus the retained tail."""
+
+    summary: str
+    entries: tuple[TranscriptEntry, ...]
+
+
 def _find_summary_text(compacted: Sequence[ModelMessage]) -> str:
-    for msg in compacted:
-        if isinstance(msg, ModelResponse):
-            for part in msg.parts:
-                if isinstance(part, TextPart) and part.content:
-                    return part.content
+    """The summarizer's prose: the first system part, minus the harness prefix."""
+    for message in compacted:
+        if isinstance(message, ModelRequest):
+            for part in message.parts:
+                if isinstance(part, SystemPromptPart) and part.content:
+                    return part.content.removeprefix(_SUMMARY_PREFIX)
     return "Session context successfully compacted."
+
+
+def _compacted_entries(compacted: Sequence[ModelMessage]) -> tuple[TranscriptEntry, ...]:
+    """Replay a compacted message list back into the transcript it replaces."""
+    entries: list[TranscriptEntry] = []
+    for message in compacted:
+        for part in message.parts:
+            entry = _entry_from_part(part)
+            if entry is not None:
+                entries.append(entry)
+    return tuple(entries)
+
+
+def _entry_from_part(part: object) -> TranscriptEntry | None:
+    if isinstance(part, SystemPromptPart):
+        return _summary_entry(part)
+    if isinstance(part, UserPromptPart | TextPart):
+        return _text_entry(part)
+    if isinstance(part, ToolCallPart | ToolReturnPart):
+        return _tool_entry(part)
+    return None
+
+
+def _summary_entry(part: SystemPromptPart) -> TranscriptEntry | None:
+    summary = part.content.removeprefix(_SUMMARY_PREFIX)
+    return TranscriptEntry(role="assistant", content=summary) if summary else None
+
+
+def _text_entry(part: UserPromptPart | TextPart) -> TranscriptEntry | None:
+    content = part.content
+    if not isinstance(content, str) or not content:
+        return None
+    if isinstance(part, UserPromptPart):
+        return TranscriptEntry(role="user", content=content)
+    return TranscriptEntry(role="assistant", content=content)
+
+
+def _tool_entry(part: ToolCallPart | ToolReturnPart) -> TranscriptEntry:
+    if isinstance(part, ToolCallPart):
+        return TranscriptEntry(
+            role="tool_call",
+            content=part.args_as_json_str(),
+            tool_name=part.tool_name,
+            tool_call_id=part.tool_call_id,
+        )
+    return TranscriptEntry(
+        role="tool_result",
+        content=str(part.content),
+        tool_name=part.tool_name,
+        tool_call_id=part.tool_call_id,
+    )
+
+
+def tiered_compaction(
+    *,
+    target_tokens: int | None = None,
+    target_fraction: float | None = None,
+    keep_messages: int = 20,
+    preserve_first_user_message: bool = True,
+) -> TieredCompaction[Any]:
+    """Cheap-first compaction: clear stale tool results, summarize only if still over budget."""
+    return TieredCompaction(
+        tiers=[
+            ClearToolResults(max_tokens=1),
+            SummarizingCompaction(
+                max_messages=1,
+                keep_messages=keep_messages,
+                preserve_first_user_message=preserve_first_user_message,
+            ),
+        ],
+        target_tokens=target_tokens,
+        target_fraction=target_fraction,
+    )
 
 
 async def execute_compaction(
@@ -214,12 +311,18 @@ async def execute_compaction(
     session_id: str,
     owner_id: str,
     model: Model,
-) -> str:
+) -> CompactionResult:
     transcript = await store.transcript(session_id, owner_id)
     if not transcript:
-        return "No session history to compact."
+        return CompactionResult(summary="No session history to compact.", entries=())
 
     messages = _transcript_to_messages(transcript)
-    strategy = SummarizingCompaction(max_messages=1, keep_messages=1)
+    # keep_messages=1 + target_tokens=1 force the tiered policy to the summarization tier.
+    strategy = tiered_compaction(
+        target_tokens=1, keep_messages=1, preserve_first_user_message=False
+    )
     compacted = await compact_now(strategy, messages, model=model)
-    return _find_summary_text(compacted)
+    return CompactionResult(
+        summary=_find_summary_text(compacted),
+        entries=_compacted_entries(compacted),
+    )

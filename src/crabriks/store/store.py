@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
@@ -56,10 +57,6 @@ CREATE TABLE IF NOT EXISTS crabriks.runs (
     finished_at timestamptz,
     CONSTRAINT runs_status_known CHECK (status IN ('running', 'ok', 'error', 'pending_approval'))
 );
-
-ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
-ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
-    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS runs_one_running_per_session
     ON crabriks.runs (session_id)
@@ -154,6 +151,8 @@ class SessionStore(Protocol):
     async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]: ...
 
     async def delete_session(self, session_id: str, owner_id: str) -> bool: ...
+
+    async def clear_transcript(self, session_id: str, owner_id: str) -> None: ...
 
     async def claim_run(self, session_id: str) -> str: ...
 
@@ -336,6 +335,15 @@ class MemorySessionStore:
                 raise SessionForbidden(session_id)
             return tuple(session.entries)
 
+    async def clear_transcript(self, session_id: str, owner_id: str) -> None:
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFound(session_id)
+            if session.owner_id != owner_id:
+                raise SessionForbidden(session_id)
+            session.entries.clear()
+
     async def create_approval(
         self,
         *,
@@ -497,19 +505,23 @@ class LakebaseSessionStore:
         self._pool = pool
 
     async def migrate(self) -> None:
-        await self._pool.execute(SCHEMA)
-        await self._pool.execute(
-            """
-            DO $$
-            BEGIN
-                ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
-                ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
-                    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
-            EXCEPTION
-                WHEN undefined_table THEN NULL;
-            END $$;
-            """
-        )
+        try:
+            await self._pool.execute(SCHEMA)
+        except asyncpg.InsufficientPrivilegeError:
+            logger.info("Skipping SCHEMA creation: insufficient privilege (tables already exist)")
+        with suppress(asyncpg.InsufficientPrivilegeError):
+            await self._pool.execute(
+                """
+                DO $$
+                BEGIN
+                    ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+                    ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+                        CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+                EXCEPTION
+                    WHEN undefined_table OR insufficient_privilege THEN NULL;
+                END $$;
+                """
+            )
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
         session = _uuid(session_id)
@@ -681,6 +693,13 @@ class LakebaseSessionStore:
             return tuple(_entry_from_row(row) for row in rows)
         await self._require_owner(session_id, owner_id)
         return ()
+
+    async def clear_transcript(self, session_id: str, owner_id: str) -> None:
+        await self._require_owner(session_id, owner_id)
+        await self._pool.execute(
+            "DELETE FROM crabriks.transcript_entries WHERE session_id = $1",
+            _uuid(session_id),
+        )
 
     async def delete_session(self, session_id: str, owner_id: str) -> bool:
         await self._require_owner(session_id, owner_id)

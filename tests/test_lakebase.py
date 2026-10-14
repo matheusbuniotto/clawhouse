@@ -11,7 +11,7 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from crabriks.shapes import TranscriptEntry, UserProfile
-from crabriks.store import LakebaseSessionStore, RunInProgress
+from crabriks.store import LakebaseSessionStore, RunInProgress, SessionForbidden
 from crabriks.turn import TurnContext, run_turn
 
 pytestmark = pytest.mark.skipif(
@@ -117,6 +117,27 @@ async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg
         TranscriptEntry(role="assistant", content="saved"),
     )
     assert await store.transcript(SESSION, OWNER) == result.transcript
+
+
+async def test_lakebase_clear_transcript_empties_history_and_guards_ownership() -> None:
+    pool = await _pool()
+    store = LakebaseSessionStore(pool)
+    try:
+        await store.migrate()
+        await pool.execute(
+            "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+        )
+        session = await store.create_session(OWNER)
+        run_id = await store.claim_run(session.id)
+        await store.append_entry(session.id, run_id, TranscriptEntry(role="user", content="hi"))
+        await store.finish_run(session.id, run_id, "ok")
+
+        await store.clear_transcript(session.id, OWNER)
+        assert await store.transcript(session.id, OWNER) == ()
+        with pytest.raises(SessionForbidden):
+            await store.clear_transcript(session.id, "grace@example.com")
+    finally:
+        await store.close()
 
 
 async def test_migration_upgrades_existing_runs_status_constraint() -> None:

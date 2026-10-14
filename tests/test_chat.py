@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -97,8 +98,8 @@ def _catalog_settings(models: tuple[ModelEntry, ...]) -> Settings:
     )
 
 
-def _events(body: str) -> list[tuple[str, dict[str, str]]]:
-    frames: list[tuple[str, dict[str, str]]] = []
+def _events(body: str) -> list[tuple[str, dict[str, Any]]]:
+    frames: list[tuple[str, dict[str, Any]]] = []
     for raw in body.split("\n\n"):
         if not raw.strip():
             continue
@@ -281,8 +282,18 @@ async def test_a_turn_streams_over_sse_and_survives_reload() -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _events(response.text)
-    assert [event for event, _ in events] == ["tool_call", "tool_result", "token", "token", "done"]
+    assert [event for event, _ in events] == [
+        "tool_call",
+        "tool_result",
+        "token",
+        "token",
+        "usage",
+        "done",
+    ]
     assert events[-1][1] == {"status": "ok", "reply": "The time is 2026-10-10T12:00:00Z"}
+    usage = dict(events)["usage"]
+    assert usage["input_tokens"] > 0
+    assert usage["context_window"] is None
     assert "dapi-secret" not in response.text
     roles = [entry["role"] for entry in reloaded.json()["entries"]]
     assert roles == ["user", "tool_call", "tool_result", "assistant"]
