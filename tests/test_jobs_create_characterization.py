@@ -55,7 +55,7 @@ def _ctx(client: MagicMock, store: MemorySessionStore, model: FunctionModel) -> 
         store=store,
         model=model,
         now=lambda: datetime(2026, 10, 14, 12, 0, 0, tzinfo=UTC),
-        user_token="user-obo-token",
+        user_token="fake-user-credential",
         databricks_capability=DatabricksCapability(
             client_factory=lambda _token: client, warehouse_id="wh-1"
         ),
@@ -251,9 +251,9 @@ def test_read_only_jobs_tools_are_not_in_the_approval_set(tool: str) -> None:
 
 def test_default_client_uses_user_token_as_pat_when_given() -> None:
     with patch.object(databricks_module, "WorkspaceClient") as workspace_client:
-        default_workspace_client("user-obo-token")
+        default_workspace_client("fake-user-credential")
 
-    workspace_client.assert_called_once_with(token="user-obo-token", auth_type="pat")
+    workspace_client.assert_called_once_with(token="fake-user-credential", auth_type="pat")
 
 
 def test_default_client_without_token_uses_ambient_auth() -> None:
@@ -266,9 +266,9 @@ def test_default_client_without_token_uses_ambient_auth() -> None:
 def test_default_client_falls_back_to_ambient_when_user_token_client_fails() -> None:
     ambient = MagicMock(name="ambient")
     with patch.object(
-        databricks_module, "WorkspaceClient", side_effect=[ValueError("bad token"), ambient]
+        databricks_module, "WorkspaceClient", side_effect=[ValueError("bad credential"), ambient]
     ) as workspace_client:
-        client = default_workspace_client("user-obo-token")
+        client = default_workspace_client("fake-user-credential")
 
     assert client is ambient
     assert workspace_client.call_args_list[1].args == ()
@@ -312,7 +312,7 @@ def test_capability_toolset_falls_back_to_ambient_when_user_client_factory_fails
         raise RuntimeError("user client unavailable")
 
     cap = DatabricksCapability(
-        client_factory=failing_factory, warehouse_id="wh-1", user_token="user-obo-token"
+        client_factory=failing_factory, warehouse_id="wh-1", user_token="fake-user-credential"
     )
     with patch.object(databricks_module, "WorkspaceClient") as workspace_client:
         toolset = cap.get_toolset()
