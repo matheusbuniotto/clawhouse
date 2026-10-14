@@ -125,7 +125,7 @@ test("fills the context ring from a usage frame", async () => {
   await vi.waitFor(() =>
     expect(document.querySelector("#ctx-meter")?.getAttribute("data-level")).toBe("warn"),
   );
-  expect(document.querySelector(".ctx-label")?.textContent).toBe("50%");
+  expect(document.querySelector(".ctx-label")?.textContent).toBe("150k");
 });
 
 test("a failed turn marks the running tool row and reports inline", async () => {

@@ -98,6 +98,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let contextTokens = 0;
   let contextWindow: number | null = null;
 
+  function formatTokens(value: number): string {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+    if (value >= 1_000) return `${Math.round(value / 1000)}k`;
+    return String(value);
+  }
+
   // Absolute pressure thresholds for the sent-context size.
   function usageLevel(tokens: number): string {
     if (tokens >= 300_000) return "danger";
@@ -113,7 +119,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     const ratio = denominator > 0 ? Math.min(1, contextTokens / denominator) : 0;
     meter.dataset.level = usageLevel(contextTokens);
     ringFill.setAttribute("stroke-dashoffset", String(ringCircumference * (1 - ratio)));
-    meterLabel.textContent = contextWindow ? `${Math.round(ratio * 100)}%` : "?";
+    meterLabel.textContent = formatTokens(contextTokens);
     const detail = contextWindow
       ? `${contextTokens.toLocaleString()} / ${contextWindow.toLocaleString()} input tokens`
       : `${contextTokens.toLocaleString()} input tokens; context window unknown`;
