@@ -124,11 +124,13 @@ async def test_compact_command_creates_summary_checkpoint() -> None:
 
     result = await run_turn(session_id, "/compact", ctx=ctx)
     assert result.status == "ok"
-    assert "compact" in result.reply.lower()
 
-    # Verify transcript now has summary checkpoint
+    # The tiered policy replaces the old history with the summary checkpoint...
     transcript = await store.transcript(session_id, OWNER)
-    assert any("compact" in e.content.lower() or "summary" in e.content.lower() for e in transcript)
+    assert any(entry.content == "This is a compacted summary." for entry in transcript)
+    assert all(
+        "Turn 1" not in entry.content and "Reply 1" not in entry.content for entry in transcript
+    )
 
 
 @pytest.mark.asyncio

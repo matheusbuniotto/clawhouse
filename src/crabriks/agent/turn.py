@@ -9,15 +9,15 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from pydantic_ai import AgentRunResult, DeferredToolRequests, RunContext
-from pydantic_ai.capabilities import AbstractCapability, AgentCapability, CapabilityOrdering
-from pydantic_ai.capabilities._deferred_capability_loader import DeferredCapabilityLoader
+from pydantic_ai import DeferredToolRequests, RunContext
+from pydantic_ai.capabilities import AbstractCapability, AgentCapability
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    ModelMessage,
     ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
@@ -26,14 +26,12 @@ from pydantic_ai.messages import (
     ToolCallPart,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.tools import DeferredToolResults, ToolApproved, ToolDefinition, ToolDenied
-from pydantic_ai.toolsets import (
-    AbstractToolset,
-    AgentToolset,
-    ApprovalRequiredToolset,
-    FunctionToolset,
-)
+from pydantic_ai.tools import DeferredToolResults, ToolApproved, ToolDenied
+from pydantic_ai.toolsets import AbstractToolset, AgentToolset, FunctionToolset
+from pydantic_ai_harness.compaction import ContextUsageEvent, ReportContextUsage
+from pydantic_ai_harness.guardrails import GuardrailResult, ToolCallInfo, ToolGuardrail
 
+from crabriks.agent.commands import Command, CommandContext, dispatch_command, parse_command
 from crabriks.agent.core import TurnDeps, crabriks_agent, format_utc
 from crabriks.agent.history import to_model_messages
 from crabriks.agent.prompt import (
@@ -51,17 +49,12 @@ from crabriks.capabilities.bootstrap import (
 )
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
-from crabriks.capabilities.mentions import execute_compaction, resolve_mention_bundles
-from crabriks.capabilities.schedules import (
-    calculate_next_run,
-    parse_schedule_command,
-)
+from crabriks.capabilities.mentions import resolve_mention_bundles, tiered_compaction
 from crabriks.capabilities.sheets import GOOGLE_SHEETS_TOOL_CARDS, GoogleSheetsCapability
 from crabriks.capabilities.skills import loaded_skill_text, skills_capability
 from crabriks.capabilities.workspace import WorkspacePaths
 from crabriks.store.shapes import (
     ApprovalEntry,
-    ScheduleEntry,
     TranscriptEntry,
     TurnResult,
     TurnStatus,
@@ -124,7 +117,6 @@ class UsageNotice:
     """Input tokens of the last model request: the context as sent to the model."""
 
     input_tokens: int
-    output_tokens: int
     context_window: int | None
 
 
@@ -332,27 +324,15 @@ def _status(holder: list[TurnResult]) -> TurnStatus:
     return holder[0].status
 
 
-@dataclass
-class SensitiveToolGate(AbstractCapability[TurnDeps]):
-    """Pause every listed tool through the one wrapper around the assembled toolset."""
+def _sensitive_tool_guard(names: frozenset[str]) -> ToolGuardrail[TurnDeps]:
+    """Defer every listed tool through the harness-native approval flow."""
 
-    names: frozenset[str]
+    def guard(call: ToolCallInfo) -> GuardrailResult:
+        if call.name in names:
+            return GuardrailResult.approve()
+        return GuardrailResult.allow()
 
-    def get_ordering(self) -> CapabilityOrdering:
-        # The loader handles `load_capability` itself, so the gate has to sit outside it.
-        return CapabilityOrdering(position="outermost", wraps=(DeferredCapabilityLoader,))
-
-    def get_wrapper_toolset(self, toolset: AbstractToolset[TurnDeps]) -> AbstractToolset[TurnDeps]:
-        names = self.names
-
-        def approval_required(
-            _ctx: RunContext[TurnDeps],
-            tool_def: ToolDefinition,
-            _args: dict[str, object],
-        ) -> bool:
-            return tool_def.name in names
-
-        return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)
+    return ToolGuardrail(guard=guard)
 
 
 SAVE_PROFILE_NAME = "save_profile"
@@ -497,8 +477,11 @@ def _capabilities_for_turn(
     if skills is not None:
         capabilities.append(skills)
     if claimed.ctx.sensitive_tools:
-        capabilities.append(SensitiveToolGate(frozenset(claimed.ctx.sensitive_tools)))
-    return capabilities or None
+        capabilities.append(_sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)))
+    # Compact the in-run history when it approaches the window, then report what was sent.
+    capabilities.append(tiered_compaction(target_fraction=0.8))
+    capabilities.append(ReportContextUsage())
+    return capabilities
 
 
 def _prompt_for(
@@ -526,80 +509,24 @@ def _prompt_for(
     )
 
 
-def usage_notice(
-    ctx: TurnContext, result: AgentRunResult[str | DeferredToolRequests]
-) -> UsageNotice:
-    """The last request's prompt size — what the next turn will send to the model."""
-    input_tokens = 0
-    output_tokens = 0
-    for message in result.all_messages():
-        if isinstance(message, ModelResponse):
-            input_tokens = message.usage.input_tokens or 0
-            output_tokens = message.usage.output_tokens or 0
+def _usage_notice(event: ContextUsageEvent) -> UsageNotice:
+    """Native context reporting replaced the post-run scan of model messages."""
     return UsageNotice(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        context_window=ctx.model.context_window,
+        input_tokens=event.used_tokens,
+        context_window=event.window_tokens if event.resolved else None,
     )
 
 
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
+    command = parse_command(claimed.user_message)
+    if command is not None:
+        return await _run_command(claimed, command)
+
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
     await _append_user(claimed)
-    mcp = await mcp_capability(
-        ctx.mcp_servers,
-        ctx.user_token,
-        toolset_factory=ctx.mcp_toolset_factory,
-    )
-    if claimed.user_message.strip() == "/compact":
-        summary = await execute_compaction(ctx.store, claimed.session_id, ctx.owner_id, ctx.model)
-        reply = f"Conversation history compacted successfully.\n\nSummary:\n{summary}"
-        await _append(claimed, TranscriptEntry(role="assistant", content=reply))
-        transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
-        return TurnResult(
-            session_id=claimed.session_id,
-            status="ok",
-            reply=reply,
-            error=None,
-            transcript=transcript,
-        )
-
-    parsed_schedule = parse_schedule_command(claimed.user_message)
-    if parsed_schedule is not None:
-        now = ctx.now()
-        next_run = calculate_next_run(parsed_schedule.cron_expression, from_time=now)
-        sch_id = str(uuid4())
-        sch_entry = ScheduleEntry(
-            id=sch_id,
-            session_id=claimed.session_id,
-            owner_id=ctx.owner_id,
-            cron_expression=parsed_schedule.cron_expression,
-            prompt=parsed_schedule.prompt,
-            status="active",
-            next_run_at=next_run,
-            created_at=now,
-        )
-        await ctx.store.create_schedule(sch_entry)
-        reply = (
-            f"⏰ Scheduled automation created successfully!\n\n"
-            f"- **Schedule ID**: `{sch_id}`\n"
-            f"- **Cron Expression**: `{parsed_schedule.cron_expression}`\n"
-            f"- **First Run At**: `{next_run.isoformat()}`\n"
-            f"- **Instruction**: {parsed_schedule.prompt}"
-        )
-        await _append(claimed, TranscriptEntry(role="assistant", content=reply))
-        transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
-        return TurnResult(
-            session_id=claimed.session_id,
-            status="ok",
-            reply=reply,
-            error=None,
-            transcript=transcript,
-        )
-
     bundle = await resolve_mention_bundles(
         claimed.user_message,
         store=ctx.store,
@@ -611,32 +538,33 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     user_prompt = claimed.user_message
     if bundle.injected_context:
         user_prompt = f"{claimed.user_message}\n\n[Injected Context]\n{bundle.injected_context}"
-
-    prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
-    result = await crabriks_agent().run(
-        user_prompt,
-        message_history=to_model_messages(prior) or None,
-        model=ctx.model,
-        instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now),
-        event_stream_handler=_persist_and_emit(claimed, queue),
-        capabilities=_capabilities_for_turn(claimed, mcp, birth_ritual=birth_ritual),
+    return await _invoke_agent(
+        claimed,
+        queue,
+        profile=profile,
+        birth_ritual=birth_ritual,
+        user_prompt=user_prompt,
+        history=to_model_messages(prior) or None,
     )
-    await _publish(ctx, queue, usage_notice(ctx, result))
 
-    if isinstance(result.output, DeferredToolRequests):
-        return await _handle_deferred_approvals(claimed, queue, result.output)
-    raw_reply = result.output if isinstance(result.output, str) else str(result.output)
-    reply = scrub_token(raw_reply, ctx.user_token) if ctx.user_token else raw_reply
-    await _append(claimed, TranscriptEntry(role="assistant", content=reply))
-    transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
-    return TurnResult(
-        session_id=claimed.session_id,
-        status="ok",
-        reply=reply,
-        error=None,
-        transcript=transcript,
+
+async def _run_command(claimed: _Claimed, command: Command) -> TurnResult:
+    await _append_user(claimed)
+    outcome = await dispatch_command(
+        command,
+        ctx=CommandContext(
+            store=claimed.ctx.store,
+            session_id=claimed.session_id,
+            owner_id=claimed.ctx.owner_id,
+            model=claimed.ctx.model,
+            now=claimed.ctx.now(),
+        ),
     )
+    if outcome.replacement is not None:
+        await claimed.ctx.store.clear_transcript(claimed.session_id, claimed.ctx.owner_id)
+        for entry in outcome.replacement:
+            await _append(claimed, entry)
+    return await _ok_result(claimed, outcome.reply)
 
 
 async def _run_model_resume(
@@ -649,16 +577,10 @@ async def _run_model_resume(
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
-    mcp = await mcp_capability(
-        ctx.mcp_servers,
-        ctx.user_token,
-        toolset_factory=ctx.mcp_toolset_factory,
-    )
-    prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
-    history = to_model_messages(prior)
     call_args = approval.arguments
     if ctx.user_token and "[REDACTED]" in call_args:
         call_args = call_args.replace("[REDACTED]", ctx.user_token)
+    history = to_model_messages(prior)
     history.append(
         ModelResponse(
             parts=[
@@ -670,29 +592,65 @@ async def _run_model_resume(
             ]
         )
     )
-    deferred_results = _deferred_results(approval, decision)
+    return await _invoke_agent(
+        claimed,
+        queue,
+        profile=profile,
+        birth_ritual=birth_ritual,
+        history=history,
+        deferred_results=_deferred_results(approval, decision),
+        skip_tool_call_id=approval.tool_call_id,
+    )
+
+
+async def _invoke_agent(  # noqa: PLR0913
+    claimed: _Claimed,
+    queue: _Queue,
+    *,
+    profile: UserProfile | None,
+    birth_ritual: bool,
+    user_prompt: str | None = None,
+    history: list[ModelMessage] | None = None,
+    deferred_results: DeferredToolResults | None = None,
+    skip_tool_call_id: str | None = None,
+) -> TurnResult:
+    ctx = claimed.ctx
+    mcp = await mcp_capability(
+        ctx.mcp_servers,
+        ctx.user_token,
+        toolset_factory=ctx.mcp_toolset_factory,
+    )
+    prompt = _prompt_for(claimed, mcp, profile=profile, birth_ritual=birth_ritual)
+    usage: list[UsageNotice] = []
     result = await crabriks_agent().run(
+        user_prompt,
         message_history=history,
         deferred_tool_results=deferred_results,
         model=ctx.model,
         instructions=prompt.text,
         deps=TurnDeps(now=ctx.now),
         event_stream_handler=_persist_and_emit(
-            claimed, queue, skip_tool_call_id=approval.tool_call_id
+            claimed, queue, skip_tool_call_id=skip_tool_call_id, usage=usage
         ),
         capabilities=_capabilities_for_turn(claimed, mcp, birth_ritual=birth_ritual),
     )
-    await _publish(ctx, queue, usage_notice(ctx, result))
+    if usage:
+        await _publish(ctx, queue, usage[0])
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
     raw_reply = result.output if isinstance(result.output, str) else str(result.output)
-    reply = scrub_token(raw_reply, ctx.user_token) if ctx.user_token else raw_reply
-    await _append(claimed, TranscriptEntry(role="assistant", content=reply))
-    transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+    return await _ok_result(claimed, raw_reply)
+
+
+async def _ok_result(claimed: _Claimed, reply: str) -> TurnResult:
+    token = claimed.ctx.user_token
+    scrubbed = scrub_token(reply, token) if token else reply
+    await _append(claimed, TranscriptEntry(role="assistant", content=scrubbed))
+    transcript = await claimed.ctx.store.transcript(claimed.session_id, claimed.ctx.owner_id)
     return TurnResult(
         session_id=claimed.session_id,
         status="ok",
-        reply=reply,
+        reply=scrubbed,
         error=None,
         transcript=transcript,
     )
@@ -815,6 +773,7 @@ def _persist_and_emit(
     queue: _Queue,
     *,
     skip_tool_call_id: str | None = None,
+    usage: list[UsageNotice] | None = None,
 ):
     async def handle(
         run_ctx: RunContext[TurnDeps],
@@ -823,6 +782,10 @@ def _persist_and_emit(
         del run_ctx
         token = claimed.ctx.user_token
         async for event in events:
+            if isinstance(event, ContextUsageEvent):
+                if usage is not None:
+                    usage[:] = [_usage_notice(event)]
+                continue
             notice = notice_from(event)
             if notice is None:
                 continue

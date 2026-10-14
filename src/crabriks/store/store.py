@@ -152,6 +152,8 @@ class SessionStore(Protocol):
 
     async def delete_session(self, session_id: str, owner_id: str) -> bool: ...
 
+    async def clear_transcript(self, session_id: str, owner_id: str) -> None: ...
+
     async def claim_run(self, session_id: str) -> str: ...
 
     async def append_entry(self, session_id: str, run_id: str, entry: TranscriptEntry) -> None: ...
@@ -332,6 +334,15 @@ class MemorySessionStore:
             if session.owner_id != owner_id:
                 raise SessionForbidden(session_id)
             return tuple(session.entries)
+
+    async def clear_transcript(self, session_id: str, owner_id: str) -> None:
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFound(session_id)
+            if session.owner_id != owner_id:
+                raise SessionForbidden(session_id)
+            session.entries.clear()
 
     async def create_approval(
         self,
@@ -682,6 +693,13 @@ class LakebaseSessionStore:
             return tuple(_entry_from_row(row) for row in rows)
         await self._require_owner(session_id, owner_id)
         return ()
+
+    async def clear_transcript(self, session_id: str, owner_id: str) -> None:
+        await self._require_owner(session_id, owner_id)
+        await self._pool.execute(
+            "DELETE FROM crabriks.transcript_entries WHERE session_id = $1",
+            _uuid(session_id),
+        )
 
     async def delete_session(self, session_id: str, owner_id: str) -> bool:
         await self._require_owner(session_id, owner_id)
