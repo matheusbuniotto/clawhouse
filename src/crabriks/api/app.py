@@ -38,6 +38,7 @@ from crabriks.agent.turn import (
     TurnContext,
     TurnNotice,
     TurnResult,
+    UsageNotice,
     canonical_session_id,
     iter_turn,
     resume_turn,
@@ -1075,23 +1076,38 @@ def _encode(item: TurnNotice | TurnResult) -> bytes:
     return f"event: {event}\ndata: {data}\n\n".encode()
 
 
-def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, str]]:
+def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
+    frame: tuple[str, dict[str, object]]
     if isinstance(item, Token):
-        return "token", {"text": item.text}
-    if isinstance(item, ToolCallNotice):
-        return "tool_call", {"name": item.name, "arguments": item.arguments}
-    if isinstance(item, ToolResultNotice):
-        return "tool_result", {"name": item.name, "content": item.content}
-    if isinstance(item, ApprovalNotice):
-        return "approval_required", {
-            "approval_id": item.approval_id,
-            "name": item.name,
-            "arguments": item.arguments,
-        }
-    return "error", {"status": "error", "reply": "", "error": FAILED_TURN}
+        frame = "token", {"text": item.text}
+    elif isinstance(item, ToolCallNotice):
+        frame = "tool_call", {"name": item.name, "arguments": item.arguments}
+    elif isinstance(item, ToolResultNotice):
+        frame = "tool_result", {"name": item.name, "content": item.content}
+    elif isinstance(item, ApprovalNotice):
+        frame = (
+            "approval_required",
+            {
+                "approval_id": item.approval_id,
+                "name": item.name,
+                "arguments": item.arguments,
+            },
+        )
+    elif isinstance(item, UsageNotice):
+        frame = (
+            "usage",
+            {
+                "input_tokens": item.input_tokens,
+                "output_tokens": item.output_tokens,
+                "context_window": item.context_window,
+            },
+        )
+    else:
+        frame = "error", {"status": "error", "reply": "", "error": FAILED_TURN}
+    return frame
 
 
-def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, str]]:
+def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, object]]:
     if isinstance(item, TurnNotice):
         return _notice_frame(item)
     if item.status == "ok":

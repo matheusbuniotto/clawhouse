@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic_ai import DeferredToolRequests, RunContext
+from pydantic_ai import AgentRunResult, DeferredToolRequests, RunContext
 from pydantic_ai.capabilities import AbstractCapability, AgentCapability, CapabilityOrdering
 from pydantic_ai.capabilities._deferred_capability_loader import DeferredCapabilityLoader
 from pydantic_ai.messages import (
@@ -119,7 +119,16 @@ class ApprovalNotice:
     tool_call_id: str
 
 
-TurnNotice = Token | ToolCallNotice | ToolResultNotice | ApprovalNotice
+@dataclass(frozen=True, slots=True)
+class UsageNotice:
+    """Input tokens of the last model request: the context as sent to the model."""
+
+    input_tokens: int
+    output_tokens: int
+    context_window: int | None
+
+
+TurnNotice = Token | ToolCallNotice | ToolResultNotice | ApprovalNotice | UsageNotice
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
 MCPToolsetFactory = Callable[[MCPServerConfig, str], AbstractToolset[object]]
@@ -517,6 +526,23 @@ def _prompt_for(
     )
 
 
+def usage_notice(
+    ctx: TurnContext, result: AgentRunResult[str | DeferredToolRequests]
+) -> UsageNotice:
+    """The last request's prompt size — what the next turn will send to the model."""
+    input_tokens = 0
+    output_tokens = 0
+    for message in result.all_messages():
+        if isinstance(message, ModelResponse):
+            input_tokens = message.usage.input_tokens or 0
+            output_tokens = message.usage.output_tokens or 0
+    return UsageNotice(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        context_window=ctx.model.context_window,
+    )
+
+
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
@@ -596,6 +622,7 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         event_stream_handler=_persist_and_emit(claimed, queue),
         capabilities=_capabilities_for_turn(claimed, mcp, birth_ritual=birth_ritual),
     )
+    await _publish(ctx, queue, usage_notice(ctx, result))
 
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
@@ -655,6 +682,7 @@ async def _run_model_resume(
         ),
         capabilities=_capabilities_for_turn(claimed, mcp, birth_ritual=birth_ritual),
     )
+    await _publish(ctx, queue, usage_notice(ctx, result))
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
     raw_reply = result.output if isinstance(result.output, str) else str(result.output)
@@ -912,6 +940,7 @@ __all__ = [
     "ToolResultNotice",
     "TurnContext",
     "TurnNotice",
+    "UsageNotice",
     "is_wake_up_message",
     "iter_resume_turn",
     "iter_turn",

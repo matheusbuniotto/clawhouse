@@ -100,6 +100,34 @@ test("streams a turn into markdown and a shared tool row", async () => {
   expect(document.querySelector("#status")?.textContent).toBe("");
 });
 
+test("fills the context ring from a usage frame", async () => {
+  const frames =
+    'event: usage\ndata: {"input_tokens":150000,"output_tokens":12,"context_window":300000}\n\n' +
+    'event: done\ndata: {"status":"ok","reply":"ok"}\n\n';
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") {
+      return jsonResponse({ models: [{ id: "m", label: "M", default: true }] });
+    }
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
+
+  (document.querySelector("#message") as HTMLTextAreaElement).value = "hello";
+  document
+    .querySelector("#composer")
+    ?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  await vi.waitFor(() =>
+    expect(document.querySelector("#ctx-meter")?.getAttribute("data-level")).toBe("warn"),
+  );
+  expect(document.querySelector(".ctx-label")?.textContent).toBe("150k");
+});
+
 test("a failed turn marks the running tool row and reports inline", async () => {
   const frames =
     'event: tool_call\ndata: {"name":"lookup","arguments":"{}"}\n\n' +
