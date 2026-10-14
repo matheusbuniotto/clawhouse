@@ -9,9 +9,12 @@ import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from crabriks.agent.history import to_model_messages
 from crabriks.agent.turn import TurnContext, run_turn
 from crabriks.capabilities.databricks import DatabricksCapability
 from crabriks.capabilities.mentions import (
+    CompactionResult,
+    execute_compaction,
     extract_agent_mentions,
     extract_file_mentions,
     extract_skill_mentions,
@@ -131,6 +134,58 @@ async def test_compact_command_creates_summary_checkpoint() -> None:
     assert all(
         "Turn 1" not in entry.content and "Reply 1" not in entry.content for entry in transcript
     )
+
+
+@pytest.mark.asyncio
+async def test_compact_empty_session_reports_nothing_to_compact() -> None:
+    store = MemorySessionStore()
+    session_id = "55555555-5555-4555-8555-555555555555"
+    await store.open_session(session_id, OWNER)
+
+    def explode(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        raise AssertionError("an empty transcript must not call the summarizer")
+
+    result = await execute_compaction(store, session_id, OWNER, FunctionModel(function=explode))
+
+    assert result == CompactionResult(summary="No session history to compact.", entries=())
+
+
+@pytest.mark.asyncio
+async def test_compact_rewrites_tool_history_into_a_replayable_checkpoint() -> None:
+    store = MemorySessionStore()
+    session_id = "66666666-6666-4666-8666-666666666666"
+    await store.open_session(session_id, OWNER)
+    run_id = await store.claim_run(session_id)
+    for entry in (
+        TranscriptEntry(role="user", content="what time is it?"),
+        TranscriptEntry(role="tool_call", content="{}", tool_name="clock", tool_call_id="c1"),
+        TranscriptEntry(role="tool_result", content="12:00", tool_name="clock", tool_call_id="c1"),
+        TranscriptEntry(role="assistant", content="The time is 12:00"),
+    ):
+        await store.append_entry(session_id, run_id, entry)
+    await store.finish_run(session_id, run_id, "ok")
+
+    def sync_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        del messages, info
+        return ModelResponse(parts=[TextPart(content="Compacted tool history.")])
+
+    result = await run_turn(
+        session_id,
+        "/compact",
+        ctx=TurnContext(
+            owner_id=OWNER,
+            store=store,
+            model=FunctionModel(function=sync_fn),
+            now=lambda: NOW,
+        ),
+    )
+
+    assert result.status == "ok"
+    assert any(entry.content == "Compacted tool history." for entry in result.transcript)
+    assert all(entry.role != "tool_call" for entry in result.transcript)
+    # The rewritten transcript replays as valid model messages (no orphaned tool pair).
+    assert to_model_messages(result.transcript)
 
 
 @pytest.mark.asyncio
