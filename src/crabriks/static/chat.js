@@ -1,4 +1,4 @@
-import { el } from "./dom.js";
+import { el, svgEl } from "./dom.js";
 import { appendToolActivity, markRunningToolsError, renderAssistantTurn, renderInlineApproval, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "crabriks.session";
 const MODEL_KEY = "crabriks.model";
@@ -24,25 +24,17 @@ export function mount(root, ctx) {
     const meter = el("div", "ctx-meter");
     meter.id = "ctx-meter";
     meter.dataset.level = "ok";
-    const ringRadius = 15.5;
-    const ringCircumference = 2 * Math.PI * ringRadius;
-    const svgNs = "http://www.w3.org/2000/svg";
-    const ring = document.createElementNS(svgNs, "svg");
-    ring.setAttribute("viewBox", "0 0 36 36");
-    ring.setAttribute("class", "ctx-ring");
-    ring.setAttribute("aria-hidden", "true");
-    const ringTrack = document.createElementNS(svgNs, "circle");
-    ringTrack.setAttribute("class", "ctx-track");
-    const ringFill = document.createElementNS(svgNs, "circle");
-    ringFill.setAttribute("class", "ctx-fill");
-    for (const circle of [ringTrack, ringFill]) {
-        circle.setAttribute("cx", "18");
-        circle.setAttribute("cy", "18");
-        circle.setAttribute("r", String(ringRadius));
-    }
-    ringFill.setAttribute("stroke-dasharray", String(ringCircumference));
-    ringFill.setAttribute("stroke-dashoffset", String(ringCircumference));
-    ring.append(ringTrack, ringFill);
+    const ringCircumference = 2 * Math.PI * 15.5;
+    const ringFill = svgEl("circle", {
+        class: "ctx-fill",
+        cx: "18",
+        cy: "18",
+        r: "15.5",
+        "stroke-dasharray": String(ringCircumference),
+        "stroke-dashoffset": String(ringCircumference),
+    });
+    const ring = svgEl("svg", { class: "ctx-ring", viewBox: "0 0 36 36", "aria-hidden": "true" });
+    ring.append(svgEl("circle", { class: "ctx-track", cx: "18", cy: "18", r: "15.5" }), ringFill);
     const meterLabel = el("span", "ctx-label", "0");
     meter.append(ring, meterLabel);
     const abortButton = el("button", "abort", "Stop");
@@ -92,11 +84,6 @@ export function mount(root, ctx) {
             : `${contextTokens.toLocaleString()} input tokens; context window unknown`;
         meter.title = detail;
         meter.setAttribute("aria-label", `Context: ${detail}`);
-    }
-    function applyUsage(inputTokens, limit) {
-        contextTokens = inputTokens;
-        contextWindow = limit;
-        renderMeter();
     }
     renderMeter();
     function sessionId() {
@@ -285,7 +272,9 @@ export function mount(root, ctx) {
             return;
         }
         if (frame.event === "usage") {
-            applyUsage(payload.input_tokens ?? 0, payload.context_window ?? null);
+            contextTokens = payload.input_tokens ?? 0;
+            contextWindow = payload.context_window ?? null;
+            renderMeter();
             return;
         }
         if (frame.event === "done") {
