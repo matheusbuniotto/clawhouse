@@ -10,6 +10,7 @@ import pytest
 from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
@@ -28,6 +29,7 @@ from crabriks.turn import (
     ToolResultNotice,
     TurnContext,
     TurnNotice,
+    UsageNotice,
     run_turn,
 )
 from crabriks.workspace import WorkspacePaths, resolve_agent_workspace
@@ -142,12 +144,30 @@ async def test_turn_persists_the_clock_exchange_and_streams_the_reply() -> None:
     assert result.error is None
     assert result.transcript == expected
     assert await store.transcript(SESSION, OWNER) == expected
-    assert notices == [
+    assert notices[:-1] == [
         ToolCallNotice(name="clock", arguments="{}", tool_call_id=CALL_ID),
         ToolResultNotice(name="clock", content=EXPECTED_TIME, tool_call_id=CALL_ID),
         Token("The time is "),
         Token(EXPECTED_TIME),
     ]
+    assert isinstance(notices[-1], UsageNotice)
+
+
+async def test_a_turn_reports_the_sent_context_and_the_model_window() -> None:
+    store = MemorySessionStore()
+    notices: list[TurnNotice] = []
+
+    async def reply(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages, info
+        yield "hello there"
+
+    model = FunctionModel(stream_function=reply, profile=ModelProfile(context_window=200_000))
+    await run_turn(SESSION, "hi", ctx=_ctx(store, model, emit=notices))
+
+    usage = [notice for notice in notices if isinstance(notice, UsageNotice)]
+    assert len(usage) == 1
+    assert usage[0].context_window == 200_000
+    assert usage[0].input_tokens > 0
 
 
 async def test_a_second_inflight_run_on_the_same_session_errors() -> None:

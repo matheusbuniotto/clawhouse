@@ -49,13 +49,40 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const modelPicker = document.createElement("select");
   modelPicker.id = "model";
   modelPicker.className = "model-pill";
+
+  // Context-window meter: a ring showing the input tokens sent to the model.
+  const meter = el("div", "ctx-meter");
+  meter.id = "ctx-meter";
+  meter.dataset.level = "ok";
+  const ringRadius = 15.5;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const svgNs = "http://www.w3.org/2000/svg";
+  const ring = document.createElementNS(svgNs, "svg");
+  ring.setAttribute("viewBox", "0 0 36 36");
+  ring.setAttribute("class", "ctx-ring");
+  ring.setAttribute("aria-hidden", "true");
+  const ringTrack = document.createElementNS(svgNs, "circle");
+  ringTrack.setAttribute("class", "ctx-track");
+  const ringFill = document.createElementNS(svgNs, "circle");
+  ringFill.setAttribute("class", "ctx-fill");
+  for (const circle of [ringTrack, ringFill]) {
+    circle.setAttribute("cx", "18");
+    circle.setAttribute("cy", "18");
+    circle.setAttribute("r", String(ringRadius));
+  }
+  ringFill.setAttribute("stroke-dasharray", String(ringCircumference));
+  ringFill.setAttribute("stroke-dashoffset", String(ringCircumference));
+  ring.append(ringTrack, ringFill);
+  const meterLabel = el("span", "ctx-label", "0");
+  meter.append(ring, meterLabel);
+
   const abortButton = el("button", "abort", "Stop");
   abortButton.id = "abort";
   abortButton.type = "button";
   abortButton.hidden = true;
   const sendButton = el("button", "send", "Send");
   sendButton.type = "submit";
-  toolbar.append(modelLabel, modelPicker, abortButton, sendButton);
+  toolbar.append(modelLabel, modelPicker, meter, abortButton, sendButton);
 
   const statusLine = el("p", "status");
   statusLine.id = "status";
@@ -67,6 +94,40 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let draft: HTMLElement | null = null;
   let draftText = "";
   let controller: AbortController | null = null;
+
+  let contextTokens = 0;
+  let contextWindow: number | null = null;
+
+  // Absolute pressure thresholds for the sent-context size.
+  function usageLevel(tokens: number): string {
+    if (tokens >= 300_000) return "danger";
+    if (tokens >= 250_000) return "orange";
+    if (tokens >= 150_000) return "warn";
+    return "ok";
+  }
+
+  function renderMeter(): void {
+    // The ring fills against the model's context window; 300k is a sane gauge
+    // when the window is unknown. Colour is absolute, per the product call.
+    const denominator = contextWindow ?? 300_000;
+    const ratio = denominator > 0 ? Math.min(1, contextTokens / denominator) : 0;
+    meter.dataset.level = usageLevel(contextTokens);
+    ringFill.setAttribute("stroke-dashoffset", String(ringCircumference * (1 - ratio)));
+    meterLabel.textContent = contextWindow ? `${Math.round(ratio * 100)}%` : "?";
+    const detail = contextWindow
+      ? `${contextTokens.toLocaleString()} / ${contextWindow.toLocaleString()} input tokens`
+      : `${contextTokens.toLocaleString()} input tokens; context window unknown`;
+    meter.title = detail;
+    meter.setAttribute("aria-label", `Context: ${detail}`);
+  }
+
+  function applyUsage(inputTokens: number, limit: number | null): void {
+    contextTokens = inputTokens;
+    contextWindow = limit;
+    renderMeter();
+  }
+
+  renderMeter();
 
   function sessionId(): string {
     const fromUrl = ctx.url.searchParams.get("session");
@@ -227,6 +288,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       error?: string;
       status?: string;
       approval_id?: string;
+      input_tokens?: number;
+      output_tokens?: number;
+      context_window?: number | null;
     };
     if (frame.event === "token" && payload.text) {
       draftText += payload.text;
@@ -274,6 +338,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       });
       if (!draft) showThinking();
       transcript.scrollTop = transcript.scrollHeight;
+      return;
+    }
+    if (frame.event === "usage") {
+      applyUsage(payload.input_tokens ?? 0, payload.context_window ?? null);
       return;
     }
     if (frame.event === "done") {
@@ -572,6 +640,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   modelPicker.addEventListener("change", () => {
     sessionStorage.setItem(MODEL_KEY, modelPicker.value);
+    // The new model's window is unknown until its first turn reports usage.
+    contextWindow = null;
+    renderMeter();
   });
 
   async function checkHatchDraft(): Promise<void> {

@@ -440,6 +440,55 @@ body {
   border-color: transparent;
 }
 
+/* Context-window meter — a ring of the input tokens sent to the model. */
+.ctx-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.ctx-meter[data-level="warn"] {
+  color: var(--warn);
+}
+
+.ctx-meter[data-level="orange"] {
+  color: var(--orange);
+}
+
+.ctx-meter[data-level="danger"] {
+  color: var(--danger);
+}
+
+.ctx-ring {
+  width: 30px;
+  height: 30px;
+  transform: rotate(-90deg);
+}
+
+.ctx-ring circle {
+  fill: none;
+  stroke-width: 3.5;
+}
+
+.ctx-track {
+  stroke: var(--border-strong);
+}
+
+.ctx-fill {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset var(--duration) var(--ease),
+    stroke var(--duration-fast) var(--ease);
+}
+
+.ctx-label {
+  color: currentColor;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
 .abort {
   min-height: 30px;
   padding: 0 12px;
