@@ -222,3 +222,34 @@ async def test_lakebase_user_profile_crud() -> None:
         assert retrieved.hatched is True
     finally:
         await store.close()
+
+
+async def test_lakebase_keeps_agent_ids_and_notices_and_upgrades_old_tables() -> None:
+    pool = await _pool()
+    store = LakebaseSessionStore(pool)
+    try:
+        await store.migrate()
+        # A table from before #97: no agent_id column, and the old role constraint.
+        await pool.execute("ALTER TABLE clawhouse.transcript_entries DROP COLUMN agent_id")
+        await pool.execute(
+            """
+            ALTER TABLE clawhouse.transcript_entries DROP CONSTRAINT transcript_role_known;
+            ALTER TABLE clawhouse.transcript_entries ADD CONSTRAINT transcript_role_known
+                CHECK (role IN ('user', 'assistant', 'tool_call', 'tool_result'));
+            """
+        )
+        await store.migrate()
+        session = await store.create_session(OWNER)
+        run_id = await store.claim_run(session.id)
+        entries = (
+            TranscriptEntry(role="user", content="@ghost hi", agent_id="main"),
+            TranscriptEntry(role="notice", content="@ghost não encontrado.", agent_id="main"),
+            TranscriptEntry(role="assistant", content="hello", agent_id="fraud"),
+        )
+        for entry in entries:
+            await store.append_entry(session.id, run_id, entry)
+        await store.finish_run(session.id, run_id, "ok")
+
+        assert await store.transcript(session.id, OWNER) == entries
+    finally:
+        await store.close()

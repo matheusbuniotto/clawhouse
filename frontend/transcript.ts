@@ -33,6 +33,13 @@ export function renderAgentHeader(agent: AgentLabel): HTMLElement {
   return node;
 }
 
+/** A line for the reader, never sent to the model, e.g. "@x não encontrado". */
+export function renderNotice(text: string): HTMLElement {
+  const node = el("p", "agent-notice", text);
+  node.setAttribute("role", "note");
+  return node;
+}
+
 export interface ToolFrame {
   event: "tool_call" | "tool_result";
   name?: string;

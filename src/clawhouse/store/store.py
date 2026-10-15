@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS clawhouse.transcript_entries (
     tool_call_id text,
     agent_id text,
     CONSTRAINT transcript_role_known CHECK (
-        role IN ('user', 'assistant', 'tool_call', 'tool_result')
+        role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice')
     ),
     CONSTRAINT transcript_position_unique UNIQUE (session_id, position)
 );
@@ -533,6 +533,10 @@ class LakebaseSessionStore:
                     ALTER TABLE clawhouse.runs DROP CONSTRAINT IF EXISTS runs_status_known;
                     ALTER TABLE clawhouse.runs ADD CONSTRAINT runs_status_known
                         CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+                    ALTER TABLE clawhouse.transcript_entries
+                        DROP CONSTRAINT IF EXISTS transcript_role_known;
+                    ALTER TABLE clawhouse.transcript_entries ADD CONSTRAINT transcript_role_known
+                        CHECK (role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice'));
                 EXCEPTION
                     WHEN undefined_table OR insufficient_privilege THEN NULL;
                 END $$;

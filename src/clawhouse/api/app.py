@@ -40,6 +40,7 @@ from clawhouse.agent.turn import (
     TurnNotice,
     TurnResult,
     UsageNotice,
+    WarningNotice,
     canonical_session_id,
     iter_turn,
     resume_turn,
@@ -1101,6 +1102,8 @@ def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
                 "model": item.model,
             },
         )
+    elif isinstance(item, WarningNotice):
+        frame = "notice", {"text": item.text}
     elif isinstance(item, UsageNotice):
         frame = (
             "usage",

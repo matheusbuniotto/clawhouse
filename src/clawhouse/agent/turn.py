@@ -12,7 +12,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic_ai import DeferredToolRequests, RunContext
-from pydantic_ai.capabilities import AbstractCapability, AgentCapability
+from pydantic_ai.capabilities import AbstractCapability, AgentCapability, ProcessHistory
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -33,7 +33,7 @@ from pydantic_ai_harness.guardrails import GuardrailResult, ToolCallInfo, ToolGu
 
 from clawhouse.agent.commands import Command, CommandContext, dispatch_command, parse_command
 from clawhouse.agent.core import TurnDeps, clawhouse_agent, format_utc
-from clawhouse.agent.history import to_model_messages
+from clawhouse.agent.history import foreign_tool_filter, to_model_messages
 from clawhouse.agent.prompt import (
     BUILTIN_TOOLS,
     RuntimeMeta,
@@ -41,7 +41,14 @@ from clawhouse.agent.prompt import (
     ToolCard,
     build_system_prompt,
 )
-from clawhouse.agent.roster import PLATFORM_AGENT, ActiveAgent, find_agent, session_default
+from clawhouse.agent.roster import (
+    PLATFORM_AGENT,
+    ActiveAgent,
+    choose_agent,
+    find_agent,
+    missing_agent_warning,
+    session_default,
+)
 from clawhouse.capabilities.agent_tools import AgentManagementCapability
 from clawhouse.capabilities.bootstrap import (
     BootstrapContext,
@@ -53,7 +60,11 @@ from clawhouse.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capab
 from clawhouse.capabilities.mentions import resolve_mention_bundles, tiered_compaction
 from clawhouse.capabilities.sheets import GOOGLE_SHEETS_TOOL_CARDS, GoogleSheetsCapability
 from clawhouse.capabilities.skills import loaded_skill_text, skills_capability
-from clawhouse.capabilities.workspace import WorkspacePaths
+from clawhouse.capabilities.workspace import (
+    UnsafeAgentName,
+    WorkspacePaths,
+    resolve_agent_workspace,
+)
 from clawhouse.store.shapes import (
     ApprovalEntry,
     TranscriptEntry,
@@ -131,7 +142,22 @@ class AgentNotice:
     model: str
 
 
-TurnNotice = Token | ToolCallNotice | ToolResultNotice | ApprovalNotice | UsageNotice | AgentNotice
+@dataclass(frozen=True, slots=True)
+class WarningNotice:
+    """A line for the reader, not the model: e.g. an `@agent` that does not exist."""
+
+    text: str
+
+
+TurnNotice = (
+    Token
+    | ToolCallNotice
+    | ToolResultNotice
+    | ApprovalNotice
+    | UsageNotice
+    | AgentNotice
+    | WarningNotice
+)
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
 MCPToolsetFactory = Callable[[MCPServerConfig, str], AbstractToolset[object]]
@@ -484,12 +510,14 @@ def _capabilities_for_turn(
         capabilities.append(cap)
     if mcp is not None:
         capabilities.append(mcp)
-    skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
-    skills = skills_capability(skills_dir)
+    workspace = _agent_workspace(claimed)
+    skills = skills_capability(workspace.skills if workspace else None)
     if skills is not None:
         capabilities.append(skills)
     if claimed.ctx.sensitive_tools:
         capabilities.append(_sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)))
+    # The history is shared between agents: drop tool parts this agent's toolset lacks.
+    capabilities.append(ProcessHistory(foreign_tool_filter))
     # Compact the in-run history when it approaches the window, then report what was sent.
     capabilities.append(tiered_compaction(target_fraction=0.8))
     capabilities.append(ReportContextUsage())
@@ -510,14 +538,25 @@ def _prompt_for(
     base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD, *GOOGLE_SHEETS_TOOL_CARDS)
     builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
+    workspace = _agent_workspace(claimed)
+    custom = claimed.agent.custom
+    if custom is not None:
+        name, emoji = custom.name, custom.signature_emoji
+        persona = f"{custom.description}\n\n{custom.system_prompt}".strip()
+    else:
+        name = profile.assistant_name if profile else None
+        emoji = profile.signature_emoji if profile else None
+        persona = None
     return build_system_prompt(
         tools=(*builtin, *db_cards, *mcp_cards),
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
-        bootstrap=_bootstrap(ctx, user_directives=user_directives),
-        workspace=ctx.workspace,
-        assistant_name=profile.assistant_name if profile else None,
-        signature_emoji=profile.signature_emoji if profile else None,
+        bootstrap=_bootstrap(workspace, user_directives=user_directives),
+        workspace=workspace,
+        assistant_name=name,
+        signature_emoji=emoji,
         birth_ritual=birth_ritual,
+        agent_id=claimed.agent.agent_id,
+        persona=persona,
     )
 
 
@@ -541,23 +580,28 @@ async def _start_agent(claimed: _Claimed, queue: _Queue, agent: ActiveAgent) -> 
 
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     ctx = claimed.ctx
-    agent = await session_default(ctx.store, ctx.owner_id, ctx.default_agent)
-    claimed = await _start_agent(claimed, queue, agent)
     command = parse_command(claimed.user_message)
     if command is not None:
-        return await _run_command(claimed, command)
+        agent = await session_default(ctx.store, ctx.owner_id, ctx.default_agent)
+        return await _run_command(await _start_agent(claimed, queue, agent), command)
+    choice = await choose_agent(
+        claimed.user_message,
+        store=ctx.store,
+        owner_id=ctx.owner_id,
+        default_handle=ctx.default_agent,
+    )
+    claimed = await _start_agent(claimed, queue, choice.agent)
 
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
     await _append_user(claimed)
+    if choice.missing is not None:
+        await _warn(claimed, queue, missing_agent_warning(choice.missing))
     bundle = await resolve_mention_bundles(
         claimed.user_message,
-        store=ctx.store,
-        owner_id=ctx.owner_id,
-        workspace=ctx.workspace,
+        workspace=_agent_workspace(claimed),
         databricks_cap=ctx.databricks_capability,
-        default_agent=ctx.default_agent,
     )
     user_prompt = claimed.user_message
     if bundle.injected_context:
@@ -570,6 +614,11 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         user_prompt=user_prompt,
         history=to_model_messages(prior) or None,
     )
+
+
+async def _warn(claimed: _Claimed, queue: _Queue, text: str) -> None:
+    await _append(claimed, TranscriptEntry(role="notice", content=text))
+    await _publish(claimed.ctx, queue, WarningNotice(text))
 
 
 async def _run_command(claimed: _Claimed, command: Command) -> TurnResult:
@@ -737,14 +786,26 @@ async def _handle_deferred_approvals(
 
 
 def _bootstrap(
-    ctx: TurnContext,
+    workspace: WorkspacePaths | None,
     user_directives: str | None = None,
 ) -> BootstrapContext | None:
-    if ctx.workspace is None:
+    if workspace is None:
         if user_directives:
             return load_bootstrap_directives(user_directives)
         return None
-    return load_bootstrap(ctx.workspace, user_directives=user_directives)
+    return load_bootstrap(workspace, user_directives=user_directives)
+
+
+def _agent_workspace(claimed: _Claimed) -> WorkspacePaths | None:
+    """The folder of the agent answering: a custom agent's sits next to the platform one."""
+    base = claimed.ctx.workspace
+    custom = claimed.agent.custom
+    if base is None or custom is None:
+        return base
+    try:
+        return resolve_agent_workspace(base.directory.parents[2], custom.name)
+    except UnsafeAgentName:
+        return None
 
 
 async def _append_user(claimed: _Claimed) -> None:
@@ -939,6 +1000,7 @@ __all__ = [
     "TurnContext",
     "TurnNotice",
     "UsageNotice",
+    "WarningNotice",
     "is_wake_up_message",
     "iter_resume_turn",
     "iter_turn",

@@ -6,6 +6,7 @@ import {
   renderAgentHeader,
   renderAssistantTurn,
   renderInlineApproval,
+  renderNotice,
   renderUserTurn,
 } from "./transcript.js";
 
@@ -13,7 +14,7 @@ const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
 
 interface Entry {
-  role: "user" | "assistant" | "tool_call" | "tool_result";
+  role: "user" | "assistant" | "tool_call" | "tool_result" | "notice";
   content: string;
   tool_name: string | null;
   agent_id?: string | null;
@@ -150,6 +151,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let headerOwed = false;
 
   function renderEntry(entry: Entry): void {
+    if (entry.role === "notice") {
+      transcript.append(renderNotice(entry.content));
+      return;
+    }
     if (entry.role !== "user" && headerOwed) {
       headerOwed = false;
       const id = entry.agent_id || "main";
@@ -318,6 +323,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       emoji?: string;
       model?: string;
     };
+    if (frame.event === "notice" && payload.text) {
+      const note = renderNotice(payload.text);
+      if (draft) transcript.insertBefore(note, draft);
+      else transcript.append(note);
+      return;
+    }
     if (frame.event === "agent" && payload.agent_id) {
       const header = renderAgentHeader({
         agent_id: payload.agent_id,

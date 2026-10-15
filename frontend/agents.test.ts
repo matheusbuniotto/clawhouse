@@ -90,3 +90,52 @@ test("a reloaded transcript heads each reply with the agent that wrote it", asyn
   expect(headers.map((h) => h.dataset.agentId)).toEqual(["fraud", "main", "main"]);
   expect(headers[0].textContent).toBe("🕵️@fraud");
 });
+
+test("an unknown @agent shows a notice above the default agent's reply", async () => {
+  const frames = [
+    'event: agent\ndata: {"type":"agent","agent_id":"main","name":"main","emoji":"🦀","model":"m"}\n\n',
+    'event: notice\ndata: {"text":"@ghost não encontrado. Quem respondeu foi o agente padrão da sessão."}\n\n',
+    'event: done\ndata: {"status":"ok","reply":"hello"}\n\n',
+  ].join("");
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({ models: [] });
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
+  (document.querySelector("#message") as HTMLTextAreaElement).value = "@ghost hi";
+  document
+    .querySelector("#composer")
+    ?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  await vi.waitFor(() => expect(document.querySelector(".assistant p")).not.toBeNull());
+  const note = document.querySelector(".agent-notice") as HTMLElement;
+  expect(note.textContent).toContain("@ghost não encontrado");
+  expect(note.nextElementSibling?.classList.contains("assistant")).toBe(true);
+});
+
+test("a reloaded notice entry renders as a notice, not a bubble", async () => {
+  const entries = [
+    { role: "user", content: "@ghost hi", tool_name: null, agent_id: "main" },
+    { role: "notice", content: "@ghost não encontrado.", tool_name: null, agent_id: "main" },
+    { role: "assistant", content: "hello", tool_name: null, agent_id: "main" },
+  ];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries });
+    return jsonResponse({ models: [] });
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".agent-notice")).not.toBeNull());
+  const log = document.querySelector("#log") as HTMLElement;
+  expect([...log.children].map((n) => n.className)).toEqual([
+    "bubble user",
+    "agent-notice",
+    "agent-header",
+    "assistant",
+  ]);
+});

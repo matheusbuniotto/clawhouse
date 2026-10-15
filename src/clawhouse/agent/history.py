@@ -1,7 +1,10 @@
-"""Replay a transcript as Pydantic AI model messages. Pure: no I/O."""
+"""Replay a transcript as Pydantic AI model messages, and trim it for the agent that reads it."""
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
+from dataclasses import replace
+from typing import Any
 
+from pydantic_ai import RunContext
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -70,3 +73,38 @@ def _append_tool_pair(
         )
     )
     return 2
+
+
+def drop_foreign_tool_parts(
+    messages: Sequence[ModelMessage], known_tools: Collection[str]
+) -> list[ModelMessage]:
+    """Keep only tool calls and returns the current agent knows; text always survives.
+
+    The history is shared between agents, so a mentioned agent can inherit calls to tools it
+    does not have. Replaying them would make the model call (or the provider reject) a tool
+    outside its toolset. Messages left empty are dropped.
+    """
+    kept: list[ModelMessage] = []
+    for message in messages:
+        parts = [part for part in message.parts if _known(part, known_tools)]
+        if not parts:
+            continue
+        if len(parts) == len(message.parts):
+            kept.append(message)
+        else:
+            kept.append(replace(message, parts=parts))
+    return kept
+
+
+def _known(part: object, known_tools: Collection[str]) -> bool:
+    if isinstance(part, ToolCallPart | ToolReturnPart):
+        return part.tool_name in known_tools
+    return True
+
+
+def foreign_tool_filter(ctx: RunContext[Any], messages: list[ModelMessage]) -> list[ModelMessage]:
+    """History processor: filter against the tools this run actually exposes."""
+    known = ctx.tools
+    if not known:
+        return messages
+    return drop_foreign_tool_parts(messages, known.keys())

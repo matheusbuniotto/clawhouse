@@ -53,6 +53,8 @@ def build_system_prompt(  # noqa: PLR0913
     assistant_name: str | None = None,
     signature_emoji: str | None = None,
     birth_ritual: bool = False,
+    agent_id: str = AGENT_NAME,
+    persona: str | None = None,
 ) -> SystemPrompt:
     """Compose the platform agent's prompt. An agent with no tools is refused.
 
@@ -63,7 +65,13 @@ def build_system_prompt(  # noqa: PLR0913
     if not tools:
         raise ValueError("an agent must expose at least one tool")
     sections = (
-        _identity(bootstrap, assistant_name=assistant_name, signature_emoji=signature_emoji),
+        _identity(
+            bootstrap,
+            assistant_name=assistant_name,
+            signature_emoji=signature_emoji,
+            agent_id=agent_id,
+        ),
+        f"# Agent Instructions\n{persona}" if persona else None,
         _tools(tools),
         _birth_ritual() if birth_ritual else None,
         _project(bootstrap),
@@ -101,11 +109,13 @@ def _identity(
     *,
     assistant_name: str | None = None,
     signature_emoji: str | None = None,
+    agent_id: str = AGENT_NAME,
 ) -> str:
     name = assistant_name or "Clawhouse"
     if signature_emoji and signature_emoji not in name:
         name = f"{name} {signature_emoji}"
-    blocks = [f"# Identity\nYou are {name}, the platform agent {AGENT_NAME}."]
+    role = f"platform agent {AGENT_NAME}" if agent_id == AGENT_NAME else f"agent @{agent_id}"
+    blocks = [f"# Identity\nYou are {name}, the {role}."]
     blocks.extend(_blocks(bootstrap, _IDENTITY_FILES))
     return "\n\n".join(blocks)
 

@@ -1,5 +1,5 @@
 import { el, svgEl } from "./dom.js";
-import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderUserTurn, } from "./transcript.js";
+import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderNotice, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
 export function mount(root, ctx) {
@@ -106,6 +106,10 @@ export function mount(root, ctx) {
     const agentEmoji = new Map();
     let headerOwed = false;
     function renderEntry(entry) {
+        if (entry.role === "notice") {
+            transcript.append(renderNotice(entry.content));
+            return;
+        }
         if (entry.role !== "user" && headerOwed) {
             headerOwed = false;
             const id = entry.agent_id || "main";
@@ -253,6 +257,14 @@ export function mount(root, ctx) {
     }
     function onFrame(frame) {
         const payload = JSON.parse(frame.data);
+        if (frame.event === "notice" && payload.text) {
+            const note = renderNotice(payload.text);
+            if (draft)
+                transcript.insertBefore(note, draft);
+            else
+                transcript.append(note);
+            return;
+        }
         if (frame.event === "agent" && payload.agent_id) {
             const header = renderAgentHeader({
                 agent_id: payload.agent_id,

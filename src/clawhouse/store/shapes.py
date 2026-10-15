@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-Role = Literal["user", "assistant", "tool_call", "tool_result"]
+Role = Literal["user", "assistant", "tool_call", "tool_result", "notice"]
 TurnStatus = Literal["ok", "error", "pending_approval"]
 ApprovalStatus = Literal["pending", "approved", "denied"]
 RunState = Literal["running", "idle", "error"]

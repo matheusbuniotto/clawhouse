@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,9 @@ if TYPE_CHECKING:
 
 PLATFORM_AGENT_ID = "main"
 PLATFORM_EMOJI = "🦀"
+
+# `@handle` at a word start. Tables (`@a.b.c`), files (`@x.md`, `@file:x`), emails: not agents.
+_MENTION = re.compile(r"(?<![\w@])@([A-Za-z0-9][A-Za-z0-9_-]*)(?![\w.:/@-])")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,3 +57,37 @@ async def find_agent(store: SessionStore, owner_id: str, handle: str | None) -> 
 async def session_default(store: SessionStore, owner_id: str, handle: str | None) -> ActiveAgent:
     """The session's default agent, falling back to the platform agent."""
     return await find_agent(store, owner_id, handle) or PLATFORM_AGENT
+
+
+@dataclass(frozen=True, slots=True)
+class AgentChoice:
+    """Who answers this message, and the handle that was asked for but does not exist."""
+
+    agent: ActiveAgent
+    missing: str | None = None
+
+
+def first_agent_mention(text: str) -> str | None:
+    match = _MENTION.search(text)
+    return match.group(1) if match else None
+
+
+async def choose_agent(
+    text: str, *, store: SessionStore, owner_id: str, default_handle: str | None
+) -> AgentChoice:
+    """`@x` picks the agent for this message only; otherwise the session default answers.
+
+    An unknown `@x`, or one the owner may not use, falls back to the default and is reported.
+    """
+    default = await session_default(store, owner_id, default_handle)
+    handle = first_agent_mention(text)
+    if handle is None:
+        return AgentChoice(agent=default)
+    found = await find_agent(store, owner_id, handle)
+    if found is None:
+        return AgentChoice(agent=default, missing=handle)
+    return AgentChoice(agent=found)
+
+
+def missing_agent_warning(handle: str) -> str:
+    return f"@{handle} não encontrado. Quem respondeu foi o agente padrão da sessão."

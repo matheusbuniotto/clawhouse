@@ -21,6 +21,12 @@ export function renderAgentHeader(agent) {
         node.append(el("span", "agent-header-model", agent.model));
     return node;
 }
+/** A line for the reader, never sent to the model, e.g. "@x não encontrado". */
+export function renderNotice(text) {
+    const node = el("p", "agent-notice", text);
+    node.setAttribute("role", "note");
+    return node;
+}
 const STATUS_LABEL = {
     running: "Running",
     ok: "OK",
