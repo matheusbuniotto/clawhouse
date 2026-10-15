@@ -57,7 +57,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 test("renders the persistent rail, caller identity, and dark-by-default theme", async () => {
