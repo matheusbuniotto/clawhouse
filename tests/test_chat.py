@@ -502,6 +502,7 @@ async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) ->
         "/transcript.js",
         "/highlight.js",
         "/jobs.js",
+        "/jobspage.js",
         "/sessions.js",
         "/new.js",
         "/approvals.js",

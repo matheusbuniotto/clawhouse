@@ -28,6 +28,7 @@ const TITLES: Record<string, string> = {
   "/new": "Clawhouse · New session",
   "/approvals": "Clawhouse · Approvals",
   "/status": "Clawhouse · Status",
+  "/jobs": "Clawhouse · Jobs",
 };
 
 const ROUTES: Record<string, () => Promise<ScreenModule>> = {
@@ -37,9 +38,13 @@ const ROUTES: Record<string, () => Promise<ScreenModule>> = {
   "/new": () => import("./new.js"),
   "/approvals": () => import("./approvals.js"),
   "/status": () => import("./status.js"),
+  "/jobs": () => import("./jobspage.js"),
 };
 
-function requireElement<T extends Element>(parent: ParentNode, selector: string): T {
+function requireElement<T extends Element>(
+  parent: ParentNode,
+  selector: string,
+): T {
   const node = parent.querySelector<T>(selector);
   if (!node) throw new Error(`shell markup is missing ${selector}`);
   return node;
@@ -98,7 +103,9 @@ export function mountShell(root: ParentNode = document): void {
   }
 
   function updateActive(path: string, url: URL): void {
-    for (const link of shell.querySelectorAll<HTMLAnchorElement>(".rail-nav a[data-nav]")) {
+    for (const link of shell.querySelectorAll<HTMLAnchorElement>(
+      ".rail-nav a[data-nav]",
+    )) {
       const href = link.getAttribute("href")?.split("?")[0];
       if (href === path || (path === "/" && href === "/chat")) {
         link.setAttribute("aria-current", "page");
@@ -107,7 +114,9 @@ export function mountShell(root: ParentNode = document): void {
       }
     }
     const session = url.searchParams.get("session");
-    for (const row of sessionList.querySelectorAll<HTMLAnchorElement>(".rail-session")) {
+    for (const row of sessionList.querySelectorAll<HTMLAnchorElement>(
+      ".rail-session",
+    )) {
       if (session !== null && row.dataset.id === session) {
         row.setAttribute("aria-current", "page");
       } else {
@@ -118,7 +127,8 @@ export function mountShell(root: ParentNode = document): void {
 
   function onClick(event: MouseEvent): void {
     if (event.defaultPrevented || event.button !== 0) return;
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return;
     const anchor = (event.target as Element | null)?.closest?.("a[data-nav]");
     if (!(anchor instanceof HTMLAnchorElement)) return;
     const href = anchor.getAttribute("href");
@@ -139,21 +149,30 @@ export function mountShell(root: ParentNode = document): void {
     link.dataset.id = item.id;
     link.dataset.title = item.title.toLowerCase();
     link.href = `/chat?session=${item.id}`;
-    link.append(el("span", "rail-session-title", item.title || "Untitled session"));
+    link.append(
+      el("span", "rail-session-title", item.title || "Untitled session"),
+    );
 
     const actions = el("span", "rail-session-actions");
     const delBtn = el("button", "rail-session-delete", "×");
     delBtn.type = "button";
-    delBtn.setAttribute("aria-label", `Delete session ${item.title || item.id}`);
+    delBtn.setAttribute(
+      "aria-label",
+      `Delete session ${item.title || item.id}`,
+    );
     delBtn.title = "Delete session";
     delBtn.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (!confirm(`Delete "${item.title || "Untitled session"}"?`)) return;
       try {
-        const res = await fetch(`/api/sessions/${item.id}`, { method: "DELETE" });
+        const res = await fetch(`/api/sessions/${item.id}`, {
+          method: "DELETE",
+        });
         if (res.ok || res.status === 204) {
-          const currentSession = new URL(location.href).searchParams.get("session");
+          const currentSession = new URL(location.href).searchParams.get(
+            "session",
+          );
           if (currentSession === item.id) {
             navigate("/chat");
           }
@@ -260,14 +279,17 @@ export function mountShell(root: ParentNode = document): void {
   }
 
   themeToggle.addEventListener("click", () => {
-    const next = document.documentElement.dataset.themeMode === "light" ? "dark" : "light";
+    const next =
+      document.documentElement.dataset.themeMode === "light" ? "dark" : "light";
     localStorage.setItem(THEME_KEY, next);
     syncTheme(next);
   });
 
   search.addEventListener("input", () => {
     const term = search.value.trim().toLowerCase();
-    for (const row of sessionList.querySelectorAll<HTMLElement>(".rail-session")) {
+    for (const row of sessionList.querySelectorAll<HTMLElement>(
+      ".rail-session",
+    )) {
       row.hidden = term !== "" && !(row.dataset.title ?? "").includes(term);
     }
   });
@@ -281,7 +303,9 @@ export function mountShell(root: ParentNode = document): void {
     expand.setAttribute("aria-expanded", String(collapsed));
   }
 
-  collapse.addEventListener("click", () => setCollapsed(!shell.hasAttribute("data-collapsed")));
+  collapse.addEventListener("click", () =>
+    setCollapsed(!shell.hasAttribute("data-collapsed")),
+  );
   expand.addEventListener("click", () => setCollapsed(false));
   handle.addEventListener("pointerdown", startResize);
   shell.addEventListener("click", onClick);
@@ -291,8 +315,10 @@ export function mountShell(root: ParentNode = document): void {
   });
 
   const storedWidth = Number(localStorage.getItem(RAIL_WIDTH_KEY));
-  if (Number.isFinite(storedWidth) && storedWidth > 0) applyRailWidth(storedWidth);
-  const initialMode = localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+  if (Number.isFinite(storedWidth) && storedWidth > 0)
+    applyRailWidth(storedWidth);
+  const initialMode =
+    localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
   localStorage.setItem(THEME_KEY, initialMode);
   syncTheme(initialMode);
   void loadIdentity();

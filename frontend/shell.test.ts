@@ -69,7 +69,7 @@ test("renders the persistent rail, caller identity, and dark-by-default theme", 
     [...document.querySelectorAll("#rail .rail-nav a[data-nav]")].map((link) =>
       link.getAttribute("href"),
     ),
-  ).toEqual(["/chat", "/sessions", "/approvals", "/status"]);
+  ).toEqual(["/chat", "/sessions", "/approvals", "/jobs", "/status"]);
   expect(document.querySelector("#rail .rail-heading")?.textContent).toBe("Sessions");
   expect(document.querySelector("#rail-search")).not.toBeNull();
   expect(document.querySelector("#rail-new")).not.toBeNull();

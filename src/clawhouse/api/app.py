@@ -50,6 +50,7 @@ from clawhouse.agent.turn import (
     run_turn,
 )
 from clawhouse.api.identity import Caller, Unauthenticated, resolve_caller
+from clawhouse.api.jobs import jobs_routes
 from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.interaction import ASK_USER, InvalidAnswer, Question, check_answer
 from clawhouse.capabilities.schedules import (
@@ -324,6 +325,7 @@ def _routes(app: FastAPI) -> None:
     _status_routes(app)
     _agent_routes(app)
     _schedule_routes(app)
+    jobs_routes(app, _require_caller, lambda caller: _caller_token(app.state.settings, caller))
     _composer_routes(app)
 
 
@@ -348,6 +350,7 @@ def _page_routes(app: FastAPI) -> None:
     @app.get("/new")
     @app.get("/approvals")
     @app.get("/status")
+    @app.get("/jobs")
     async def shell_page(caller: Caller = _require_caller) -> FileResponse:
         del caller
         return FileResponse(STATIC / "index.html")
@@ -416,6 +419,10 @@ def _core_script_routes(app: FastAPI) -> None:
 
 
 def _screen_script_routes(app: FastAPI) -> None:
+    @app.get("/jobspage.js")
+    async def jobs_page_script() -> FileResponse:
+        return FileResponse(STATIC / "jobspage.js", media_type="text/javascript")
+
     @app.get("/chat.js")
     async def chat_script() -> FileResponse:
         return FileResponse(STATIC / "chat.js", media_type="text/javascript")
@@ -1051,6 +1058,18 @@ async def _read_entries(
         raise HTTPException(status_code=403, detail="You do not own this session.") from exc
 
 
+def _caller_token(settings: Settings, caller: Caller) -> str:
+    """The forwarded caller token wins. Dev token fallback applies strictly to dev_user."""
+    dev_user = settings.dev_user
+    dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
+    return request_token(
+        forwarded=caller.access_token,
+        user_id=caller.user_id,
+        dev_user=dev_user,
+        dev_token=dev_token,
+    )
+
+
 def _build_turn_context(
     request: Request,
     caller: Caller,
@@ -1059,15 +1078,7 @@ def _build_turn_context(
 ) -> TurnContext:
     model = _model_for_caller(request, caller, model_id)
     settings: Settings = request.app.state.settings
-    # The forwarded caller token wins. Dev token fallback applies strictly to dev_user.
-    dev_user = settings.dev_user
-    dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
-    token = request_token(
-        forwarded=caller.access_token,
-        user_id=caller.user_id,
-        dev_user=dev_user,
-        dev_token=dev_token,
-    )
+    token = _caller_token(settings, caller)
     databricks_cap = DatabricksCapability(user_token=token or "")
     return TurnContext(
         owner_id=caller.user_id,
