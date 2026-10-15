@@ -29,6 +29,7 @@ from clawhouse.agent.prompt import AGENT_NAME
 from clawhouse.agent.turn import (
     BUSY_TURN,
     FAILED_TURN,
+    AgentNotice,
     ApprovalNotice,
     InvalidSessionId,
     MCPToolsetFactory,
@@ -177,6 +178,7 @@ class EntryOut(BaseModel):
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    agent_id: str | None = None
 
 
 class TranscriptOut(BaseModel):
@@ -1086,6 +1088,17 @@ def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
                 "approval_id": item.approval_id,
                 "name": item.name,
                 "arguments": item.arguments,
+            },
+        )
+    elif isinstance(item, AgentNotice):
+        frame = (
+            "agent",
+            {
+                "type": "agent",
+                "agent_id": item.agent_id,
+                "name": item.name,
+                "emoji": item.emoji,
+                "model": item.model,
             },
         )
     elif isinstance(item, UsageNotice):

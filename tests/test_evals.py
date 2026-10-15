@@ -49,8 +49,8 @@ async def test_execute_turn_eval_captures_success_trace() -> None:
     trace: WorkedExampleTrace = await execute_turn_eval(inputs)
 
     expected_transcript = (
-        TranscriptEntry(role="user", content="Hello Clawhouse"),
-        TranscriptEntry(role="assistant", content="Greetings from Clawhouse!"),
+        TranscriptEntry(agent_id="main", role="user", content="Hello Clawhouse"),
+        TranscriptEntry(agent_id="main", role="assistant", content="Greetings from Clawhouse!"),
     )
 
     assert trace.session_id == SESSION_ID
@@ -99,20 +99,24 @@ async def test_execute_turn_eval_captures_tool_call_trace() -> None:
         ),
     )
     expected_transcript = (
-        TranscriptEntry(role="user", content="what time is it?"),
+        TranscriptEntry(agent_id="main", role="user", content="what time is it?"),
         TranscriptEntry(
+            agent_id="main",
             role="tool_call",
             content="{}",
             tool_name="clock",
             tool_call_id=call_id,
         ),
         TranscriptEntry(
+            agent_id="main",
             role="tool_result",
             content=expected_time,
             tool_name="clock",
             tool_call_id=call_id,
         ),
-        TranscriptEntry(role="assistant", content=f"Current time is {expected_time}"),
+        TranscriptEntry(
+            agent_id="main", role="assistant", content=f"Current time is {expected_time}"
+        ),
     )
 
     assert trace.status == "ok"
@@ -142,7 +146,7 @@ async def test_execute_turn_eval_captures_error_trace() -> None:
 
     trace: WorkedExampleTrace = await execute_turn_eval(inputs)
 
-    expected_transcript = (TranscriptEntry(role="user", content="kaboom"),)
+    expected_transcript = (TranscriptEntry(agent_id="main", role="user", content="kaboom"),)
 
     assert trace.status == "error"
     assert trace.reply == ""

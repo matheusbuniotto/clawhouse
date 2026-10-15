@@ -205,9 +205,12 @@ def _clock_trace(call_id: str) -> tuple[ToolCallTrace, ...]:
 
 def _clock_transcript(user_msg: str, call_id: str) -> tuple[TranscriptEntry, ...]:
     return (
-        TranscriptEntry(role="user", content=user_msg),
-        TranscriptEntry(role="tool_call", content="{}", tool_name="clock", tool_call_id=call_id),
+        TranscriptEntry(agent_id="main", role="user", content=user_msg),
         TranscriptEntry(
+            agent_id="main", role="tool_call", content="{}", tool_name="clock", tool_call_id=call_id
+        ),
+        TranscriptEntry(
+            agent_id="main",
             role="tool_result",
             content=EVAL_FROZEN_TIME_STR,
             tool_name="clock",
@@ -226,8 +229,8 @@ def _success_case() -> Case[TurnEvalInput, WorkedExampleTrace, object]:
         yield reply_msg
 
     trans = (
-        TranscriptEntry(role="user", content=user_msg),
-        TranscriptEntry(role="assistant", content=reply_msg),
+        TranscriptEntry(agent_id="main", role="user", content=user_msg),
+        TranscriptEntry(agent_id="main", role="assistant", content=reply_msg),
     )
 
     return Case(
@@ -270,7 +273,7 @@ def _tool_call_case() -> Case[TurnEvalInput, WorkedExampleTrace, object]:
 
     trans = (
         *_clock_transcript(user_msg, call_id),
-        TranscriptEntry(role="assistant", content=reply_msg),
+        TranscriptEntry(agent_id="main", role="assistant", content=reply_msg),
     )
 
     return Case(
@@ -305,7 +308,7 @@ def _immediate_error_case() -> Case[TurnEvalInput, WorkedExampleTrace, object]:
             yield ""
         raise RuntimeError("Model execution failed")
 
-    trans = (TranscriptEntry(role="user", content=user_msg),)
+    trans = (TranscriptEntry(agent_id="main", role="user", content=user_msg),)
 
     return Case(
         name="error_turn_immediate_failure",

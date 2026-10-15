@@ -521,3 +521,32 @@
   color: var(--accent);
   text-decoration: underline;
 }
+
+/* Agent per message (#97): who answers the turn below. */
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.agent-header-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.agent-header-model {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.agent-notice {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--warn);
+  font-size: 0.85rem;
+  color: var(--muted);
+}

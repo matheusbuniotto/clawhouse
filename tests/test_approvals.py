@@ -230,8 +230,11 @@ async def test_sensitive_tool_call_pauses_turn_and_creates_pending_approval() ->
     assert result.reply == ""
     assert result.error is None
     assert len(result.transcript) == 2
-    assert result.transcript[0] == TranscriptEntry(role="user", content="what time is it?")
+    assert result.transcript[0] == TranscriptEntry(
+        agent_id="main", role="user", content="what time is it?"
+    )
     assert result.transcript[1] == TranscriptEntry(
+        agent_id="main",
         role="tool_call",
         content="{}",
         tool_name="clock",

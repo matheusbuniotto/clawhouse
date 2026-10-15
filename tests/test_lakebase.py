@@ -113,8 +113,8 @@ async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg
     await store.claim_run(SESSION)
 
     assert result.transcript == (
-        TranscriptEntry(role="user", content="hello"),
-        TranscriptEntry(role="assistant", content="saved"),
+        TranscriptEntry(agent_id="main", role="user", content="hello"),
+        TranscriptEntry(agent_id="main", role="assistant", content="saved"),
     )
     assert await store.transcript(SESSION, OWNER) == result.transcript
 

@@ -41,6 +41,7 @@ from clawhouse.agent.prompt import (
     ToolCard,
     build_system_prompt,
 )
+from clawhouse.agent.roster import PLATFORM_AGENT, ActiveAgent, find_agent, session_default
 from clawhouse.capabilities.agent_tools import AgentManagementCapability
 from clawhouse.capabilities.bootstrap import (
     BootstrapContext,
@@ -120,7 +121,17 @@ class UsageNotice:
     context_window: int | None
 
 
-TurnNotice = Token | ToolCallNotice | ToolResultNotice | ApprovalNotice | UsageNotice
+@dataclass(frozen=True, slots=True)
+class AgentNotice:
+    """Opens a turn: which agent answers it, and on which model."""
+
+    agent_id: str
+    name: str
+    emoji: str
+    model: str
+
+
+TurnNotice = Token | ToolCallNotice | ToolResultNotice | ApprovalNotice | UsageNotice | AgentNotice
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
 MCPToolsetFactory = Callable[[MCPServerConfig, str], AbstractToolset[object]]
@@ -184,6 +195,7 @@ class _Claimed:
     user_message: str
     run_id: str
     ctx: TurnContext
+    agent: ActiveAgent = PLATFORM_AGENT
 
 
 async def iter_turn(
@@ -517,12 +529,24 @@ def _usage_notice(event: ContextUsageEvent) -> UsageNotice:
     )
 
 
+async def _start_agent(claimed: _Claimed, queue: _Queue, agent: ActiveAgent) -> _Claimed:
+    """Bind the turn to its agent and announce it before any other frame."""
+    model_name = getattr(claimed.ctx.model, "model_name", "") or ""
+    notice = AgentNotice(
+        agent_id=agent.agent_id, name=agent.name, emoji=agent.emoji, model=str(model_name)
+    )
+    await _publish(claimed.ctx, queue, notice)
+    return replace(claimed, agent=agent)
+
+
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
+    ctx = claimed.ctx
+    agent = await session_default(ctx.store, ctx.owner_id, ctx.default_agent)
+    claimed = await _start_agent(claimed, queue, agent)
     command = parse_command(claimed.user_message)
     if command is not None:
         return await _run_command(claimed, command)
 
-    ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
@@ -575,6 +599,7 @@ async def _run_model_resume(
 ) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+    claimed = await _start_agent(claimed, queue, await _paused_agent(ctx, prior))
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
     call_args = approval.arguments
@@ -601,6 +626,13 @@ async def _run_model_resume(
         deferred_results=_deferred_results(approval, decision),
         skip_tool_call_id=approval.tool_call_id,
     )
+
+
+async def _paused_agent(ctx: TurnContext, prior: tuple[TranscriptEntry, ...]) -> ActiveAgent:
+    """The agent that paused: the one the last user message addressed."""
+    handle = next((e.agent_id for e in reversed(prior) if e.role == "user"), None)
+    found = await find_agent(ctx.store, ctx.owner_id, handle)
+    return found or await session_default(ctx.store, ctx.owner_id, ctx.default_agent)
 
 
 async def _invoke_agent(  # noqa: PLR0913
@@ -733,6 +765,8 @@ def _scrub_entry(entry: TranscriptEntry, token: str) -> TranscriptEntry:
 
 
 async def _append(claimed: _Claimed, entry: TranscriptEntry) -> None:
+    if entry.agent_id is None:
+        entry = replace(entry, agent_id=claimed.agent.agent_id)
     scrubbed = _scrub_entry(entry, claimed.ctx.user_token)
     await claimed.ctx.store.append_entry(claimed.session_id, claimed.run_id, scrubbed)
 
@@ -891,6 +925,7 @@ def _as_text(content: object) -> str:
 __all__ = [
     "BUSY_TURN",
     "FAILED_TURN",
+    "AgentNotice",
     "ApprovalForbidden",
     "ApprovalNotice",
     "ApprovalPending",

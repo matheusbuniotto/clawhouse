@@ -16,6 +16,8 @@ class TranscriptEntry:
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    # Who produced the entry. None on rows written before agents were tracked: the default agent.
+    agent_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

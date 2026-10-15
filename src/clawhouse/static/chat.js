@@ -1,5 +1,5 @@
 import { el, svgEl } from "./dom.js";
-import { appendToolActivity, markRunningToolsError, renderAssistantTurn, renderInlineApproval, renderUserTurn, } from "./transcript.js";
+import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
 export function mount(root, ctx) {
@@ -102,8 +102,17 @@ export function mount(root, ctx) {
     function showEmpty() {
         transcript.replaceChildren(el("p", "empty", "This session is empty."));
     }
+    // Emoji per handle, for headers rebuilt from a reloaded transcript.
+    const agentEmoji = new Map();
+    let headerOwed = false;
     function renderEntry(entry) {
+        if (entry.role !== "user" && headerOwed) {
+            headerOwed = false;
+            const id = entry.agent_id || "main";
+            transcript.append(renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }));
+        }
         if (entry.role === "user") {
+            headerOwed = true;
             transcript.append(renderUserTurn(entry.content));
             return;
         }
@@ -121,6 +130,7 @@ export function mount(root, ctx) {
     function renderTranscript(entries) {
         dropDraft();
         transcript.replaceChildren();
+        headerOwed = false;
         if (entries.length === 0) {
             showEmpty();
             return;
@@ -204,6 +214,21 @@ export function mount(root, ctx) {
         if (wanted)
             modelPicker.value = wanted;
     }
+    async function loadAgents() {
+        try {
+            const response = await fetch("/api/agents");
+            if (!response.ok)
+                return;
+            const agents = (await response.json());
+            for (const agent of agents) {
+                if (agent.signature_emoji)
+                    agentEmoji.set(agent.name, agent.signature_emoji);
+            }
+        }
+        catch {
+            // Headers fall back to the bare handle.
+        }
+    }
     async function loadTranscript() {
         const response = await fetch(`/api/sessions/${sessionId()}/transcript`);
         if (!response.ok) {
@@ -228,6 +253,19 @@ export function mount(root, ctx) {
     }
     function onFrame(frame) {
         const payload = JSON.parse(frame.data);
+        if (frame.event === "agent" && payload.agent_id) {
+            const header = renderAgentHeader({
+                agent_id: payload.agent_id,
+                name: payload.name,
+                emoji: payload.emoji,
+                model: payload.model,
+            });
+            if (draft)
+                transcript.insertBefore(header, draft);
+            else
+                transcript.append(header);
+            return;
+        }
         if (frame.event === "token" && payload.text) {
             draftText += payload.text;
             ensureDraft().textContent = draftText;
@@ -576,6 +614,6 @@ export function mount(root, ctx) {
         }
     }
     void loadModels();
-    void loadTranscript();
+    void loadAgents().then(loadTranscript);
     void checkHatchDraft();
 }

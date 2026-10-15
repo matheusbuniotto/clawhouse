@@ -3,6 +3,7 @@ import type { ScreenContext } from "./shell.js";
 import {
   appendToolActivity,
   markRunningToolsError,
+  renderAgentHeader,
   renderAssistantTurn,
   renderInlineApproval,
   renderUserTurn,
@@ -15,6 +16,12 @@ interface Entry {
   role: "user" | "assistant" | "tool_call" | "tool_result";
   content: string;
   tool_name: string | null;
+  agent_id?: string | null;
+}
+
+interface AgentInfo {
+  name: string;
+  signature_emoji?: string;
 }
 
 interface ModelOption {
@@ -138,8 +145,18 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     transcript.replaceChildren(el("p", "empty", "This session is empty."));
   }
 
+  // Emoji per handle, for headers rebuilt from a reloaded transcript.
+  const agentEmoji = new Map<string, string>();
+  let headerOwed = false;
+
   function renderEntry(entry: Entry): void {
+    if (entry.role !== "user" && headerOwed) {
+      headerOwed = false;
+      const id = entry.agent_id || "main";
+      transcript.append(renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }));
+    }
     if (entry.role === "user") {
+      headerOwed = true;
       transcript.append(renderUserTurn(entry.content));
       return;
     }
@@ -158,6 +175,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   function renderTranscript(entries: Entry[]): void {
     dropDraft();
     transcript.replaceChildren();
+    headerOwed = false;
     if (entries.length === 0) {
       showEmpty();
       return;
@@ -249,6 +267,19 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (wanted) modelPicker.value = wanted;
   }
 
+  async function loadAgents(): Promise<void> {
+    try {
+      const response = await fetch("/api/agents");
+      if (!response.ok) return;
+      const agents = (await response.json()) as AgentInfo[];
+      for (const agent of agents) {
+        if (agent.signature_emoji) agentEmoji.set(agent.name, agent.signature_emoji);
+      }
+    } catch {
+      // Headers fall back to the bare handle.
+    }
+  }
+
   async function loadTranscript(): Promise<void> {
     const response = await fetch(`/api/sessions/${sessionId()}/transcript`);
     if (!response.ok) {
@@ -283,7 +314,21 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       input_tokens?: number;
       output_tokens?: number;
       context_window?: number | null;
+      agent_id?: string;
+      emoji?: string;
+      model?: string;
     };
+    if (frame.event === "agent" && payload.agent_id) {
+      const header = renderAgentHeader({
+        agent_id: payload.agent_id,
+        name: payload.name,
+        emoji: payload.emoji,
+        model: payload.model,
+      });
+      if (draft) transcript.insertBefore(header, draft);
+      else transcript.append(header);
+      return;
+    }
     if (frame.event === "token" && payload.text) {
       draftText += payload.text;
       ensureDraft().textContent = draftText;
@@ -659,6 +704,6 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   void loadModels();
-  void loadTranscript();
+  void loadAgents().then(loadTranscript);
   void checkHatchDraft();
 }

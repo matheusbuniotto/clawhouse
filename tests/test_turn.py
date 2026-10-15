@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from clawhouse.skills import loaded_skill_text
 from clawhouse.store import MemorySessionStore
 from clawhouse.turn import (
     FAILED_TURN,
+    AgentNotice,
     RunInProgress,
     SessionForbidden,
     Token,
@@ -70,6 +72,11 @@ def _ctx(  # noqa: PLR0913
         user_token=user_token,
         mcp_toolset_factory=mcp_toolset_factory,  # type: ignore[arg-type]
     )
+
+
+def _main(*entries: TranscriptEntry) -> tuple[TranscriptEntry, ...]:
+    """Entries as the platform agent writes them: every row carries `agent_id="main"`."""
+    return tuple(replace(entry, agent_id="main") for entry in entries)
 
 
 def _parts(messages: list[ModelMessage]) -> list[str]:
@@ -128,7 +135,7 @@ async def test_turn_persists_the_clock_exchange_and_streams_the_reply() -> None:
         ctx=_ctx(store, FunctionModel(stream_function=_clock_then_reply), emit=notices),
     )
 
-    expected = (
+    expected = _main(
         TranscriptEntry(role="user", content="what time is it?"),
         TranscriptEntry(role="tool_call", content="{}", tool_name="clock", tool_call_id=CALL_ID),
         TranscriptEntry(
@@ -145,6 +152,7 @@ async def test_turn_persists_the_clock_exchange_and_streams_the_reply() -> None:
     assert result.transcript == expected
     assert await store.transcript(SESSION, OWNER) == expected
     assert notices[:-1] == [
+        AgentNotice(agent_id="main", name="main", emoji="🦀", model="function::_clock_then_reply"),
         ToolCallNotice(name="clock", arguments="{}", tool_call_id=CALL_ID),
         ToolResultNotice(name="clock", content=EXPECTED_TIME, tool_call_id=CALL_ID),
         Token("The time is "),
@@ -217,7 +225,7 @@ async def test_a_failed_turn_returns_an_empty_reply_and_keeps_the_tool_rows() ->
     assert result.status == "error"
     assert result.reply == ""
     assert result.error == FAILED_TURN
-    assert result.transcript == (
+    assert result.transcript == _main(
         TranscriptEntry(role="user", content="what time is it?"),
         TranscriptEntry(role="tool_call", content="{}", tool_name="clock", tool_call_id=CALL_ID),
         TranscriptEntry(

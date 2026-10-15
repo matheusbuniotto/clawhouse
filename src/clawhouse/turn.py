@@ -3,6 +3,7 @@
 from clawhouse.agent.turn import (
     BUSY_TURN,
     FAILED_TURN,
+    AgentNotice,
     ApprovalNotice,
     HatchCapability,
     InvalidSessionId,
@@ -27,6 +28,7 @@ from clawhouse.agent.turn import (
 __all__ = [
     "BUSY_TURN",
     "FAILED_TURN",
+    "AgentNotice",
     "ApprovalNotice",
     "HatchCapability",
     "InvalidSessionId",
