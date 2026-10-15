@@ -61,7 +61,11 @@ export function renderQuestionCard(question, onAnswered) {
             const data = (await response.json());
             markChosen(card, selected);
             note.textContent = "";
-            onAnswered({ status: data.status ?? "ok", reply: data.reply ?? "", pending: data.pending ?? [] });
+            onAnswered({
+                status: data.status ?? "ok",
+                reply: data.reply ?? "",
+                pending: data.pending ?? [],
+            });
         }
         catch {
             note.textContent = "Erro de rede ao enviar a resposta.";
@@ -130,5 +134,78 @@ export function renderAnsweredQuestion(argumentsJson, result) {
     if (/picked the default option/.test(result)) {
         card.append(el("p", "question-note", "Sem usuário (job): seguiu a opção padrão."));
     }
+    return card;
+}
+/** Tool name the transcript stores progress cards under. */
+export const REPORT_PROGRESS = "report_progress";
+const STEP_STATUSES = [
+    "pending",
+    "running",
+    "done",
+    "failed",
+];
+const STEP_MARK = {
+    pending: "○",
+    running: "◐",
+    done: "✓",
+    failed: "✗",
+};
+const STEP_LABEL = {
+    pending: "pendente",
+    running: "em andamento",
+    done: "concluído",
+    failed: "falhou",
+};
+/** A stored `report_progress` call's state, or null when it is not usable. */
+export function parseProgress(argumentsJson) {
+    let args;
+    try {
+        args = JSON.parse(argumentsJson);
+    }
+    catch {
+        return null;
+    }
+    if (typeof args.task_id !== "string" || !Array.isArray(args.steps))
+        return null;
+    const steps = [];
+    for (const raw of args.steps) {
+        const status = (raw.status ?? "pending");
+        if (typeof raw.label !== "string" || !STEP_STATUSES.includes(status))
+            return null;
+        steps.push({ label: raw.label, status });
+    }
+    return { task_id: args.task_id, steps };
+}
+function fillProgress(card, state) {
+    const done = state.steps.filter((step) => step.status === "done").length;
+    const list = el("ol", "progress-steps");
+    for (const step of state.steps) {
+        const item = el("li", "progress-step");
+        item.dataset.status = step.status;
+        const mark = el("span", "progress-mark", STEP_MARK[step.status]);
+        mark.setAttribute("aria-label", STEP_LABEL[step.status]);
+        item.append(mark, el("span", "progress-label", step.label));
+        list.append(item);
+    }
+    card.replaceChildren(el("p", "progress-count", `${done}/${state.steps.length} concluídos`), list);
+}
+/**
+ * One card per task: the first report places it, later ones update it in place.
+ * Returns the card; `before` positions a new card (e.g. ahead of the draft).
+ */
+export function upsertProgressCard(container, state, before = null) {
+    const existing = [
+        ...container.querySelectorAll(".progress-card"),
+    ].find((card) => card.dataset.taskId === state.task_id);
+    const card = existing ?? el("div", "progress-card");
+    if (!existing) {
+        card.dataset.taskId = state.task_id;
+        card.setAttribute("role", "status");
+        if (before)
+            container.insertBefore(card, before);
+        else
+            container.append(card);
+    }
+    fillProgress(card, state);
     return card;
 }

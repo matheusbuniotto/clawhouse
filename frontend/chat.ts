@@ -1,12 +1,21 @@
 import {
   ASK_USER,
+  REPORT_PROGRESS,
+  parseProgress,
+  upsertProgressCard,
   renderAnsweredQuestion,
   renderQuestionCard,
   type AnswerResult,
+  type ProgressStep,
   type QuestionCard,
 } from "./cards.js";
 import { el, svgEl } from "./dom.js";
-import { agentSuggestions, mergeSuggestions, type AgentOption, type Suggestion } from "./mentions.js";
+import {
+  agentSuggestions,
+  mergeSuggestions,
+  type AgentOption,
+  type Suggestion,
+} from "./mentions.js";
 import type { ScreenContext } from "./shell.js";
 import {
   appendToolActivity,
@@ -28,7 +37,6 @@ interface Entry {
   tool_name: string | null;
   agent_id?: string | null;
 }
-
 
 interface ModelOption {
   id: string;
@@ -76,8 +84,15 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     "stroke-dasharray": String(ringCircumference),
     "stroke-dashoffset": String(ringCircumference),
   });
-  const ring = svgEl("svg", { class: "ctx-ring", viewBox: "0 0 36 36", "aria-hidden": "true" });
-  ring.append(svgEl("circle", { class: "ctx-track", cx: "18", cy: "18", r: "15.5" }), ringFill);
+  const ring = svgEl("svg", {
+    class: "ctx-ring",
+    viewBox: "0 0 36 36",
+    "aria-hidden": "true",
+  });
+  ring.append(
+    svgEl("circle", { class: "ctx-track", cx: "18", cy: "18", r: "15.5" }),
+    ringFill,
+  );
   const meterLabel = el("span", "ctx-label", "0");
   meter.append(ring, meterLabel);
 
@@ -122,9 +137,13 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     // The ring fills against the model's context window; 300k is a sane gauge
     // when the window is unknown. Colour is absolute, per the product call.
     const denominator = contextWindow ?? 300_000;
-    const ratio = denominator > 0 ? Math.min(1, contextTokens / denominator) : 0;
+    const ratio =
+      denominator > 0 ? Math.min(1, contextTokens / denominator) : 0;
     meter.dataset.level = usageLevel(contextTokens);
-    ringFill.setAttribute("stroke-dashoffset", String(ringCircumference * (1 - ratio)));
+    ringFill.setAttribute(
+      "stroke-dashoffset",
+      String(ringCircumference * (1 - ratio)),
+    );
     meterLabel.textContent = formatTokens(contextTokens);
     const detail = contextWindow
       ? `${contextTokens.toLocaleString()} / ${contextWindow.toLocaleString()} input tokens`
@@ -161,14 +180,20 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (entry.role === "user" || !headerOwed) return;
     headerOwed = false;
     const id = entry.agent_id || "main";
-    transcript.append(renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }));
+    transcript.append(
+      renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }),
+    );
   }
 
   /** Returns how many entries it consumed: a question is its call plus its result. */
   function renderQuestionEntries(entries: Entry[], index: number): number {
     const call = entries[index];
     const result = entries[index + 1];
-    if (!result || result.role !== "tool_result" || result.tool_name !== ASK_USER) {
+    if (
+      !result ||
+      result.role !== "tool_result" ||
+      result.tool_name !== ASK_USER
+    ) {
       return 1; // Still pending: the live card comes from /questions.
     }
     headerFor(call);
@@ -194,10 +219,18 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     const name = entry.tool_name ?? "tool";
     if (entry.role === "tool_call") {
-      appendToolActivity(transcript, { event: "tool_call", name, arguments: entry.content });
+      appendToolActivity(transcript, {
+        event: "tool_call",
+        name,
+        arguments: entry.content,
+      });
       return;
     }
-    appendToolActivity(transcript, { event: "tool_result", name, content: entry.content });
+    appendToolActivity(transcript, {
+      event: "tool_result",
+      name,
+      content: entry.content,
+    });
   }
 
   function renderTranscript(entries: Entry[]): void {
@@ -208,8 +241,19 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       showEmpty();
       return;
     }
-    for (let index = 0; index < entries.length; ) {
+    for (let index = 0; index < entries.length;) {
       const entry = entries[index];
+      if (entry.tool_name === REPORT_PROGRESS) {
+        // The last state wins; the card keeps the spot of the first report.
+        const state =
+          entry.role === "tool_call" ? parseProgress(entry.content) : null;
+        if (state) {
+          headerFor(entry);
+          upsertProgressCard(transcript, state);
+        }
+        index += 1;
+        continue;
+      }
       if (entry.role === "tool_call" && entry.tool_name === ASK_USER) {
         index += renderQuestionEntries(entries, index);
         continue;
@@ -311,7 +355,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       if (!Array.isArray(agents)) return;
       agentOptions = agents;
       for (const agent of agents) {
-        if (agent.signature_emoji) agentEmoji.set(agent.name, agent.signature_emoji);
+        if (agent.signature_emoji)
+          agentEmoji.set(agent.name, agent.signature_emoji);
       }
     } catch {
       // Headers fall back to the bare handle.
@@ -388,7 +433,17 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       options?: string[];
       default?: string | null;
       multi?: boolean;
+      task_id?: string;
+      steps?: ProgressStep[];
     };
+    if (frame.event === "progress" && payload.task_id) {
+      upsertProgressCard(
+        transcript,
+        { task_id: payload.task_id, steps: payload.steps ?? [] },
+        draft,
+      );
+      return;
+    }
     if (frame.event === "question" && payload.question_id) {
       showQuestion({
         id: payload.question_id,
@@ -401,7 +456,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       return;
     }
     // Questions render as cards, not tool rows.
-    if ((frame.event === "tool_call" || frame.event === "tool_result") && payload.name === ASK_USER) {
+    if (
+      (frame.event === "tool_call" || frame.event === "tool_result") &&
+      (payload.name === ASK_USER || payload.name === REPORT_PROGRESS)
+    ) {
       return;
     }
     if (frame.event === "notice" && payload.text) {
@@ -454,7 +512,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
           }
           setStatus("");
         },
-        payload.arguments
+        payload.arguments,
       );
       transcript.scrollTop = transcript.scrollHeight;
       return;
@@ -487,7 +545,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       return;
     }
     if (frame.event === "error") {
-      const failure = payload.error ?? "The turn failed before a reply was completed.";
+      const failure =
+        payload.error ?? "The turn failed before a reply was completed.";
       markRunningToolsError(transcript, failure);
       dropDraft();
       setStatus(failure);
@@ -575,7 +634,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let selectedIndex = -1;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let suggestionsAbort: AbortController | null = null;
-  let activeTrigger: { type: "@" | "/"; query: string; start: number; end: number } | null = null;
+  let activeTrigger: {
+    type: "@" | "/";
+    query: string;
+    start: number;
+    end: number;
+  } | null = null;
 
   function closePopover(): void {
     if (debounceTimer) clearTimeout(debounceTimer);
@@ -603,9 +667,15 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       return;
     }
     suggestions.forEach((item, idx) => {
-      const li = el("li", `composer-popover-item${idx === selectedIndex ? " active" : ""}`);
+      const li = el(
+        "li",
+        `composer-popover-item${idx === selectedIndex ? " active" : ""}`,
+      );
       li.setAttribute("role", "option");
-      li.setAttribute("aria-selected", idx === selectedIndex ? "true" : "false");
+      li.setAttribute(
+        "aria-selected",
+        idx === selectedIndex ? "true" : "false",
+      );
 
       const label = el("span", "popover-item-label", item.label);
       const detail = el("span", "popover-item-detail", item.detail);
@@ -674,7 +744,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         return;
       }
       const remote = data.suggestions ?? [];
-      suggestions = type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
+      suggestions =
+        type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
       if (selectedIndex < 0 || selectedIndex >= suggestions.length) {
         selectedIndex = suggestions.length > 0 ? 0 : -1;
       }
@@ -713,7 +784,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       popover = null;
     }
     // Agents are already loaded: show them at once, the server fills in files and tables.
-    localSuggestions = type === "@" ? agentSuggestions(agentOptions, query) : [];
+    localSuggestions =
+      type === "@" ? agentSuggestions(agentOptions, query) : [];
     if (localSuggestions.length > 0) {
       suggestions = [...localSuggestions];
       selectedIndex = 0;
@@ -757,7 +829,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        selectedIndex = (selectedIndex - 1 + suggestions.length) % suggestions.length;
+        selectedIndex =
+          (selectedIndex - 1 + suggestions.length) % suggestions.length;
         renderPopover();
         return;
       }
@@ -796,7 +869,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       ]);
       if (!hatchRes.ok || !sessionsRes.ok) return;
       const hatchData = (await hatchRes.json()) as { hatched?: boolean };
-      const sessionsData = (await sessionsRes.json()) as { sessions?: unknown[] };
+      const sessionsData = (await sessionsRes.json()) as {
+        sessions?: unknown[];
+      };
       const hasSessions = (sessionsData.sessions?.length ?? 0) > 0;
       if (!hatchData.hatched && !hasSessions && !input.value) {
         input.value = "Wake up, my friend!";

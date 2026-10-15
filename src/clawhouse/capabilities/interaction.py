@@ -1,4 +1,4 @@
-"""Structured interaction in the transcript: questions with buttons (`ask_user`).
+"""Structured interaction in the transcript: questions (`ask_user`) and progress cards.
 
 A question reuses the approval pause: the tool defers, the run ends with
 `DeferredToolRequests`, the store keeps the pending call, and the answer comes
@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
+from pydantic import BaseModel, ValidationError
 from pydantic_ai import CallDeferred, ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
@@ -22,6 +23,34 @@ ASK_USER_DESCRIPTION = (
     "asking in prose when you need a decision. `options` are short button labels; "
     "`default` (one of the options) is used when nobody can answer."
 )
+
+
+REPORT_PROGRESS = "report_progress"
+REPORT_PROGRESS_DESCRIPTION = (
+    "Show the user a checklist for a long task and keep it current. Call it with the full step "
+    "list each time a step changes; the same `task_id` updates the same card."
+)
+
+StepStatus = Literal["pending", "running", "done", "failed"]
+
+
+class Step(BaseModel):
+    label: str
+    status: StepStatus = "pending"
+
+
+class _ProgressArgs(BaseModel):
+    task_id: str
+    steps: list[Step]
+
+
+def parse_progress(arguments: str) -> tuple[str, tuple[Step, ...]] | None:
+    """A `report_progress` call's card state, or None when the model sent junk."""
+    try:
+        args = _ProgressArgs.model_validate_json(arguments or "{}")
+    except ValidationError:
+        return None
+    return args.task_id, tuple(args.steps)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +114,10 @@ def _question(question: str, options: list[str], default: str | None, *, multi: 
 
 @dataclass
 class InteractionCapability(AbstractCapability[Any]):
-    """`ask_user` for every agent. `headless` answers with the default instead of pausing."""
+    """`ask_user` and `report_progress` for every agent.
+
+    `headless` makes `ask_user` answer with the default instead of pausing.
+    """
 
     headless: bool = False
 
@@ -112,6 +144,14 @@ class InteractionCapability(AbstractCapability[Any]):
                 }
             )
 
+        def report_progress(task_id: str, steps: list[Step]) -> str:
+            """Show or update the progress card for `task_id`."""
+            done = sum(step.status == "done" for step in steps)
+            return f"Progress card {task_id} updated: {done}/{len(steps)} done."
+
         toolset: FunctionToolset[Any] = FunctionToolset()
         toolset.add_function(ask_user, name=ASK_USER, description=ASK_USER_DESCRIPTION)
+        toolset.add_function(
+            report_progress, name=REPORT_PROGRESS, description=REPORT_PROGRESS_DESCRIPTION
+        )
         return toolset

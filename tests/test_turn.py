@@ -393,6 +393,7 @@ async def test_turn_shows_the_skill_catalog_without_the_body(tmp_path: Path) -> 
         "clock",
         "create_agent",
         "ask_user",
+        "report_progress",
         "create_google_sheet",
         "update_google_sheet",
     }
@@ -593,6 +594,7 @@ async def test_empty_skill_library_offers_only_builtin_tools(tmp_path: Path) -> 
         "clock",
         "create_agent",
         "ask_user",
+        "report_progress",
         "create_google_sheet",
         "update_google_sheet",
     }

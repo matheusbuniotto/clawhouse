@@ -34,6 +34,7 @@ from clawhouse.agent.turn import (
     ApprovalNotice,
     InvalidSessionId,
     MCPToolsetFactory,
+    ProgressNotice,
     QuestionNotice,
     Token,
     ToolCallNotice,
@@ -1202,7 +1203,7 @@ def _encode(item: TurnNotice | TurnResult) -> bytes:
 
 
 def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
-    frame = _stream_frame(item) or _interaction_frame(item)
+    frame = _stream_frame(item) or _interaction_frame(item) or _card_frame(item)
     if frame is None:
         return "error", {"status": "error", "reply": "", "error": FAILED_TURN}
     return frame
@@ -1226,7 +1227,7 @@ def _stream_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None:
 
 
 def _interaction_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None:
-    """Usage, who answers, notices for the reader, and question cards."""
+    """Usage, who answers, and notices for the reader."""
     if isinstance(item, UsageNotice):
         return "usage", {
             "input_tokens": item.input_tokens,
@@ -1242,6 +1243,14 @@ def _interaction_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None
         }
     if isinstance(item, WarningNotice):
         return "notice", {"text": item.text}
+    return None
+
+
+def _card_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None:
+    """Question and progress cards."""
+    if isinstance(item, ProgressNotice):
+        steps = [{"label": label, "status": status} for label, status in item.steps]
+        return "progress", {"type": "progress", "task_id": item.task_id, "steps": steps}
     if isinstance(item, QuestionNotice):
         return "question", {
             "question_id": item.question_id,

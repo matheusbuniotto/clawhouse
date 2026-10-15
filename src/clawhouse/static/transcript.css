@@ -619,3 +619,51 @@
 .question-note:empty {
   display: none;
 }
+
+.progress-card {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  padding: 10px 14px;
+  margin: 8px 0;
+}
+
+.progress-count {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.progress-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.progress-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.progress-mark {
+  font-family: var(--font-mono);
+  width: 1.2em;
+  color: var(--muted);
+}
+
+.progress-step[data-status="running"] .progress-mark,
+.progress-step[data-status="running"] .progress-label {
+  color: var(--accent);
+}
+
+.progress-step[data-status="done"] .progress-label {
+  color: var(--muted);
+}
+
+.progress-step[data-status="failed"] .progress-mark,
+.progress-step[data-status="failed"] .progress-label {
+  color: var(--warn);
+}

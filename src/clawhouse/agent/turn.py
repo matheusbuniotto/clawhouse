@@ -59,9 +59,12 @@ from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.interaction import (
     ASK_USER,
     ASK_USER_DESCRIPTION,
+    REPORT_PROGRESS,
+    REPORT_PROGRESS_DESCRIPTION,
     InteractionCapability,
     Question,
     answer_text,
+    parse_progress,
 )
 from clawhouse.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from clawhouse.capabilities.mentions import resolve_mention_bundles, tiered_compaction
@@ -146,6 +149,14 @@ class QuestionNotice:
 
 
 @dataclass(frozen=True, slots=True)
+class ProgressNotice:
+    """The current state of a progress card. One card per `task_id`, updated in place."""
+
+    task_id: str
+    steps: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Answer:
     """The labels the user clicked on a question card."""
 
@@ -189,6 +200,7 @@ TurnNotice = (
     | AgentNotice
     | WarningNotice
     | QuestionNotice
+    | ProgressNotice
 )
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
@@ -595,6 +607,7 @@ def _prompt_for(
         *BUILTIN_TOOLS,
         CREATE_AGENT_TOOL_CARD,
         ToolCard(name=ASK_USER, description=ASK_USER_DESCRIPTION),
+        ToolCard(name=REPORT_PROGRESS, description=REPORT_PROGRESS_DESCRIPTION),
         *GOOGLE_SHEETS_TOOL_CARDS,
     )
     builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
@@ -984,9 +997,24 @@ def _persist_and_emit(
                 continue
             scrubbed = _scrub_notice(notice, token)
             await _record(claimed, scrubbed)
-            await _publish(claimed.ctx, queue, scrubbed)
+            shown = _as_progress(scrubbed)
+            if shown is not None:
+                await _publish(claimed.ctx, queue, shown)
 
     return handle
+
+
+def _as_progress(notice: TurnNotice) -> TurnNotice | None:
+    """`report_progress` streams as its card, not as tool rows; the rows stay in the store."""
+    if not isinstance(notice, ToolCallNotice | ToolResultNotice) or notice.name != REPORT_PROGRESS:
+        return notice
+    if isinstance(notice, ToolResultNotice):
+        return None
+    parsed = parse_progress(notice.arguments)
+    if parsed is None:
+        return None
+    task_id, steps = parsed
+    return ProgressNotice(task_id=task_id, steps=tuple((s.label, s.status) for s in steps))
 
 
 async def _record(claimed: _Claimed, notice: TurnNotice) -> None:
@@ -1085,6 +1113,7 @@ __all__ = [
     "ApprovalPending",
     "HatchCapability",
     "InvalidSessionId",
+    "ProgressNotice",
     "QuestionNotice",
     "RunInProgress",
     "SessionForbidden",

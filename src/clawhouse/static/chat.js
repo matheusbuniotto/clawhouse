@@ -1,6 +1,6 @@
-import { ASK_USER, renderAnsweredQuestion, renderQuestionCard, } from "./cards.js";
+import { ASK_USER, REPORT_PROGRESS, parseProgress, upsertProgressCard, renderAnsweredQuestion, renderQuestionCard, } from "./cards.js";
 import { el, svgEl } from "./dom.js";
-import { agentSuggestions, mergeSuggestions } from "./mentions.js";
+import { agentSuggestions, mergeSuggestions, } from "./mentions.js";
 import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderNotice, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
@@ -36,7 +36,11 @@ export function mount(root, ctx) {
         "stroke-dasharray": String(ringCircumference),
         "stroke-dashoffset": String(ringCircumference),
     });
-    const ring = svgEl("svg", { class: "ctx-ring", viewBox: "0 0 36 36", "aria-hidden": "true" });
+    const ring = svgEl("svg", {
+        class: "ctx-ring",
+        viewBox: "0 0 36 36",
+        "aria-hidden": "true",
+    });
     ring.append(svgEl("circle", { class: "ctx-track", cx: "18", cy: "18", r: "15.5" }), ringFill);
     const meterLabel = el("span", "ctx-label", "0");
     meter.append(ring, meterLabel);
@@ -121,7 +125,9 @@ export function mount(root, ctx) {
     function renderQuestionEntries(entries, index) {
         const call = entries[index];
         const result = entries[index + 1];
-        if (!result || result.role !== "tool_result" || result.tool_name !== ASK_USER) {
+        if (!result ||
+            result.role !== "tool_result" ||
+            result.tool_name !== ASK_USER) {
             return 1; // Still pending: the live card comes from /questions.
         }
         headerFor(call);
@@ -147,10 +153,18 @@ export function mount(root, ctx) {
         }
         const name = entry.tool_name ?? "tool";
         if (entry.role === "tool_call") {
-            appendToolActivity(transcript, { event: "tool_call", name, arguments: entry.content });
+            appendToolActivity(transcript, {
+                event: "tool_call",
+                name,
+                arguments: entry.content,
+            });
             return;
         }
-        appendToolActivity(transcript, { event: "tool_result", name, content: entry.content });
+        appendToolActivity(transcript, {
+            event: "tool_result",
+            name,
+            content: entry.content,
+        });
     }
     function renderTranscript(entries) {
         dropDraft();
@@ -162,6 +176,16 @@ export function mount(root, ctx) {
         }
         for (let index = 0; index < entries.length;) {
             const entry = entries[index];
+            if (entry.tool_name === REPORT_PROGRESS) {
+                // The last state wins; the card keeps the spot of the first report.
+                const state = entry.role === "tool_call" ? parseProgress(entry.content) : null;
+                if (state) {
+                    headerFor(entry);
+                    upsertProgressCard(transcript, state);
+                }
+                index += 1;
+                continue;
+            }
             if (entry.role === "tool_call" && entry.tool_name === ASK_USER) {
                 index += renderQuestionEntries(entries, index);
                 continue;
@@ -320,6 +344,10 @@ export function mount(root, ctx) {
     }
     function onFrame(frame) {
         const payload = JSON.parse(frame.data);
+        if (frame.event === "progress" && payload.task_id) {
+            upsertProgressCard(transcript, { task_id: payload.task_id, steps: payload.steps ?? [] }, draft);
+            return;
+        }
         if (frame.event === "question" && payload.question_id) {
             showQuestion({
                 id: payload.question_id,
@@ -332,7 +360,8 @@ export function mount(root, ctx) {
             return;
         }
         // Questions render as cards, not tool rows.
-        if ((frame.event === "tool_call" || frame.event === "tool_result") && payload.name === ASK_USER) {
+        if ((frame.event === "tool_call" || frame.event === "tool_result") &&
+            (payload.name === ASK_USER || payload.name === REPORT_PROGRESS)) {
             return;
         }
         if (frame.event === "notice" && payload.text) {
@@ -593,7 +622,8 @@ export function mount(root, ctx) {
                 return;
             }
             const remote = data.suggestions ?? [];
-            suggestions = type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
+            suggestions =
+                type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
             if (selectedIndex < 0 || selectedIndex >= suggestions.length) {
                 selectedIndex = suggestions.length > 0 ? 0 : -1;
             }
@@ -629,7 +659,8 @@ export function mount(root, ctx) {
             popover = null;
         }
         // Agents are already loaded: show them at once, the server fills in files and tables.
-        localSuggestions = type === "@" ? agentSuggestions(agentOptions, query) : [];
+        localSuggestions =
+            type === "@" ? agentSuggestions(agentOptions, query) : [];
         if (localSuggestions.length > 0) {
             suggestions = [...localSuggestions];
             selectedIndex = 0;
@@ -670,7 +701,8 @@ export function mount(root, ctx) {
             }
             if (event.key === "ArrowUp") {
                 event.preventDefault();
-                selectedIndex = (selectedIndex - 1 + suggestions.length) % suggestions.length;
+                selectedIndex =
+                    (selectedIndex - 1 + suggestions.length) % suggestions.length;
                 renderPopover();
                 return;
             }
