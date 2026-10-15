@@ -16,6 +16,13 @@ sync:
     - tests/
     - docs/
     - frontend/
+    # Static assets are committed; without these the Apps builder runs `npm run build` and fails.
+    - package.json
+    - package-lock.json
+    - vitest.config.ts
+    - playwright.config.ts
+    - e2e/
+    - Makefile
     - "**/__pycache__/"
     - "**/*.pyc"
     # Root guide only. claw/agents/main/AGENTS.md is the platform agent file and must sync.
