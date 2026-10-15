@@ -1,4 +1,5 @@
 import { el, svgEl } from "./dom.js";
+import { agentSuggestions, mergeSuggestions } from "./mentions.js";
 import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderNotice, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
@@ -104,6 +105,7 @@ export function mount(root, ctx) {
     }
     // Emoji per handle, for headers rebuilt from a reloaded transcript.
     const agentEmoji = new Map();
+    let agentOptions = [];
     let headerOwed = false;
     function renderEntry(entry) {
         if (entry.role === "notice") {
@@ -224,6 +226,9 @@ export function mount(root, ctx) {
             if (!response.ok)
                 return;
             const agents = (await response.json());
+            if (!Array.isArray(agents))
+                return;
+            agentOptions = agents;
             for (const agent of agents) {
                 if (agent.signature_emoji)
                     agentEmoji.set(agent.name, agent.signature_emoji);
@@ -423,6 +428,7 @@ export function mount(root, ctx) {
     // Autocomplete popover state
     let popover = null;
     let suggestions = [];
+    let localSuggestions = [];
     let selectedIndex = -1;
     let debounceTimer = null;
     let suggestionsAbort = null;
@@ -509,8 +515,11 @@ export function mount(root, ctx) {
                 activeTrigger.end !== end) {
                 return;
             }
-            suggestions = data.suggestions ?? [];
-            selectedIndex = suggestions.length > 0 ? 0 : -1;
+            const remote = data.suggestions ?? [];
+            suggestions = type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
+            if (selectedIndex < 0 || selectedIndex >= suggestions.length) {
+                selectedIndex = suggestions.length > 0 ? 0 : -1;
+            }
             renderPopover();
         }
         catch {
@@ -541,6 +550,13 @@ export function mount(root, ctx) {
         if (popover) {
             popover.remove();
             popover = null;
+        }
+        // Agents are already loaded: show them at once, the server fills in files and tables.
+        localSuggestions = type === "@" ? agentSuggestions(agentOptions, query) : [];
+        if (localSuggestions.length > 0) {
+            suggestions = [...localSuggestions];
+            selectedIndex = 0;
+            renderPopover();
         }
         if (debounceTimer)
             clearTimeout(debounceTimer);

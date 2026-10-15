@@ -373,6 +373,10 @@ def _core_script_routes(app: FastAPI) -> None:
     async def jobs_script() -> FileResponse:
         return FileResponse(STATIC / "jobs.js", media_type="text/javascript")
 
+    @app.get("/mentions.js")
+    async def mentions_script() -> FileResponse:
+        return FileResponse(STATIC / "mentions.js", media_type="text/javascript")
+
 
 def _screen_script_routes(app: FastAPI) -> None:
     @app.get("/chat.js")

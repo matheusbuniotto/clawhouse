@@ -1,4 +1,5 @@
 import { el, svgEl } from "./dom.js";
+import { agentSuggestions, mergeSuggestions, type AgentOption, type Suggestion } from "./mentions.js";
 import type { ScreenContext } from "./shell.js";
 import {
   appendToolActivity,
@@ -20,10 +21,6 @@ interface Entry {
   agent_id?: string | null;
 }
 
-interface AgentInfo {
-  name: string;
-  signature_emoji?: string;
-}
 
 interface ModelOption {
   id: string;
@@ -148,6 +145,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   // Emoji per handle, for headers rebuilt from a reloaded transcript.
   const agentEmoji = new Map<string, string>();
+  let agentOptions: AgentOption[] = [];
   let headerOwed = false;
 
   function renderEntry(entry: Entry): void {
@@ -276,7 +274,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     try {
       const response = await fetch("/api/agents");
       if (!response.ok) return;
-      const agents = (await response.json()) as AgentInfo[];
+      const agents = (await response.json()) as AgentOption[];
+      if (!Array.isArray(agents)) return;
+      agentOptions = agents;
       for (const agent of agents) {
         if (agent.signature_emoji) agentEmoji.set(agent.name, agent.signature_emoji);
       }
@@ -486,7 +486,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   // Autocomplete popover state
   let popover: HTMLUListElement | null = null;
-  let suggestions: { label: string; insert_text: string; detail: string; kind: string }[] = [];
+  let suggestions: Suggestion[] = [];
+  let localSuggestions: Suggestion[] = [];
   let selectedIndex = -1;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let suggestionsAbort: AbortController | null = null;
@@ -576,9 +577,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       ) {
         return;
       }
-      const data = (await res.json()) as {
-        suggestions: { label: string; insert_text: string; detail: string; kind: string }[];
-      };
+      const data = (await res.json()) as { suggestions?: Suggestion[] };
       // Re-check sequence and trigger after asynchronous JSON parsing
       if (
         seq !== requestSeq ||
@@ -590,8 +589,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       ) {
         return;
       }
-      suggestions = data.suggestions ?? [];
-      selectedIndex = suggestions.length > 0 ? 0 : -1;
+      const remote = data.suggestions ?? [];
+      suggestions = type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
+      if (selectedIndex < 0 || selectedIndex >= suggestions.length) {
+        selectedIndex = suggestions.length > 0 ? 0 : -1;
+      }
       renderPopover();
     } catch {
       // aborted or network error
@@ -625,6 +627,13 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (popover) {
       popover.remove();
       popover = null;
+    }
+    // Agents are already loaded: show them at once, the server fills in files and tables.
+    localSuggestions = type === "@" ? agentSuggestions(agentOptions, query) : [];
+    if (localSuggestions.length > 0) {
+      suggestions = [...localSuggestions];
+      selectedIndex = 0;
+      renderPopover();
     }
 
     if (debounceTimer) clearTimeout(debounceTimer);

@@ -251,12 +251,17 @@ test("shows autocomplete popover on @ trigger and inserts suggestion on Enter", 
         ],
       });
     }
+    // Agent rows come from GET /api/agents (#97); server agent rows are ignored.
+    if (url === "/api/agents") {
+      return jsonResponse([{ name: "main", description: "Platform", signature_emoji: "🦀" }]);
+    }
     if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
     if (url === "/api/models") return jsonResponse({ models: [] });
     return jsonResponse({});
   });
 
   await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
   const message = document.querySelector("#message") as HTMLTextAreaElement;
 
   message.value = "@ma";
@@ -265,7 +270,7 @@ test("shows autocomplete popover on @ trigger and inserts suggestion on Enter", 
   message.dispatchEvent(new Event("input"));
 
   await vi.waitFor(() => expect(document.querySelector(".composer-popover")).not.toBeNull());
-  expect(document.querySelector(".popover-item-label")?.textContent).toBe("main");
+  expect(document.querySelector(".popover-item-label")?.textContent).toBe("🦀 @main");
 
   // Press Enter to select
   message.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));

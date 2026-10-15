@@ -17,6 +17,7 @@
     "dom.ts",
     "chat.ts",
     "transcript.ts",
+    "mentions.ts",
     "jobs.ts",
     "sessions.ts",
     "new.ts",
