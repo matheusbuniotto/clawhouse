@@ -550,3 +550,72 @@
   font-size: 0.85rem;
   color: var(--muted);
 }
+
+/* Question cards (#97): ask_user answered with buttons, not typing. */
+.question-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.question-card[data-state="pending"] {
+  border-color: var(--accent);
+}
+
+.question-text {
+  margin: 0 0 0.6rem;
+  color: var(--text-strong);
+}
+
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.question-option,
+.question-submit {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.question-option:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+}
+
+.question-option.default {
+  border-style: dashed;
+}
+
+.question-option[aria-pressed="true"],
+.question-option.chosen {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--text-strong);
+}
+
+.question-option:disabled:not(.chosen) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.question-submit {
+  margin-top: 0.6rem;
+}
+
+.question-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.question-note:empty {
+  display: none;
+}

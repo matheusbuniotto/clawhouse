@@ -18,6 +18,7 @@
     "chat.ts",
     "transcript.ts",
     "mentions.ts",
+    "cards.ts",
     "jobs.ts",
     "sessions.ts",
     "new.ts",

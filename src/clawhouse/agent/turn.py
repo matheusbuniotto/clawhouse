@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -56,6 +56,13 @@ from clawhouse.capabilities.bootstrap import (
     load_bootstrap_directives,
 )
 from clawhouse.capabilities.databricks import DatabricksCapability
+from clawhouse.capabilities.interaction import (
+    ASK_USER,
+    ASK_USER_DESCRIPTION,
+    InteractionCapability,
+    Question,
+    answer_text,
+)
 from clawhouse.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from clawhouse.capabilities.mentions import resolve_mention_bundles, tiered_compaction
 from clawhouse.capabilities.sheets import GOOGLE_SHEETS_TOOL_CARDS, GoogleSheetsCapability
@@ -83,6 +90,8 @@ from clawhouse.store.store import (
 logger = logging.getLogger("clawhouse.turn")
 
 FAILED_TURN = "The turn failed before a reply was completed."
+QUESTION_TTL = timedelta(hours=24)
+QUESTION_EXPIRED = "Pergunta encerrada sem resposta depois de 24h."
 BUSY_TURN = "A turn is already running for this session."
 
 
@@ -125,6 +134,28 @@ class ApprovalNotice:
 
 
 @dataclass(frozen=True, slots=True)
+class QuestionNotice:
+    """The run paused on `ask_user`: the card to show, answered by `question_id`."""
+
+    question_id: str
+    question: str
+    options: tuple[str, ...]
+    default: str | None
+    multi: bool
+    tool_call_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class Answer:
+    """The labels the user clicked on a question card."""
+
+    selected: tuple[str, ...]
+
+
+Resolution = Literal["approved", "denied"] | Answer
+
+
+@dataclass(frozen=True, slots=True)
 class UsageNotice:
     """Input tokens of the last model request: the context as sent to the model."""
 
@@ -157,6 +188,7 @@ TurnNotice = (
     | UsageNotice
     | AgentNotice
     | WarningNotice
+    | QuestionNotice
 )
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
@@ -178,6 +210,8 @@ class TurnContext:
     sensitive_tools: tuple[str, ...] = ()
     databricks_capability: DatabricksCapability | None = None
     default_agent: str | None = None
+    # No one is watching (scheduled job): questions take their default instead of pausing.
+    headless: bool = False
 
 
 def canonical_session_id(value: str) -> str:
@@ -201,7 +235,7 @@ async def run_turn(session_id: str, user_message: str, *, ctx: TurnContext) -> T
 async def resume_turn(
     session_id: str,
     approval_id: str,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     *,
     ctx: TurnContext,
 ) -> TurnResult:
@@ -253,7 +287,7 @@ async def iter_turn(
 async def iter_resume_turn(
     session_id: str,
     approval_id: str,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     *,
     ctx: TurnContext,
 ) -> AsyncGenerator[TurnNotice | TurnResult, None]:
@@ -282,19 +316,39 @@ async def iter_resume_turn(
 
 async def _claim(session_id: str, user_message: str, ctx: TurnContext) -> _Claimed:
     await ctx.store.open_session(session_id, ctx.owner_id)
+    expired = await _expire_questions(session_id, ctx)
     run_id = await ctx.store.claim_run(session_id)
-    return _Claimed(
+    claimed = _Claimed(
         session_id=session_id,
         user_message=user_message,
         run_id=run_id,
         ctx=ctx,
     )
+    for _ in range(expired):
+        await _append(claimed, TranscriptEntry(role="notice", content=QUESTION_EXPIRED))
+    return claimed
+
+
+async def _expire_questions(session_id: str, ctx: TurnContext) -> int:
+    """Close questions nobody answered in `QUESTION_TTL`, so the session is not stuck."""
+    pending = await ctx.store.list_approvals(ctx.owner_id, status="pending")
+    cutoff = ctx.now() - QUESTION_TTL
+    stale = [
+        entry
+        for entry in pending
+        if entry.session_id == session_id
+        and entry.tool_name == ASK_USER
+        and entry.created_at < cutoff
+    ]
+    for entry in stale:
+        await ctx.store.resolve_approval(entry.id, "denied", "system:expired", ctx.now())
+    return len(stale)
 
 
 async def _claim_resume(
     session_id: str,
     approval_id: str,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     ctx: TurnContext,
 ) -> _Claimed:
     canonical = canonical_session_id(session_id)
@@ -302,7 +356,8 @@ async def _claim_resume(
     if approval.session_id != canonical:
         raise ApprovalForbidden(approval_id)
     await ctx.store.open_session(canonical, ctx.owner_id)
-    await ctx.store.resolve_approval(approval_id, decision, ctx.owner_id, ctx.now())
+    status = "approved" if isinstance(decision, Answer) else decision
+    await ctx.store.resolve_approval(approval_id, status, ctx.owner_id, ctx.now())
     run_id = await ctx.store.claim_run(canonical)
     return _Claimed(
         session_id=canonical,
@@ -326,7 +381,7 @@ async def _worker(claimed: _Claimed, queue: _Queue, holder: list[TurnResult]) ->
 async def _worker_resume(
     claimed: _Claimed,
     approval: ApprovalEntry,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     *,
     queue: _Queue,
     holder: list[TurnResult],
@@ -503,6 +558,7 @@ def _capabilities_for_turn(
     if birth_ritual:
         capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
     capabilities.append(GoogleSheetsCapability(user_token=claimed.ctx.user_token))
+    capabilities.append(InteractionCapability(headless=claimed.ctx.headless))
     if claimed.ctx.databricks_capability is not None:
         cap = claimed.ctx.databricks_capability
         if not cap.user_token and claimed.ctx.user_token:
@@ -535,7 +591,12 @@ def _prompt_for(
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
     db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
-    base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD, *GOOGLE_SHEETS_TOOL_CARDS)
+    base_tools = (
+        *BUILTIN_TOOLS,
+        CREATE_AGENT_TOOL_CARD,
+        ToolCard(name=ASK_USER, description=ASK_USER_DESCRIPTION),
+        *GOOGLE_SHEETS_TOOL_CARDS,
+    )
     builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
     workspace = _agent_workspace(claimed)
@@ -643,7 +704,7 @@ async def _run_command(claimed: _Claimed, command: Command) -> TurnResult:
 async def _run_model_resume(
     claimed: _Claimed,
     approval: ApprovalEntry,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     queue: _Queue,
 ) -> TurnResult:
     ctx = claimed.ctx
@@ -739,8 +800,10 @@ async def _ok_result(claimed: _Claimed, reply: str) -> TurnResult:
 
 def _deferred_results(
     approval: ApprovalEntry,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
 ) -> DeferredToolResults:
+    if isinstance(decision, Answer):
+        return DeferredToolResults(calls={approval.tool_call_id: answer_text(decision.selected)})
     if decision == "approved":
         return DeferredToolResults(approvals={approval.tool_call_id: ToolApproved()})
     return DeferredToolResults(
@@ -754,26 +817,13 @@ async def _handle_deferred_approvals(
     output: DeferredToolRequests,
 ) -> TurnResult:
     ctx = claimed.ctx
-    first_id: str | None = None
+    ids: list[str] = []
     for call in output.approvals:
-        raw_args = call.args_as_json_str()
-        scrubbed = scrub_token(raw_args, ctx.user_token) if ctx.user_token else raw_args
-        entry = await ctx.store.create_approval(
-            session_id=claimed.session_id,
-            run_id=claimed.run_id,
-            tool_name=call.tool_name,
-            tool_call_id=call.tool_call_id,
-            arguments=scrubbed,
-        )
-        if first_id is None:
-            first_id = entry.id
-        notice = ApprovalNotice(
-            approval_id=entry.id,
-            name=call.tool_name,
-            arguments=scrubbed,
-            tool_call_id=call.tool_call_id,
-        )
-        await _publish(ctx, queue, notice)
+        ids.append(await _pause_for_approval(claimed, queue, call))
+    for call in output.calls:
+        if call.tool_name == ASK_USER:
+            ids.append(await _pause_for_question(claimed, queue, call))
+    first_id = ids[0] if ids else None
     transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     return TurnResult(
         session_id=claimed.session_id,
@@ -783,6 +833,48 @@ async def _handle_deferred_approvals(
         transcript=transcript,
         approval_id=first_id,
     )
+
+
+async def _pause_record(claimed: _Claimed, call: ToolCallPart) -> tuple[str, str]:
+    ctx = claimed.ctx
+    raw_args = call.args_as_json_str()
+    scrubbed = scrub_token(raw_args, ctx.user_token) if ctx.user_token else raw_args
+    entry = await ctx.store.create_approval(
+        session_id=claimed.session_id,
+        run_id=claimed.run_id,
+        tool_name=call.tool_name,
+        tool_call_id=call.tool_call_id,
+        arguments=scrubbed,
+    )
+    return entry.id, scrubbed
+
+
+async def _pause_for_approval(claimed: _Claimed, queue: _Queue, call: ToolCallPart) -> str:
+    approval_id, arguments = await _pause_record(claimed, call)
+    notice = ApprovalNotice(
+        approval_id=approval_id,
+        name=call.tool_name,
+        arguments=arguments,
+        tool_call_id=call.tool_call_id,
+    )
+    await _publish(claimed.ctx, queue, notice)
+    return approval_id
+
+
+async def _pause_for_question(claimed: _Claimed, queue: _Queue, call: ToolCallPart) -> str:
+    """A question pauses like an approval: same row, same lock on the session."""
+    question_id, arguments = await _pause_record(claimed, call)
+    asked = Question.from_arguments(arguments)
+    notice = QuestionNotice(
+        question_id=question_id,
+        question=asked.question,
+        options=asked.options,
+        default=asked.default,
+        multi=asked.multi,
+        tool_call_id=call.tool_call_id,
+    )
+    await _publish(claimed.ctx, queue, notice)
+    return question_id
 
 
 def _bootstrap(
@@ -987,11 +1079,13 @@ __all__ = [
     "BUSY_TURN",
     "FAILED_TURN",
     "AgentNotice",
+    "Answer",
     "ApprovalForbidden",
     "ApprovalNotice",
     "ApprovalPending",
     "HatchCapability",
     "InvalidSessionId",
+    "QuestionNotice",
     "RunInProgress",
     "SessionForbidden",
     "Token",

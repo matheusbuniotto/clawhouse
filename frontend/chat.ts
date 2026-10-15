@@ -1,3 +1,10 @@
+import {
+  ASK_USER,
+  renderAnsweredQuestion,
+  renderQuestionCard,
+  type AnswerResult,
+  type QuestionCard,
+} from "./cards.js";
 import { el, svgEl } from "./dom.js";
 import { agentSuggestions, mergeSuggestions, type AgentOption, type Suggestion } from "./mentions.js";
 import type { ScreenContext } from "./shell.js";
@@ -13,6 +20,7 @@ import {
 
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
+const WAITING_FOR_ANSWER = "Esperando sua resposta na pergunta acima.";
 
 interface Entry {
   role: "user" | "assistant" | "tool_call" | "tool_result" | "notice";
@@ -89,6 +97,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   root.append(transcript, form);
 
   let draft: HTMLElement | null = null;
+  let questionAsked = false;
   let draftText = "";
   let controller: AbortController | null = null;
 
@@ -148,16 +157,32 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let agentOptions: AgentOption[] = [];
   let headerOwed = false;
 
+  function headerFor(entry: Entry): void {
+    if (entry.role === "user" || !headerOwed) return;
+    headerOwed = false;
+    const id = entry.agent_id || "main";
+    transcript.append(renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }));
+  }
+
+  /** Returns how many entries it consumed: a question is its call plus its result. */
+  function renderQuestionEntries(entries: Entry[], index: number): number {
+    const call = entries[index];
+    const result = entries[index + 1];
+    if (!result || result.role !== "tool_result" || result.tool_name !== ASK_USER) {
+      return 1; // Still pending: the live card comes from /questions.
+    }
+    headerFor(call);
+    const card = renderAnsweredQuestion(call.content, result.content);
+    if (card) transcript.append(card);
+    return 2;
+  }
+
   function renderEntry(entry: Entry): void {
     if (entry.role === "notice") {
       transcript.append(renderNotice(entry.content));
       return;
     }
-    if (entry.role !== "user" && headerOwed) {
-      headerOwed = false;
-      const id = entry.agent_id || "main";
-      transcript.append(renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }));
-    }
+    headerFor(entry);
     if (entry.role === "user") {
       headerOwed = true;
       transcript.append(renderUserTurn(entry.content));
@@ -183,7 +208,15 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       showEmpty();
       return;
     }
-    for (const entry of entries) renderEntry(entry);
+    for (let index = 0; index < entries.length; ) {
+      const entry = entries[index];
+      if (entry.role === "tool_call" && entry.tool_name === ASK_USER) {
+        index += renderQuestionEntries(entries, index);
+        continue;
+      }
+      renderEntry(entry);
+      index += 1;
+    }
     transcript.scrollTop = transcript.scrollHeight;
   }
 
@@ -293,6 +326,34 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     const body = (await response.json()) as { entries?: Entry[] };
     renderTranscript(body.entries ?? []);
+    await loadPendingQuestions();
+  }
+
+  async function loadPendingQuestions(): Promise<void> {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId()}/questions`);
+      if (!response.ok) return;
+      const pending = (await response.json()) as QuestionCard[];
+      if (!Array.isArray(pending) || pending.length === 0) return;
+      transcript.querySelector(".empty")?.remove();
+      for (const question of pending) showQuestion(question);
+      setStatus(WAITING_FOR_ANSWER);
+    } catch {
+      // The transcript is still usable without the live card.
+    }
+  }
+
+  function showQuestion(question: QuestionCard): void {
+    if (draft?.classList.contains("thinking")) dropDraft();
+    transcript.append(renderQuestionCard(question, onAnswered));
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  function onAnswered(result: AnswerResult): void {
+    if (result.reply) transcript.append(renderAssistantTurn(result.reply));
+    for (const question of result.pending) showQuestion(question);
+    setStatus(result.pending.length > 0 ? WAITING_FOR_ANSWER : "");
+    transcript.scrollTop = transcript.scrollHeight;
   }
 
   function parseFrame(raw: string): SseFrame | null {
@@ -322,7 +383,27 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       agent_id?: string;
       emoji?: string;
       model?: string;
+      question_id?: string;
+      question?: string;
+      options?: string[];
+      default?: string | null;
+      multi?: boolean;
     };
+    if (frame.event === "question" && payload.question_id) {
+      showQuestion({
+        id: payload.question_id,
+        question: payload.question ?? "",
+        options: payload.options ?? [],
+        default: payload.default ?? null,
+        multi: payload.multi ?? false,
+      });
+      questionAsked = true;
+      return;
+    }
+    // Questions render as cards, not tool rows.
+    if ((frame.event === "tool_call" || frame.event === "tool_result") && payload.name === ASK_USER) {
+      return;
+    }
     if (frame.event === "notice" && payload.text) {
       const note = renderNotice(payload.text);
       if (draft) transcript.insertBefore(note, draft);
@@ -396,7 +477,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     if (frame.event === "done") {
       commitReply(payload.reply ?? "");
-      if (payload.status === "pending_approval") {
+      if (payload.status === "pending_approval" && questionAsked) {
+        setStatus(WAITING_FOR_ANSWER);
+      } else if (payload.status === "pending_approval") {
         setStatus("Action paused waiting for approval above.");
       } else {
         setStatus("");
@@ -434,6 +517,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   async function sendMessage(text: string): Promise<void> {
+    questionAsked = false;
     setBusy(true);
     setStatus("");
     controller = new AbortController();
