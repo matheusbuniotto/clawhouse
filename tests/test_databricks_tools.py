@@ -9,18 +9,18 @@ import pytest
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from crabriks.agent.turn import (
+from clawhouse.agent.turn import (
     TurnContext,
     run_turn,
 )
-from crabriks.capabilities.databricks import (
+from clawhouse.capabilities.databricks import (
     DatabricksCapability,
     DatabricksTools,
     enforce_query_limit,
     is_readonly_query,
     resolve_warehouse_id,
 )
-from crabriks.store.store import MemorySessionStore
+from clawhouse.store.store import MemorySessionStore
 
 
 def test_is_readonly_query() -> None:

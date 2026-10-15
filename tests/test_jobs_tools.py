@@ -26,10 +26,10 @@ from databricks.sdk.service.jobs import (
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from crabriks.agent.turn import TurnContext, TurnResult, resume_turn, run_turn
-from crabriks.capabilities.databricks import DatabricksCapability
-from crabriks.capabilities.workspace import resolve_agent_workspace
-from crabriks.store.store import MemorySessionStore
+from clawhouse.agent.turn import TurnContext, TurnResult, resume_turn, run_turn
+from clawhouse.capabilities.databricks import DatabricksCapability
+from clawhouse.capabilities.workspace import resolve_agent_workspace
+from clawhouse.store.store import MemorySessionStore
 
 SESSION = "00000000-0000-4000-8000-0000000000a1"
 
@@ -306,9 +306,9 @@ async def test_jobs_create_sql_task_with_inline_query_imports_file_to_workspace(
     resumed = await _approve(client, store, paused.approval_id)
 
     assert _tool_result(resumed) == {"job_id": 44, "name": "ny_taxi_outliers"}
-    expected_path = "/Workspace/Shared/crabriks/ny_taxi_outliers.sql"
+    expected_path = "/Workspace/Shared/clawhouse/ny_taxi_outliers.sql"
     assert client.workspace.upload.call_args.kwargs["path"] == expected_path
-    client.workspace.mkdirs.assert_called_once_with("/Workspace/Shared/crabriks")
+    client.workspace.mkdirs.assert_called_once_with("/Workspace/Shared/clawhouse")
     client.jobs.create.assert_called_once()
     task = client.jobs.create.call_args.kwargs["tasks"][0]
     assert task.sql_task.file.path == expected_path

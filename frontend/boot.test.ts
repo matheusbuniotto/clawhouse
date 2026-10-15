@@ -9,8 +9,8 @@ import { beforeEach, expect, test, vi } from "vitest";
  * so a shell that never boots fails here.
  */
 
-const INDEX = readFileSync(resolve(process.cwd(), "src/crabriks/static/index.html"), "utf8");
-const ENTRY = "../src/crabriks/static/boot.js";
+const INDEX = readFileSync(resolve(process.cwd(), "src/clawhouse/static/index.html"), "utf8");
+const ENTRY = "../src/clawhouse/static/boot.js";
 
 const SESSION = "11111111-1111-4111-8111-111111111111";
 
@@ -54,7 +54,7 @@ beforeEach(() => {
 test("the shipped entry boots the rail, the router, and the theme", async () => {
   await boot();
 
-  expect(document.querySelector("#rail .rail-brand")?.textContent).toBe("Crabriks");
+  expect(document.querySelector("#rail .rail-brand")?.textContent).toBe("Clawhouse");
   expect(document.querySelector("#theme-toggle")?.getAttribute("aria-pressed")).toBe("false");
   expect(document.documentElement.dataset.themeMode).toBe("dark");
 
@@ -83,7 +83,7 @@ test("the theme toggle through the shipped entry applies data-theme-mode", async
 
   (document.querySelector("#theme-toggle") as HTMLButtonElement).click();
   expect(document.documentElement.dataset.themeMode).toBe("light");
-  expect(localStorage.getItem("crabriks.theme-mode")).toBe("light");
+  expect(localStorage.getItem("clawhouse.theme-mode")).toBe("light");
 });
 
 test("a session deep link boots straight into the chat screen", async () => {

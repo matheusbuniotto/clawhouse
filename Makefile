@@ -1,16 +1,16 @@
 .PHONY: all help check lint format test frontend-install frontend-check sync deploy logs status
 
-APP_NAME ?= crabriks
+APP_NAME ?= clawhouse
 WORKSPACE_PATH ?= $(shell databricks apps get $(APP_NAME) -o json 2>/dev/null | jq -r '.default_source_code_path // empty' 2>/dev/null)
 ifeq ($(strip $(WORKSPACE_PATH)),)
-WORKSPACE_PATH := /Workspace/Users/matheus.buniotto@gmail.com/crabriks
+WORKSPACE_PATH := /Workspace/Users/matheus.buniotto@gmail.com/clawhouse
 endif
 
 # Default target runs the quality checks
 all: check
 
 help:
-	@echo "Crabriks Management Makefile"
+	@echo "Clawhouse Management Makefile"
 	@echo ""
 	@echo "Quality targets:"
 	@echo "  make check      - Run all prek quality gates, pytest, and the frontend checks"
@@ -47,7 +47,7 @@ frontend-check:
 	npm run typecheck
 	@echo "==> Building frontend and checking committed output is current..."
 	npm run build
-	git diff --exit-code -- src/crabriks/static
+	git diff --exit-code -- src/clawhouse/static
 	@echo "==> Running frontend component tests (vitest)..."
 	npm test
 

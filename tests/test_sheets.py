@@ -14,9 +14,9 @@ from pydantic import ValidationError
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from crabriks.agent.turn import TurnContext, resume_turn, run_turn
-from crabriks.capabilities import sheets
-from crabriks.capabilities.sheets import (
+from clawhouse.agent.turn import TurnContext, resume_turn, run_turn
+from clawhouse.capabilities import sheets
+from clawhouse.capabilities.sheets import (
     AUTHORIZE,
     NO_TOKEN,
     REJECTED,
@@ -27,7 +27,7 @@ from crabriks.capabilities.sheets import (
     write_new_sheet,
     write_sheet_update,
 )
-from crabriks.store import MemorySessionStore
+from clawhouse.store import MemorySessionStore
 
 SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
 TOKEN = "forwarded-user-token"
@@ -294,7 +294,7 @@ async def test_gateway_403_is_reported_without_the_body(
 
     monkeypatch.setattr("requests.post", mock_post)
     sheet = NewSheet(title="test", rows=[[1]])
-    with caplog.at_level(logging.WARNING, logger="crabriks.sheets"):
+    with caplog.at_level(logging.WARNING, logger="clawhouse.sheets"):
         output = await write_new_sheet(TOKEN, sheet, host="https://adb-123.databricks.com")
     assert output["error"] == "Google Drive gateway returned HTTP 403. Check consent and access."
     assert TOKEN not in output["error"]

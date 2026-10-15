@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -507,6 +507,55 @@ wheels = [
 ]
 
 [[package]]
+name = "clawhouse"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "asyncpg" },
+    { name = "croniter" },
+    { name = "databricks-sdk" },
+    { name = "fastapi" },
+    { name = "pydantic-ai" },
+    { name = "pydantic-ai-harness", extra = ["skills"] },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "complexipy" },
+    { name = "httpx" },
+    { name = "pre-commit" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "vulture" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncpg", specifier = ">=0.32.0" },
+    { name = "croniter", specifier = ">=6.2.4" },
+    { name = "databricks-sdk", specifier = ">=0.151.0" },
+    { name = "fastapi", specifier = ">=0.143.0" },
+    { name = "pydantic-ai", specifier = ">=2.55.0" },
+    { name = "pydantic-ai-harness", extras = ["skills"], specifier = "==0.55.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "complexipy", specifier = ">=0.4.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pre-commit", specifier = ">=4.6.2" },
+    { name = "pyright", specifier = ">=1.1.395" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "ruff", specifier = ">=0.9.9" },
+    { name = "vulture", specifier = ">=2.14" },
+]
+
+[[package]]
 name = "click"
 version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -598,55 +647,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/88/74f98e217da9bb3f483e7a256c029fd0d02d35635286686a87a80701457e/complexipy-8.0.1-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cb40dde1f66a4e31e5b0f9c2f6385fd810f96b80bd7294c5317c75b4eccf0113", size = 3783169, upload-time = "2026-09-07T02:28:56.791Z" },
     { url = "https://files.pythonhosted.org/packages/5d/d7/dfaba1ec77d13c964a66b31a2c29868c4c8d4bcf41b676c7fffd75cad982/complexipy-8.0.1-pp311-pypy311_pp73-musllinux_1_2_aarch64.whl", hash = "sha256:9bcadbdf05c299fe6b8d7359b29b72be27bd1724d2f7636347358f6e0b153c10", size = 3939651, upload-time = "2026-09-07T02:28:58.576Z" },
     { url = "https://files.pythonhosted.org/packages/12/67/3cd9a85f47c8d80de9573a49ace60a67feac633df5a7a84c7ff966767169/complexipy-8.0.1-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:1360d05b1a3e8bebebf417821a6562e1cbb42239282c9ab4e43086a97b8c9dd1", size = 4072261, upload-time = "2026-09-07T02:29:00.051Z" },
-]
-
-[[package]]
-name = "crabriks"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "asyncpg" },
-    { name = "croniter" },
-    { name = "databricks-sdk" },
-    { name = "fastapi" },
-    { name = "pydantic-ai" },
-    { name = "pydantic-ai-harness", extra = ["skills"] },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "complexipy" },
-    { name = "httpx" },
-    { name = "pre-commit" },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-    { name = "vulture" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "asyncpg", specifier = ">=0.32.0" },
-    { name = "croniter", specifier = ">=6.2.4" },
-    { name = "databricks-sdk", specifier = ">=0.151.0" },
-    { name = "fastapi", specifier = ">=0.143.0" },
-    { name = "pydantic-ai", specifier = ">=2.55.0" },
-    { name = "pydantic-ai-harness", extras = ["skills"], specifier = "==0.55.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "complexipy", specifier = ">=0.4.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pre-commit", specifier = ">=4.6.2" },
-    { name = "pyright", specifier = ">=1.1.395" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
-    { name = "ruff", specifier = ">=0.9.9" },
-    { name = "vulture", specifier = ">=2.14" },
 ]
 
 [[package]]

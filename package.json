@@ -1,9 +1,9 @@
 {
-  "name": "crabriks-frontend",
+  "name": "clawhouse-frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Frontend build and component tests for the Crabriks Databricks App.",
+  "description": "Frontend build and component tests for the Clawhouse Databricks App.",
   "scripts": {
     "build": "tsc -p frontend/tsconfig.json",
     "typecheck": "tsc --noEmit -p frontend/tsconfig.json && tsc --noEmit -p frontend/tsconfig.test.json",

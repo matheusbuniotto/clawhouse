@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from crabriks.settings import default_agent_root
-from crabriks.workspace import (
+from clawhouse.settings import default_agent_root
+from clawhouse.workspace import (
     UnsafeAgentName,
     provision_agent_workspace,
     resolve_agent_workspace,

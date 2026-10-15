@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 
-test.describe("Crabriks UI in Safari (WebKit)", () => {
+test.describe("Clawhouse UI in Safari (WebKit)", () => {
   test.afterAll(() => {
     const customAgentDir = path.resolve("claw/agents/nyctaxi_analyst");
     if (fs.existsSync(customAgentDir)) {
@@ -13,7 +13,7 @@ test.describe("Crabriks UI in Safari (WebKit)", () => {
     await page.goto("/chat");
 
     // Title and shell elements
-    await expect(page).toHaveTitle(/Crabriks/);
+    await expect(page).toHaveTitle(/Clawhouse/);
     await expect(page.locator("#rail-user")).toContainText("test-user@databricks.local");
 
     // Navigation rail links
@@ -121,13 +121,13 @@ test.describe("Crabriks UI in Safari (WebKit)", () => {
     const messageInput = page.locator("#message");
     await expect(messageInput).toBeVisible();
 
-    await messageInput.fill("Hello Crabriks testing immediate rendering");
+    await messageInput.fill("Hello Clawhouse testing immediate rendering");
     await page.locator("#composer button[type='submit']").click();
 
     // 1. The user turn must be rendered in the transcript immediately
     const userTurn = page.locator(".bubble.user").last();
     await expect(userTurn).toBeVisible();
-    await expect(userTurn).toContainText("Hello Crabriks testing immediate rendering");
+    await expect(userTurn).toContainText("Hello Clawhouse testing immediate rendering");
 
     // 2. The thinking indicator must be visible while awaiting response
     const thinkingTurn = page.locator(".assistant.thinking");

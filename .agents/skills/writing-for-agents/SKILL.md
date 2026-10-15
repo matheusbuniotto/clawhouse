@@ -51,9 +51,9 @@ Every tool call or integration point can fail. Document the exact recovery branc
 
 ---
 
-## Crabriks Project Surfaces
+## Clawhouse Project Surfaces
 
-When editing documents across the Crabriks codebase, follow the specific conventions for each surface:
+When editing documents across the Clawhouse codebase, follow the specific conventions for each surface:
 
 ### Surface 1: Repo Root `AGENTS.md`
 - **Audience**: AI coding assistants (Claude Code, Antigravity, Cursor) operating on this repository.
@@ -65,7 +65,7 @@ When editing documents across the Crabriks codebase, follow the specific convent
 - **Rule**: Do not add code snippets or ephemeral file paths that rot. Document invariants and behavior.
 
 ### Surface 2: Platform Agent `claw/agents/main/AGENTS.md`
-- **Audience**: Crabriks runtime agent interacting with Databricks users in chat sessions.
+- **Audience**: Clawhouse runtime agent interacting with Databricks users in chat sessions.
 - **Scope**:
   - Behavioral guidelines for tool usage.
   - Unity Catalog discovery rules (`uc_*` tools must run before claiming data is unknown).

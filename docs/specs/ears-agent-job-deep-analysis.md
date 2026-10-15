@@ -2,7 +2,7 @@
 
 ## 1. Overview & Context
 
-This document specifies the end-to-end capability for a user to perform an autonomous analytics workflow directly from the Crabriks chat interface:
+This document specifies the end-to-end capability for a user to perform an autonomous analytics workflow directly from the Clawhouse chat interface:
 1. **User asks to create a specialized agent** (e.g. "Create an agent called 'NyTaxiAnalyst' to inspect high-fare taxi patterns").
 2. **System provisions the agent** both in the database store and in the physical workspace (`claw/agents/<name>/` with OpenClaw files: `AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `workspace/`).
 3. **User asks to create a Databricks Job** running a query on a sample dataset (e.g., `samples.nyctaxi.trips`) and triggering that agent to run a deep analysis on the query outputs.
@@ -86,7 +86,7 @@ sequenceDiagram
 ```
 
 ### 3.1 New Tools & Interfaces
-1. **`create_agent` Tool** (`src/crabriks/capabilities/agent_tools.py`):
+1. **`create_agent` Tool** (`src/clawhouse/capabilities/agent_tools.py`):
    - Parameters:
      - `name`: str (normalized identifier)
      - `description`: str

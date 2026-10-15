@@ -7,10 +7,10 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_SOURCE = ROOT / "src" / "crabriks" / "api" / "app.py"
+APP_SOURCE = ROOT / "src" / "clawhouse" / "api" / "app.py"
 FRONTEND = ROOT / "frontend"
-STATIC = ROOT / "src" / "crabriks" / "static"
-STATIC_PREFIX = "crabriks/static/"
+STATIC = ROOT / "src" / "clawhouse" / "static"
+STATIC_PREFIX = "clawhouse/static/"
 IMPORT_SPECIFIER = re.compile(r"""(?:\bfrom\s+|\bimport\s*\(|\bimport\s+)["'](\./[^"']+)["']""")
 
 
@@ -53,7 +53,7 @@ def test_the_wheel_ships_every_served_static_file(tmp_path: Path) -> None:
 
 def test_force_include_declares_every_served_static_file() -> None:
     assert _force_include_declared() == {
-        f"src/crabriks/static/{name}" for name in _served_static_files()
+        f"src/clawhouse/static/{name}" for name in _served_static_files()
     }
 
 
@@ -70,7 +70,7 @@ def test_every_imported_module_is_served_and_shipped() -> None:
             imports += 1
             target = specifier.removeprefix("./")
             assert target in served, f"{name} imports {specifier}, which is not served"
-            assert f"src/crabriks/static/{target}" in declared, (
+            assert f"src/clawhouse/static/{target}" in declared, (
                 f"{name} imports {specifier}, which is not in the wheel force-include"
             )
 

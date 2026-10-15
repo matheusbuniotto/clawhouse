@@ -5,7 +5,7 @@ export default defineConfig({
   timeout: 30000,
   webServer: {
     command:
-      "CRABRIKS_DEV_USER=test-user@databricks.local uv run uvicorn crabriks.app:app --port 8765 --host 127.0.0.1",
+      "CLAWHOUSE_DEV_USER=test-user@databricks.local uv run uvicorn clawhouse.app:app --port 8765 --host 127.0.0.1",
     port: 8765,
     reuseExistingServer: !process.env.CI,
   },

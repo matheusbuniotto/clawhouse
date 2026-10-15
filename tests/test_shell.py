@@ -7,11 +7,11 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from crabriks.app import create_app
-from crabriks.identity import Caller
-from crabriks.model import MissingAccessToken
-from crabriks.settings import Settings
-from crabriks.store import MemorySessionStore
+from clawhouse.app import create_app
+from clawhouse.identity import Caller
+from clawhouse.model import MissingAccessToken
+from clawhouse.settings import Settings
+from clawhouse.store import MemorySessionStore
 
 OWNER = "ada@example.com"
 HEADERS = {"x-forwarded-email": OWNER, "x-forwarded-access-token": "tok_" + "ada"}

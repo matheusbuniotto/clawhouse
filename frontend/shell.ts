@@ -16,18 +16,18 @@ interface RailSession {
   run_state?: ActivityState;
 }
 
-const THEME_KEY = "crabriks.theme-mode";
-const RAIL_WIDTH_KEY = "crabriks.rail-width";
+const THEME_KEY = "clawhouse.theme-mode";
+const RAIL_WIDTH_KEY = "clawhouse.rail-width";
 const MIN_RAIL_WIDTH = 180;
 const MAX_RAIL_WIDTH = 480;
 
 const TITLES: Record<string, string> = {
-  "/": "Crabriks",
-  "/chat": "Crabriks",
-  "/sessions": "Crabriks · Sessions",
-  "/new": "Crabriks · New session",
-  "/approvals": "Crabriks · Approvals",
-  "/status": "Crabriks · Status",
+  "/": "Clawhouse",
+  "/chat": "Clawhouse",
+  "/sessions": "Clawhouse · Sessions",
+  "/new": "Clawhouse · New session",
+  "/approvals": "Clawhouse · Approvals",
+  "/status": "Clawhouse · Status",
 };
 
 const ROUTES: Record<string, () => Promise<ScreenModule>> = {
@@ -91,7 +91,7 @@ export function mountShell(root: ParentNode = document): void {
     const path = normalize(url.pathname);
     const loader = ROUTES[path] ?? ROUTES["/"];
     const module = await loader();
-    document.title = TITLES[path] ?? "Crabriks";
+    document.title = TITLES[path] ?? "Clawhouse";
     screen.replaceChildren();
     module.mount(screen, { url, navigate });
     updateActive(path, url);
@@ -286,7 +286,7 @@ export function mountShell(root: ParentNode = document): void {
   handle.addEventListener("pointerdown", startResize);
   shell.addEventListener("click", onClick);
   window.addEventListener("popstate", onPopState);
-  window.addEventListener("crabriks:session-deleted", () => {
+  window.addEventListener("clawhouse:session-deleted", () => {
     void loadSessions();
   });
 

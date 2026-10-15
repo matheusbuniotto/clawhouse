@@ -12,20 +12,20 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from crabriks.app import create_app
-from crabriks.identity import Caller
-from crabriks.mcp import MCPServerConfig
-from crabriks.model import MissingAccessToken
-from crabriks.settings import Settings, sensitive_tools_from_env
-from crabriks.shapes import TranscriptEntry
-from crabriks.store import (
+from clawhouse.app import create_app
+from clawhouse.identity import Caller
+from clawhouse.mcp import MCPServerConfig
+from clawhouse.model import MissingAccessToken
+from clawhouse.settings import Settings, sensitive_tools_from_env
+from clawhouse.shapes import TranscriptEntry
+from clawhouse.store import (
     ApprovalAlreadyResolved,
     ApprovalNotFound,
     ApprovalPending,
     MemorySessionStore,
 )
-from crabriks.turn import ApprovalNotice, TurnContext, resume_turn, run_turn
-from crabriks.workspace import resolve_agent_workspace
+from clawhouse.turn import ApprovalNotice, TurnContext, resume_turn, run_turn
+from clawhouse.workspace import resolve_agent_workspace
 
 OWNER = "ada@example.com"
 OTHER = "grace@example.com"
@@ -427,7 +427,7 @@ async def test_approvals_page_requires_signed_in_user() -> None:
 
     assert missing.status_code == 401
     assert page.status_code == 200
-    assert "Crabriks" in page.text
+    assert "Clawhouse" in page.text
     assert 'src="/boot.js"' in page.text
     assert 'id="rail"' in page.text
 
@@ -530,20 +530,20 @@ async def test_approvals_api_lifecycle_and_guardrails() -> None:
 
 def test_malformed_sensitive_tools_env_fails_closed() -> None:
     with pytest.raises(json.JSONDecodeError):
-        sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '["unclosed_string'})
+        sensitive_tools_from_env({"CLAWHOUSE_SENSITIVE_TOOLS": '["unclosed_string'})
 
     with pytest.raises(ValueError):
-        sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '{"invalid": "not_a_list"}'})
+        sensitive_tools_from_env({"CLAWHOUSE_SENSITIVE_TOOLS": '{"invalid": "not_a_list"}'})
 
     with pytest.raises(ValueError):
-        sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": "[1, {}]"})
+        sensitive_tools_from_env({"CLAWHOUSE_SENSITIVE_TOOLS": "[1, {}]"})
 
 
 def test_documented_sensitive_tools_values_parse() -> None:
     assert sensitive_tools_from_env(
-        {"CRABRIKS_SENSITIVE_TOOLS": "bash,delete_file,drop_table"}
+        {"CLAWHOUSE_SENSITIVE_TOOLS": "bash,delete_file,drop_table"}
     ) == ("bash", "delete_file", "drop_table")
-    assert sensitive_tools_from_env({"CRABRIKS_SENSITIVE_TOOLS": '["bash", "drop_table"]'}) == (
+    assert sensitive_tools_from_env({"CLAWHOUSE_SENSITIVE_TOOLS": '["bash", "drop_table"]'}) == (
         "bash",
         "drop_table",
     )

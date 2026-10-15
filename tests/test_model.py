@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from crabriks.model import (
+from clawhouse.model import (
     MissingAccessToken,
     MissingModelConfig,
     ModelEntry,
@@ -13,7 +13,7 @@ from crabriks.model import (
     openai_compatible_chat_model,
     select_model,
 )
-from crabriks.settings import models_from_env, request_token
+from clawhouse.settings import models_from_env, request_token
 
 COMPATIBLE = {
     "id": "openrouter-llama",
@@ -112,7 +112,7 @@ def test_the_catalog_keeps_databricks_as_the_default() -> None:
         {
             "SERVING_ENDPOINT": "databricks-meta-llama-3-3-70b-instruct",
             "DATABRICKS_HOST": "https://adb-1.azuredatabricks.net",
-            "CRABRIKS_MODELS": json.dumps([COMPATIBLE]),
+            "CLAWHOUSE_MODELS": json.dumps([COMPATIBLE]),
         }
     )
 
@@ -124,7 +124,7 @@ def test_the_catalog_keeps_databricks_as_the_default() -> None:
 
 
 def test_the_first_compatible_model_is_default_without_databricks() -> None:
-    models = models_from_env({"CRABRIKS_MODELS": json.dumps([COMPATIBLE])})
+    models = models_from_env({"CLAWHOUSE_MODELS": json.dumps([COMPATIBLE])})
 
     assert [entry.id for entry in models] == ["openrouter-llama"]
     assert models[0].is_default is True
@@ -169,7 +169,7 @@ def test_compatible_model_can_override_default() -> None:
         {
             "SERVING_ENDPOINT": "databricks-meta-llama-3-3-70b-instruct",
             "DATABRICKS_HOST": "https://adb-1.azuredatabricks.net",
-            "CRABRIKS_MODELS": json.dumps([luna]),
+            "CLAWHOUSE_MODELS": json.dumps([luna]),
         }
     )
 

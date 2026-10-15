@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 const NOW = Date.UTC(2026, 9, 10, 12, 0, 0);
 const HOUR = 3_600_000;
 
-const INDEX = readFileSync(resolve(process.cwd(), "src/crabriks/static/index.html"), "utf8");
+const INDEX = readFileSync(resolve(process.cwd(), "src/clawhouse/static/index.html"), "utf8");
 
 const SESSIONS = [
   { id: "s1", title: "First", created_at: new Date(NOW - HOUR).toISOString(), run_state: "running" },
@@ -63,7 +63,7 @@ afterEach(() => {
 test("renders the persistent rail, caller identity, and dark-by-default theme", async () => {
   await mount();
 
-  expect(document.querySelector("#rail .rail-brand")?.textContent).toBe("Crabriks");
+  expect(document.querySelector("#rail .rail-brand")?.textContent).toBe("Clawhouse");
   expect(document.querySelector("#rail-collapse")?.getAttribute("aria-expanded")).toBe("true");
   expect(
     [...document.querySelectorAll("#rail .rail-nav a[data-nav]")].map((link) =>
@@ -87,16 +87,16 @@ test("the theme toggle persists the mode and keeps dark the default", async () =
   const toggle = document.querySelector("#theme-toggle") as HTMLButtonElement;
 
   expect(document.documentElement.dataset.themeMode).toBe("dark");
-  expect(localStorage.getItem("crabriks.theme-mode")).toBe("dark");
+  expect(localStorage.getItem("clawhouse.theme-mode")).toBe("dark");
 
   toggle.click();
   expect(document.documentElement.dataset.themeMode).toBe("light");
-  expect(localStorage.getItem("crabriks.theme-mode")).toBe("light");
+  expect(localStorage.getItem("clawhouse.theme-mode")).toBe("light");
   expect(toggle.getAttribute("aria-pressed")).toBe("true");
 
   toggle.click();
   expect(document.documentElement.dataset.themeMode).toBe("dark");
-  expect(localStorage.getItem("crabriks.theme-mode")).toBe("dark");
+  expect(localStorage.getItem("clawhouse.theme-mode")).toBe("dark");
 });
 
 test("the rail groups sessions with relative times and a running pulse", async () => {
@@ -246,7 +246,7 @@ test("dragging the rail handle resizes the rail and persists the width", async (
 
   window.dispatchEvent(new MouseEvent("pointermove", { clientX: 360 }));
   expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("360px");
-  expect(localStorage.getItem("crabriks.rail-width")).toBe("360");
+  expect(localStorage.getItem("clawhouse.rail-width")).toBe("360");
 
   window.dispatchEvent(new MouseEvent("pointermove", { clientX: 10 }));
   expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("180px");
@@ -256,7 +256,7 @@ test("dragging the rail handle resizes the rail and persists the width", async (
 });
 
 test("a stored rail width is restored on mount", async () => {
-  localStorage.setItem("crabriks.rail-width", "320");
+  localStorage.setItem("clawhouse.rail-width", "320");
   await mount();
   expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("320px");
 });

@@ -2,7 +2,7 @@
 
 import pytest
 
-from crabriks.store import (
+from clawhouse.store import (
     SCHEMA,
     MemorySessionStore,
     MissingDatabaseCredential,
@@ -12,7 +12,7 @@ from crabriks.store import (
     open_store,
 )
 
-URL = "postgresql://postgres:postgres@localhost:5432/crabriks"
+URL = "postgresql://postgres:postgres@localhost:5432/clawhouse"
 ENDPOINT = "projects/app/branches/production/endpoints/ep-1"
 
 
@@ -27,7 +27,7 @@ def test_a_static_password_does_not_mint_a_token() -> None:
             "PGHOST": "localhost",
             "PGPORT": "5433",
             "PGUSER": "postgres",
-            "PGDATABASE": "crabriks",
+            "PGDATABASE": "clawhouse",
             "PGPASSWORD": "postgres",
             "LAKEBASE_ENDPOINT": ENDPOINT,
         }
@@ -36,7 +36,7 @@ def test_a_static_password_does_not_mint_a_token() -> None:
         host="localhost",
         port=5433,
         user="postgres",
-        database="crabriks",
+        database="clawhouse",
         ssl=False,
         password="post" + "gres",
         endpoint=None,
@@ -102,12 +102,12 @@ async def test_open_store_uses_memory_when_no_database_is_configured() -> None:
 
 
 def test_tables_live_in_the_app_owned_schema() -> None:
-    assert "CREATE SCHEMA IF NOT EXISTS crabriks;" in SCHEMA
-    assert "CREATE TABLE IF NOT EXISTS crabriks.sessions" in SCHEMA
-    assert "CREATE TABLE IF NOT EXISTS crabriks.runs" in SCHEMA
-    assert "CREATE TABLE IF NOT EXISTS crabriks.transcript_entries" in SCHEMA
-    assert "ON crabriks.runs (session_id)" in SCHEMA
-    assert "CREATE TABLE IF NOT EXISTS crabriks.user_profiles" in SCHEMA
+    assert "CREATE SCHEMA IF NOT EXISTS clawhouse;" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS clawhouse.sessions" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS clawhouse.runs" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS clawhouse.transcript_entries" in SCHEMA
+    assert "ON clawhouse.runs (session_id)" in SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS clawhouse.user_profiles" in SCHEMA
 
 
 async def test_memory_session_store_user_profile() -> None:

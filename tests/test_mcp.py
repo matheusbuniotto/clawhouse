@@ -16,7 +16,7 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from crabriks.mcp import (
+from clawhouse.mcp import (
     MAX_TOOL_NAME_LENGTH,
     DuplicateMCPServerName,
     InsecureMCPEndpoint,
@@ -31,7 +31,7 @@ from crabriks.mcp import (
     scrub_token,
     validate_mcp_url,
 )
-from crabriks.settings import mcp_servers_from_env, settings_from_env
+from clawhouse.settings import mcp_servers_from_env, settings_from_env
 
 MOCK_USER_AUTH = "dapi-" + "super-user-auth"
 
@@ -110,12 +110,12 @@ def test_mcp_servers_parsed_from_env() -> None:
             }
         ]
     )
-    servers = mcp_servers_from_env({"CRABRIKS_MCP_SERVERS": raw})
+    servers = mcp_servers_from_env({"CLAWHOUSE_MCP_SERVERS": raw})
     assert len(servers) == 1
     assert servers[0].name == "system.ai"
     assert servers[0].url == "https://adb-123.databricks.com/ai-gateway/mcp-services/system.ai"
 
-    settings = settings_from_env({"CRABRIKS_MCP_SERVERS": raw})
+    settings = settings_from_env({"CLAWHOUSE_MCP_SERVERS": raw})
     assert len(settings.mcp_servers) == 1
     assert settings.mcp_servers[0].name == "system.ai"
 
@@ -397,7 +397,7 @@ def test_invalid_mcp_timeout_is_rejected_or_defaulted() -> None:
         MCPServerConfig(name="bad", url="https://example.com", timeout_seconds=float("nan"))
 
     raw = json.dumps([{"name": "srv", "url": "https://example.com", "timeout_seconds": -10}])
-    parsed = mcp_servers_from_env({"CRABRIKS_MCP_SERVERS": raw})
+    parsed = mcp_servers_from_env({"CLAWHOUSE_MCP_SERVERS": raw})
     assert parsed[0].timeout_seconds == 30.0
 
 
@@ -490,7 +490,7 @@ def test_duplicate_mcp_server_names_rejected_in_settings() -> None:
         ]
     )
     with pytest.raises(DuplicateMCPServerName, match="Duplicate MCP server name: 'dupe'"):
-        mcp_servers_from_env({"CRABRIKS_MCP_SERVERS": raw})
+        mcp_servers_from_env({"CLAWHOUSE_MCP_SERVERS": raw})
 
 
 @pytest.mark.asyncio

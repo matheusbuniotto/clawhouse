@@ -1,13 +1,13 @@
 """Verify domain packages export their canonical shapes and functions."""
 
-import crabriks.agent as agent_pkg
-import crabriks.api as api_pkg
-import crabriks.capabilities as cap_pkg
-import crabriks.store as store_pkg
+import clawhouse.agent as agent_pkg
+import clawhouse.api as api_pkg
+import clawhouse.capabilities as cap_pkg
+import clawhouse.store as store_pkg
 
 
 def test_domain_agent_exports() -> None:
-    assert hasattr(agent_pkg, "crabriks_agent")
+    assert hasattr(agent_pkg, "clawhouse_agent")
     assert hasattr(agent_pkg, "run_turn")
     assert hasattr(agent_pkg, "build_system_prompt")
     assert hasattr(agent_pkg, "to_model_messages")

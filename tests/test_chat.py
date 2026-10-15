@@ -16,14 +16,14 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from crabriks.app import create_app
-from crabriks.identity import Caller
-from crabriks.mcp import MCPServerConfig
-from crabriks.model import MissingAccessToken, ModelEntry, UnknownModel
-from crabriks.settings import Settings
-from crabriks.store import MemorySessionStore
-from crabriks.turn import BUSY_TURN, FAILED_TURN
-from crabriks.workspace import resolve_agent_workspace
+from clawhouse.app import create_app
+from clawhouse.identity import Caller
+from clawhouse.mcp import MCPServerConfig
+from clawhouse.model import MissingAccessToken, ModelEntry, UnknownModel
+from clawhouse.settings import Settings
+from clawhouse.store import MemorySessionStore
+from clawhouse.turn import BUSY_TURN, FAILED_TURN
+from clawhouse.workspace import resolve_agent_workspace
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 HEADERS = {
@@ -123,7 +123,7 @@ async def test_chat_page_requires_a_signed_in_user() -> None:
 
     assert missing.status_code == 401
     assert page.status_code == 200
-    assert "Crabriks" in page.text
+    assert "Clawhouse" in page.text
     assert 'src="/boot.js"' in page.text
     assert 'id="shell"' in page.text
     assert "dapi-secret" not in page.text

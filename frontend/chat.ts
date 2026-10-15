@@ -8,8 +8,8 @@ import {
   renderUserTurn,
 } from "./transcript.js";
 
-const SESSION_KEY = "crabriks.session";
-const MODEL_KEY = "crabriks.model";
+const SESSION_KEY = "clawhouse.session";
+const MODEL_KEY = "clawhouse.model";
 
 interface Entry {
   role: "user" | "assistant" | "tool_call" | "tool_result";

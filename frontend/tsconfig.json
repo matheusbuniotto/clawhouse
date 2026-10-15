@@ -8,7 +8,7 @@
     "moduleDetection": "force",
     "noEmitOnError": true,
     "types": [],
-    "outDir": "../src/crabriks/static",
+    "outDir": "../src/clawhouse/static",
     "rootDir": "."
   },
   "files": [

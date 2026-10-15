@@ -8,7 +8,7 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_evals import Case, Dataset
 
-from crabriks.evals import (
+from clawhouse.evals import (
     ExactMessageSequenceMatch,
     ExactToolCallsMatch,
     ExactTraceMatch,
@@ -20,8 +20,8 @@ from crabriks.evals import (
     execute_turn_eval,
     run_trace_evals,
 )
-from crabriks.shapes import TranscriptEntry
-from crabriks.turn import FAILED_TURN
+from clawhouse.shapes import TranscriptEntry
+from clawhouse.turn import FAILED_TURN
 
 SESSION_ID = "22222222-2222-4222-8222-222222222222"
 OWNER_ID = "eval-user@example.com"
@@ -40,24 +40,24 @@ def _text_reply_model(reply_text: str) -> FunctionModel:
 async def test_execute_turn_eval_captures_success_trace() -> None:
     inputs = TurnEvalInput(
         session_id=SESSION_ID,
-        user_message="Hello Crabriks",
+        user_message="Hello Clawhouse",
         owner_id=OWNER_ID,
-        model=_text_reply_model("Greetings from Crabriks!"),
+        model=_text_reply_model("Greetings from Clawhouse!"),
         now=lambda: FROZEN_TIME,
     )
 
     trace: WorkedExampleTrace = await execute_turn_eval(inputs)
 
     expected_transcript = (
-        TranscriptEntry(role="user", content="Hello Crabriks"),
-        TranscriptEntry(role="assistant", content="Greetings from Crabriks!"),
+        TranscriptEntry(role="user", content="Hello Clawhouse"),
+        TranscriptEntry(role="assistant", content="Greetings from Clawhouse!"),
     )
 
     assert trace.session_id == SESSION_ID
     assert trace.status == "ok"
-    assert trace.reply == "Greetings from Crabriks!"
+    assert trace.reply == "Greetings from Clawhouse!"
     assert trace.error is None
-    assert trace.messages == ("Hello Crabriks", "Greetings from Crabriks!")
+    assert trace.messages == ("Hello Clawhouse", "Greetings from Clawhouse!")
     assert trace.tool_calls == ()
     assert trace.transcript == expected_transcript
     assert trace.persisted_transcript == expected_transcript

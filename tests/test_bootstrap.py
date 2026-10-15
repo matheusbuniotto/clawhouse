@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from crabriks.bootstrap import load_bootstrap
-from crabriks.workspace import resolve_agent_workspace
+from clawhouse.bootstrap import load_bootstrap
+from clawhouse.workspace import resolve_agent_workspace
 
 ORDER = ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")
 

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clawhouse</title>
+    <link rel="stylesheet" href="/tokens.css" />
+    <link rel="stylesheet" href="/shell.css" />
+    <link rel="stylesheet" href="/transcript.css" />
+    <link rel="stylesheet" href="/screens.css" />
+  </head>
+  <body data-screen="chat">
+    <div class="shell" id="shell">
+      <aside class="rail" id="rail" aria-label="Navigation">
+        <header class="rail-head">
+          <p class="rail-brand">Clawhouse</p>
+          <div class="rail-head-actions">
+            <button
+              class="rail-action"
+              id="rail-new"
+              type="button"
+              aria-label="New session"
+              title="New session"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14"></path>
+              </svg>
+            </button>
+            <button
+              class="rail-action"
+              id="rail-collapse"
+              type="button"
+              aria-label="Collapse navigation"
+              title="Collapse navigation"
+              aria-expanded="true"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M15 18l-6-6 6-6"></path>
+              </svg>
+            </button>
+          </div>
+        </header>
+        <nav class="rail-nav" aria-label="Primary">
+          <a class="rail-link" id="nav-chat" data-nav href="/chat">Chat</a>
+          <a class="rail-link" id="nav-sessions" data-nav href="/sessions">Sessions</a>
+          <a class="rail-link" id="nav-approvals" data-nav href="/approvals">Approvals</a>
+          <a class="rail-link" id="nav-status" data-nav href="/status">Status</a>
+        </nav>
+        <p class="rail-heading">Sessions</p>
+        <label class="sr" for="rail-search">Filter sessions</label>
+        <input
+          class="rail-search"
+          id="rail-search"
+          type="search"
+          placeholder="Filter sessions"
+          autocomplete="off"
+        />
+        <div class="rail-sessions" id="rail-sessions"></div>
+        <footer class="rail-foot">
+          <p class="rail-user" id="rail-user">Checking sign-in…</p>
+          <button
+            class="rail-theme"
+            id="theme-toggle"
+            type="button"
+            aria-pressed="false"
+            title="Toggle colour theme"
+          >
+            <svg
+              class="theme-icon-moon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg
+              class="theme-icon-sun"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4"></circle>
+              <path
+                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+              ></path>
+            </svg>
+            <span class="rail-theme-label">Dark</span>
+          </button>
+        </footer>
+      </aside>
+      <aside class="rail-collapsed" id="rail-collapsed" aria-label="Expand navigation">
+        <button
+          class="rail-expand"
+          id="rail-expand"
+          type="button"
+          aria-label="Expand navigation"
+          title="Expand navigation"
+          aria-expanded="false"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 18l6-6-6-6"></path>
+          </svg>
+        </button>
+      </aside>
+      <div
+        class="rail-handle"
+        id="rail-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize navigation"
+      ></div>
+      <main class="screen" id="screen" aria-live="polite"></main>
+    </div>
+    <script type="module" src="/boot.js"></script>
+  </body>
+</html>

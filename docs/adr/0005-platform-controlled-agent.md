@@ -2,7 +2,7 @@
 
 Date: 2026-10-10
 Status: accepted
-Related: [ADR-0002 Lakebase + user workspace storage](0002-lakebase-workspace-storage.md), [issue #1 spec](https://github.com/matheusbuniotto/crabriks/issues/1)
+Related: [ADR-0002 Lakebase + user workspace storage](0002-lakebase-workspace-storage.md), [issue #1 spec](https://github.com/matheusbuniotto/clawhouse/issues/1)
 
 ## Context
 

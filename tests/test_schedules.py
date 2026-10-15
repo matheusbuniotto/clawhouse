@@ -5,17 +5,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.function import FunctionModel
 
-from crabriks.agent.turn import TurnContext
-from crabriks.app import create_app
-from crabriks.capabilities.schedules import (
+from clawhouse.agent.turn import TurnContext
+from clawhouse.app import create_app
+from clawhouse.capabilities.schedules import (
     InvalidScheduleCommand,
     calculate_next_run,
     parse_schedule_command,
     run_scheduled_turn,
 )
-from crabriks.settings import Settings
-from crabriks.store.shapes import ScheduleEntry, TurnResult
-from crabriks.store.store import MemorySessionStore
+from clawhouse.settings import Settings
+from clawhouse.store.shapes import ScheduleEntry, TurnResult
+from clawhouse.store.store import MemorySessionStore
 
 
 def test_parse_cron_syntax() -> None:

@@ -6,7 +6,7 @@ missing half: 26 real, published product screenshots of the shipped Control UI,
 downloaded into [`shots/`](shots/).
 
 Status: reference material, not an ADR. Written to inform
-[issue #22](https://github.com/matheusbuniotto/crabriks/issues/22) (refine the Crabriks
+[issue #22](https://github.com/matheusbuniotto/clawhouse/issues/22) (refine the Clawhouse
 frontend to OpenClaw's design system).
 
 ## Provenance
@@ -39,7 +39,7 @@ Caveats to keep in mind while reading:
 
 ## Index
 
-| Screen (Crabriks v1) | Images |
+| Screen (Clawhouse v1) | Images |
 | --- | --- |
 | App shell + two-pane chat | [9.2 side chat](#1-app-shell--two-pane-chat), [9.4 review panel](#1-app-shell--two-pane-chat), [10.1 MCP app panel](#1-app-shell--two-pane-chat) |
 | Chat — transcript rendering | [9.3 markdown table](#2-chat--transcript-rendering), [9.1 Mermaid](#2-chat--transcript-rendering), [9.5 citations](#2-chat--transcript-rendering) |
@@ -79,7 +79,7 @@ Source: `openclaw/openclaw` release 2026.9.2 ·
 - **Active session** is a filled rounded pill with a slightly lighter surface and
   higher-contrast text; inactive rows are muted text with no background.
 - The rail footer is a real ownership anchor: avatar + name means "you are signed in as".
-  Crabriks shows this today as a floating `#who` paragraph in the header.
+  Clawhouse shows this today as a floating `#who` paragraph in the header.
 
 ### `2026.9.4-chat-two-pane-review-panel.png`
 
@@ -125,7 +125,7 @@ This is the clearest single view of the shipped chat screen. Observable facts:
   document.
 - **Real markdown**: the assistant renders a heading (`Harbor garden opening`), body
   paragraphs, inline code-style emphasis, and a **true table** with a header row and
-  hairlined row separators. Today Crabriks sets `textContent` with
+  hairlined row separators. Today Clawhouse sets `textContent` with
   `white-space: pre-wrap`, so none of this is reachable.
 - **Per-message hover actions** sit below the assistant turn: expand (`⤢`) and
   copy (`⧉`), rendered as quiet icon buttons that do not occupy layout until hovered.
@@ -210,7 +210,7 @@ Source: `openclaw/openclaw` release 2026.10.1 · `CHANGELOG/2026.10.1.md`
 Source: `openclaw/openclaw` release 2026.9.5 ·
 `https://github.com/user-attachments/assets/a223d017e...` (see `CHANGELOG/2026.9.5.md`)
 
-- **The key lesson for Crabriks.** Today we render one flat `p.tool` line per
+- **The key lesson for Clawhouse.** Today we render one flat `p.tool` line per
   `tool_call`/`tool_result` frame. OpenClaw renders an **outcome row**: an identifier in
   monospace (`waypoint-weekly`) with a **status chip** beside it (`OK`, green text on a
   translucent green pill), a state line (`Not requested`), a right-hand meta column of
@@ -278,7 +278,7 @@ Source: `openclaw/openclaw` release 2026.9.4 ·
   time (`just now`, `10m ago`). Each row ends with a disclosure chevron and an overflow `⋯`.
 - Table footer: `1-4 of 4 rows`, a `25 per row` page-size select, and `Previous` / `Next`.
 
-> This screen is the biggest single delta from Crabriks' current `sessions.html`, which is
+> This screen is the biggest single delta from Clawhouse' current `sessions.html`, which is
 > a bare `<ul>` of links.
 
 ### `2026.9.3-sessions-transcript-search.png`
@@ -289,7 +289,7 @@ Source: `openclaw/openclaw` release 2026.9.3 ·
 `https://github.com/user-attachments/assets/9cc2dd61-f187-4489-8c04-420a94403540`
 
 - Session rows are **labelled, not numbered**: a readable title is the primary key.
-  Crabriks currently shows a raw `created_at` timestamp as a row's main content.
+  Clawhouse currently shows a raw `created_at` timestamp as a row's main content.
 
 ### `2026.9.1-sessions-catalog.png`
 
@@ -341,7 +341,7 @@ Source: `openclaw/openclaw` release 2026.9.5 · `CHANGELOG/2026.9.5.md`
 - Pickers enumerate **availability** (`available` / `offline`), so a user can see why an
   option is unusable instead of finding out after submitting.
 
-> **Porting note:** Crabriks has no device concept. The transferable part is the *pattern*
+> **Porting note:** Clawhouse has no device concept. The transferable part is the *pattern*
 > — an in-place picker above the composer whose options carry a state, with the draft
 > preserved. For us the natural equivalent is the platform workspace / agent selection.
 
@@ -373,7 +373,7 @@ Source: `openclaw/openclaw` release 2026.9.5 · `CHANGELOG/2026.9.5.md`
 - Decision surfaces attach **context to the choice**: who owns the follow-up, and when it
   is next reviewed. Approval is not a bare yes/no button.
 
-> **Crabriks-specific:** our approvals screen is the only one of the five with **zero CSS
+> **Clawhouse-specific:** our approvals screen is the only one of the five with **zero CSS
 > rules** — `approval-card`, `btn-approve`, `btn-deny`, `args-json` do not exist in
 > `chat.css`. It currently renders unstyled. See `CURRENT-STATE.md`.
 
@@ -475,9 +475,9 @@ rather than silently retried.
 - **Option 6 is the escape hatch.** A free-text "describe your own" path sits at the end of
 the enumeration, so the pre-baked roles never become a ceiling.
 
-> **Porting note:** Crabriks has no agent-creation surface; the platform agent is fixed and
+> **Porting note:** Clawhouse has no agent-creation surface; the platform agent is fixed and
 > built-in (`new.html` literally reads `Agent main · built-in, read-only`). This screenshot
-> is the reference for [issue #21](https://github.com/matheusbuniotto/crabriks/issues/21)
+> is the reference for [issue #21](https://github.com/matheusbuniotto/clawhouse/issues/21)
 > (agent first-hatch customization flow), not for the v1 five-screen refresh. The
 transferable insight regardless of scope: **a creation flow that is itself a conversation
 needs no bespoke chrome at all** — it is one more transcript, plus an approval gate.
@@ -533,7 +533,7 @@ should be treated as the target contract.
   `lg 16px`, each multiplied by `--control-ui-text-scale`. Body is 14px/1.55 with
   `letter-spacing: -0.01em`. Inputs are forced to `max(16px, …)` to suppress iOS zoom.
 - **Typefaces are a token pair**: `--font-body` ("Instrument Sans" + system stack), a
-  separate `--font-chat` for prose, and a dedicated terminal/mono face. Crabriks currently
+  separate `--font-chat` for prose, and a dedicated terminal/mono face. Clawhouse currently
   `@import`s Google Fonts at the top of `chat.css` — a third-party request on the critical
   path of a Databricks app — and hard-codes the mono family twice.
 
@@ -555,7 +555,7 @@ should be treated as the target contract.
 - **Micro-headings are consistent**: uppercase, letter-spaced, muted, 11–12 px
   (`SESSIONS`, `SEARCH TRANSCRIPTS`) — used to label every region.
 
-### What this means for Crabriks
+### What this means for Clawhouse
 
 The realistic v1 target is **not** this full surface. It is the smallest set of changes
 that makes the five ADR-0004 screens read as the same product as the screenshots above:

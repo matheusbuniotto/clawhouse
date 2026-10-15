@@ -12,7 +12,7 @@ ADR-0003 wires exactly one model: a Databricks Model Serving endpoint called wit
 
 Keep Databricks as the default provider and add a small, env-driven catalog of selectable models.
 
-- **One catalog, resolved from the environment.** `SERVING_ENDPOINT` + `DATABRICKS_HOST` produce the default `databricks` entry. `CRABRIKS_MODELS` is a JSON array of OpenAI-compatible entries (`id`, `label`, `model`, `base_url`, `api_key_env`). Databricks wins the default when present; otherwise the first compatible entry is the default.
+- **One catalog, resolved from the environment.** `SERVING_ENDPOINT` + `DATABRICKS_HOST` produce the default `databricks` entry. `CLAWHOUSE_MODELS` is a JSON array of OpenAI-compatible entries (`id`, `label`, `model`, `base_url`, `api_key_env`). Databricks wins the default when present; otherwise the first compatible entry is the default.
 - **Secrets stay out of the catalog.** Each entry names the env var that holds its key (`api_key_env`), so the catalog itself is safe to put in `app.yaml` and the key is a platform secret resource.
 - **One picker surface.** `GET /api/models` returns `id`, `label`, and `default` per entry; the chat page renders them in a `<select>` and persists the choice per session.
 - **Per-turn selection.** A turn carries an optional `model` id. Omitted means the default; an unknown id is `422`. `model_for(caller, model_id)` stays the injection seam, and `databricks_chat_model` / `openai_compatible_chat_model` build the two provider shapes.

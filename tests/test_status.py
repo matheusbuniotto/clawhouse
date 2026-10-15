@@ -13,11 +13,11 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from crabriks.app import create_app
-from crabriks.identity import Caller
-from crabriks.model import MissingAccessToken
-from crabriks.settings import Settings
-from crabriks.store import MemorySessionStore
+from clawhouse.app import create_app
+from clawhouse.identity import Caller
+from clawhouse.model import MissingAccessToken
+from clawhouse.settings import Settings
+from clawhouse.store import MemorySessionStore
 
 OWNER = "ada@example.com"
 OTHER = "grace@example.com"
@@ -171,7 +171,7 @@ async def test_status_api_log_tail_url_resolution() -> None:
     app_custom = _app(
         store,
         FunctionModel(stream_function=_reply("ok")),
-        log_tail_url="https://adb-test.azuredatabricks.net/apps/crabriks/logs",
+        log_tail_url="https://adb-test.azuredatabricks.net/apps/clawhouse/logs",
     )
     app_default = _app(
         store,
@@ -187,7 +187,7 @@ async def test_status_api_log_tail_url_resolution() -> None:
     assert resp_custom.status_code == 200
     assert (
         resp_custom.json()["log_tail_url"]
-        == "https://adb-test.azuredatabricks.net/apps/crabriks/logs"
+        == "https://adb-test.azuredatabricks.net/apps/clawhouse/logs"
     )
     assert resp_default.status_code == 200
     assert resp_default.json()["log_tail_url"] == "https://adb-test.azuredatabricks.net/#job/logs"
@@ -244,7 +244,7 @@ async def test_status_page_requires_auth_and_serves_html() -> None:
 
     assert unauth.status_code == 401
     assert auth.status_code == 200
-    assert "Crabriks" in auth.text
+    assert "Clawhouse" in auth.text
     assert 'src="/boot.js"' in auth.text
     assert 'id="rail"' in auth.text
 

@@ -1,7 +1,7 @@
-# Crabriks frontend — current state (as-is baseline)
+# Clawhouse frontend — current state (as-is baseline)
 
 Companion to [`SHOTS.md`](SHOTS.md) (OpenClaw visual reference) and
-[`SCREENSHOTS.md`](SCREENSHOTS.md). This file records **what the Crabriks frontend is
+[`SCREENSHOTS.md`](SCREENSHOTS.md). This file records **what the Clawhouse frontend is
 today**, with file-and-line evidence, so a follow-up issue can state improvements as
 checkable deltas instead of adjectives.
 
@@ -13,12 +13,12 @@ Verified against the working tree on 2026-10-11.
 
 | Path | Role | Reality |
 | --- | --- | --- |
-| `src/crabriks/api/app.py` | The HTTP layer. Declares every page, asset, and API route. | Single source of truth for routing. |
-| `src/crabriks/static/*.html` | The 5 screens, as 5 standalone HTML documents. | Served directly; no template engine. |
-| `src/crabriks/static/{chat,sessions,new}.js` | Compiled output of `frontend/*.ts`. | `tsc` output (4-space indent, trailing `export {}`). |
-| `src/crabriks/static/{approvals,status}.js` | **Hand-written JavaScript.** | No TypeScript source exists for either; not in any build or lint gate. |
-| `frontend/*.ts` + `frontend/tsconfig.json` | Upstream TypeScript sources. | `outDir: "../src/crabriks/static"`, `files: ["chat.ts", "sessions.ts", "new.ts"]`. |
-| `.venv/lib/python3.11/site-packages/crabriks/static/` | Stale wheel copy. | Contains only `chat.css`, `chat.js`, `index.html` — exactly the three files in `pyproject.toml`'s wheel `force-include`. |
+| `src/clawhouse/api/app.py` | The HTTP layer. Declares every page, asset, and API route. | Single source of truth for routing. |
+| `src/clawhouse/static/*.html` | The 5 screens, as 5 standalone HTML documents. | Served directly; no template engine. |
+| `src/clawhouse/static/{chat,sessions,new}.js` | Compiled output of `frontend/*.ts`. | `tsc` output (4-space indent, trailing `export {}`). |
+| `src/clawhouse/static/{approvals,status}.js` | **Hand-written JavaScript.** | No TypeScript source exists for either; not in any build or lint gate. |
+| `frontend/*.ts` + `frontend/tsconfig.json` | Upstream TypeScript sources. | `outDir: "../src/clawhouse/static"`, `files: ["chat.ts", "sessions.ts", "new.ts"]`. |
+| `.venv/lib/python3.11/site-packages/clawhouse/static/` | Stale wheel copy. | Contains only `chat.css`, `chat.js`, `index.html` — exactly the three files in `pyproject.toml`'s wheel `force-include`. |
 
 **Two problems fall out of this immediately.**
 
@@ -29,7 +29,7 @@ Verified against the working tree on 2026-10-11.
 2. **The installed package is missing 8 of the 11 served files.** `app.py` serves
    `chat.js`, `chat.css`, `sessions.js`, `new.js`, `approvals.js`, `status.js` and five
    HTML pages, but the wheel force-includes only three files. Under `databricks.yml`
-   (`command: uvicorn crabriks.app:app` with `PYTHONPATH: src`) the synced source tree is
+   (`command: uvicorn clawhouse.app:app` with `PYTHONPATH: src`) the synced source tree is
    used and everything resolves — the inconsistency is latent, not live.
 
 ---
@@ -37,7 +37,7 @@ Verified against the working tree on 2026-10-11.
 ## 2. Per-screen inventory
 
 All five page routes require a caller; without an `x-forwarded-email` header they return
-**401** (`src/crabriks/api/identity.py`).
+**401** (`src/clawhouse/api/identity.py`).
 
 | Route | HTML | JS/TS | API calls | Renders | Affordances |
 | --- | --- | --- | --- | --- | --- |
@@ -48,7 +48,7 @@ All five page routes require a caller; without an `x-forwarded-email` header the
 | `GET /status` | `status.html` | `status.js` (hand-written) | `GET /api/status` (once) | `dl.status-grid` (user, auth mode, token, workspace, model endpoint, storage), session rows with a run-state badge, `a#log-tail-link` | Link opens Databricks logs in a new tab |
 
 Asset routes: `/chat.css`, `/chat.js`, `/sessions.js`, `/new.js`, `/approvals.js`,
-`/status.js` (`src/crabriks/api/app.py:210–232`).
+`/status.js` (`src/clawhouse/api/app.py:210–232`).
 
 **Only chat streams.** Transport is `StreamingResponse(..., media_type="text/event-stream")`
 with frames `token`, `tool_call`, `tool_result`, `approval_required`, `done`, `error`,
@@ -59,7 +59,7 @@ polling, no refresh.
 
 ## 3. Design-token surface
 
-The entire design system is `src/crabriks/static/chat.css`. Its `:root` block
+The entire design system is `src/clawhouse/static/chat.css`. Its `:root` block
 (lines 3–17) is **12 tokens**:
 
 ```css
@@ -196,7 +196,7 @@ leverage.
 
 ## 7. Not verified
 
-- Whether the deployed workspace copy currently matches `src/crabriks/static/`
+- Whether the deployed workspace copy currently matches `src/clawhouse/static/`
   (`Makefile sync` excludes `frontend/`, so an uncompiled TS change drifts silently).
 - The exact rendered appearance of the Approvals screen, given it has no matching CSS —
   inferable only by rendering it.

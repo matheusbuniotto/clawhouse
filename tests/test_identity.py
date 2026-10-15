@@ -2,7 +2,7 @@
 
 import pytest
 
-from crabriks.identity import Unauthenticated, resolve_caller
+from clawhouse.identity import Unauthenticated, resolve_caller
 
 
 def test_email_wins_and_the_token_is_kept_for_the_request() -> None:

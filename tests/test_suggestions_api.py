@@ -8,10 +8,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.function import FunctionModel
 
-from crabriks.app import create_app
-from crabriks.capabilities.workspace import resolve_agent_workspace
-from crabriks.settings import Settings
-from crabriks.store import MemorySessionStore
+from clawhouse.app import create_app
+from clawhouse.capabilities.workspace import resolve_agent_workspace
+from clawhouse.settings import Settings
+from clawhouse.store import MemorySessionStore
 
 OWNER = "ada@example.com"
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)

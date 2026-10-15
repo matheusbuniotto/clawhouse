@@ -4,16 +4,16 @@ from pathlib import Path
 
 import pytest
 
-from crabriks.bootstrap import BootstrapContext, BootstrapFile
-from crabriks.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
-from crabriks.workspace import resolve_agent_workspace
+from clawhouse.bootstrap import BootstrapContext, BootstrapFile
+from clawhouse.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
+from clawhouse.workspace import resolve_agent_workspace
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
 SESSION_B = "22222222-2222-4222-8222-222222222222"
 
 EXPECTED_PREFIX = """\
 # Identity
-You are Crabriks, the platform agent main.
+You are Clawhouse, the platform agent main.
 
 # Tools
 - clock: Return the current UTC time as an ISO-8601 timestamp."""
@@ -43,7 +43,7 @@ def test_sections_follow_fixed_order_and_the_prefix_ignores_the_session(
         {
             "AGENTS.md": "Follow the agreement.",
             "SOUL.md": "Be brief.",
-            "IDENTITY.md": "Name: Crabriks.",
+            "IDENTITY.md": "Name: Clawhouse.",
             "USER.md": "Prefers tables.",
             "MEMORY.md": "Lakebase holds sessions.",
         }
@@ -51,13 +51,13 @@ def test_sections_follow_fixed_order_and_the_prefix_ignores_the_session(
     directory = (tmp_path / "claw" / "agents" / "main").as_posix()
     expected_prefix = f"""\
 # Identity
-You are Crabriks, the platform agent main.
+You are Clawhouse, the platform agent main.
 
 ## SOUL.md
 Be brief.
 
 ## IDENTITY.md
-Name: Crabriks.
+Name: Clawhouse.
 
 # Tools
 - clock: Return the current UTC time as an ISO-8601 timestamp.

@@ -15,12 +15,12 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from crabriks.mcp import InsecureMCPEndpoint, MCPServerConfig
-from crabriks.prompt import CLOCK_DESCRIPTION
-from crabriks.shapes import CustomAgent, TranscriptEntry, UserProfile
-from crabriks.skills import loaded_skill_text
-from crabriks.store import MemorySessionStore
-from crabriks.turn import (
+from clawhouse.mcp import InsecureMCPEndpoint, MCPServerConfig
+from clawhouse.prompt import CLOCK_DESCRIPTION
+from clawhouse.shapes import CustomAgent, TranscriptEntry, UserProfile
+from clawhouse.skills import loaded_skill_text
+from clawhouse.store import MemorySessionStore
+from clawhouse.turn import (
     FAILED_TURN,
     RunInProgress,
     SessionForbidden,
@@ -32,7 +32,7 @@ from crabriks.turn import (
     UsageNotice,
     run_turn,
 )
-from crabriks.workspace import WorkspacePaths, resolve_agent_workspace
+from clawhouse.workspace import WorkspacePaths, resolve_agent_workspace
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 OWNER = "ada@example.com"
@@ -109,7 +109,7 @@ async def _clock_then_reply(
     clock_tool = next(t for t in info.function_tools if t.name == "clock")
     assert clock_tool.description == CLOCK_DESCRIPTION
     assert info.instructions is not None
-    assert info.instructions.startswith("# Identity\nYou are Crabriks, the platform agent main.")
+    assert info.instructions.startswith("# Identity\nYou are Clawhouse, the platform agent main.")
     assert f"session_id: {SESSION}" in info.instructions
     assert "time: 2026-10-10T12:00:00Z" in info.instructions
     if "tool-return" not in _parts(messages):
@@ -378,7 +378,7 @@ async def test_turn_shows_the_skill_catalog_without_the_body(tmp_path: Path) -> 
     assert seen[0].count(_CATALOG) == 1
     assert "# Skills" not in seen[0]
     assert "Full instructions here." not in seen[0]
-    assert "# Identity\nYou are Crabriks, the platform agent main." in seen[0]
+    assert "# Identity\nYou are Clawhouse, the platform agent main." in seen[0]
     assert f"# Workspace\n{paths.directory.as_posix()}" in seen[0]
     assert set(offered[0]) == {
         "load_capability",

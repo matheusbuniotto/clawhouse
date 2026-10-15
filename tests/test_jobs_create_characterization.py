@@ -18,16 +18,16 @@ from databricks.sdk.service.jobs import CronSchedule, PauseStatus
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from crabriks.agent.turn import TurnContext, TurnResult, resume_turn, run_turn
-from crabriks.capabilities import databricks as databricks_module
-from crabriks.capabilities.databricks import (
+from clawhouse.agent.turn import TurnContext, TurnResult, resume_turn, run_turn
+from clawhouse.capabilities import databricks as databricks_module
+from clawhouse.capabilities.databricks import (
     DatabricksCapability,
     DatabricksTools,
     build_cron_schedule,
     default_workspace_client,
     to_quartz_cron,
 )
-from crabriks.store.store import MemorySessionStore
+from clawhouse.store.store import MemorySessionStore
 
 SESSION = "00000000-0000-4000-8000-0000000000b7"
 NATURAL_REQUEST = "eu quero agendar o relatório de vendas todo dia útil às 9h"

@@ -1,4 +1,4 @@
-# Crabriks 🦀
+# Clawhouse 🦀
 
 > Databricks-native agent runtime & chat app powered by **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
 
@@ -6,10 +6,10 @@
 
 ## Architecture
 
-Crabriks is organized into clean domain boundaries with zero circular dependencies:
+Clawhouse is organized into clean domain boundaries with zero circular dependencies:
 
 ```
-src/crabriks/
+src/clawhouse/
 ├── agent/         # Reasoning engine, prompt composition, turn execution, models
 ├── capabilities/  # Tools, skill catalogs (SKILL.md), Model Context Protocol (MCP)
 ├── api/           # FastAPI chat endpoints, SSE streaming, Databricks SSO identity
@@ -28,9 +28,9 @@ uv sync
 
 ### 2. Run locally
 ```bash
-CRABRIKS_DEV_USER=you@example.com \
-CRABRIKS_STORE=memory \
-uv run uvicorn crabriks.app:app --reload
+CLAWHOUSE_DEV_USER=you@example.com \
+CLAWHOUSE_STORE=memory \
+uv run uvicorn clawhouse.app:app --reload
 ```
 Open **`http://localhost:8000/chat`**.
 
@@ -52,10 +52,10 @@ Open **`http://localhost:8000/chat`**.
 
 ## Model Providers
 
-Add external OpenAI-compatible endpoints via `CRABRIKS_MODELS`:
+Add external OpenAI-compatible endpoints via `CLAWHOUSE_MODELS`:
 
 ```bash
-export CRABRIKS_MODELS='[
+export CLAWHOUSE_MODELS='[
   {
     "id": "openai-gpt-6-luna",
     "label": "GPT-6 Luna (OpenRouter)",
@@ -76,8 +76,8 @@ Protect destructive or privileged tools with interactive user approvals. Provide
 comma-separated list of tool names, or an equivalent JSON array (both parse the same way):
 
 ```bash
-export CRABRIKS_SENSITIVE_TOOLS="bash,delete_file,drop_table"
-# or: export CRABRIKS_SENSITIVE_TOOLS='["bash", "delete_file", "drop_table"]'
+export CLAWHOUSE_SENSITIVE_TOOLS="bash,delete_file,drop_table"
+# or: export CLAWHOUSE_SENSITIVE_TOOLS='["bash", "delete_file", "drop_table"]'
 ```
 
 Pending approvals freeze the run and appear in the UI approvals inbox (`/approvals`).
@@ -91,15 +91,15 @@ Deploy as a Databricks Asset Bundle (DAB):
 ```bash
 databricks bundle deploy --profile <PROFILE> \
   --var serving_endpoint=databricks-meta-llama-3-3-70b-instruct \
-  --var postgres_branch=projects/crabriks/branches/production \
-  --var postgres_database=projects/crabriks/branches/production/databases/databricks-postgres
+  --var postgres_branch=projects/clawhouse/branches/production \
+  --var postgres_database=projects/clawhouse/branches/production/databases/databricks-postgres
 ```
 
 ---
 
 ## Quality Gates
 
-Crabriks enforces zero-warning code quality across all files:
+Clawhouse enforces zero-warning code quality across all files:
 
 ```bash
 prek run -a          # Fast staged / all-file checks (ruff, complexipy, pyright)

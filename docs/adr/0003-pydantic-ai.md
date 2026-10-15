@@ -2,8 +2,8 @@
 
 Date: 2026-10-10
 Status: accepted (approved 2026-10-10 via HTML review: FastAPI+TS ✅ | Lakebase ✅ | PydanticAI ✅)
-Deciders: crabriks maintainers
-Related: [ADR-0001 FastAPI + TypeScript UI](0001-fastapi-typescript-ui.md), [ADR-0002 Lakebase + user workspace storage](0002-lakebase-workspace-storage.md), [issue #1 spec](../..), [issue #2 RFC](https://github.com/matheusbuniotto/crabriks/issues/2)
+Deciders: clawhouse maintainers
+Related: [ADR-0001 FastAPI + TypeScript UI](0001-fastapi-typescript-ui.md), [ADR-0002 Lakebase + user workspace storage](0002-lakebase-workspace-storage.md), [issue #1 spec](../..), [issue #2 RFC](https://github.com/matheusbuniotto/clawhouse/issues/2)
 
 ## Context
 

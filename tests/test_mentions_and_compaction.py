@@ -9,10 +9,10 @@ import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from crabriks.agent.history import to_model_messages
-from crabriks.agent.turn import TurnContext, run_turn
-from crabriks.capabilities.databricks import DatabricksCapability
-from crabriks.capabilities.mentions import (
+from clawhouse.agent.history import to_model_messages
+from clawhouse.agent.turn import TurnContext, run_turn
+from clawhouse.capabilities.databricks import DatabricksCapability
+from clawhouse.capabilities.mentions import (
     CompactionResult,
     execute_compaction,
     extract_agent_mentions,
@@ -21,9 +21,9 @@ from crabriks.capabilities.mentions import (
     extract_table_mentions,
     resolve_mention_bundles,
 )
-from crabriks.capabilities.workspace import resolve_agent_workspace
-from crabriks.store.shapes import CustomAgent, TranscriptEntry
-from crabriks.store.store import MemorySessionStore
+from clawhouse.capabilities.workspace import resolve_agent_workspace
+from clawhouse.store.shapes import CustomAgent, TranscriptEntry
+from clawhouse.store.store import MemorySessionStore
 
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 OWNER = "ada@example.com"

@@ -7,9 +7,9 @@ import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from crabriks.agent.turn import TurnContext, run_turn
-from crabriks.store.shapes import TranscriptEntry
-from crabriks.store.store import MemorySessionStore, SessionForbidden
+from clawhouse.agent.turn import TurnContext, run_turn
+from clawhouse.store.shapes import TranscriptEntry
+from clawhouse.store.store import MemorySessionStore, SessionForbidden
 
 SESSION = "22222222-2222-4222-8222-222222222222"
 OWNER = "ada@example.com"

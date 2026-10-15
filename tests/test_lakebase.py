@@ -10,13 +10,13 @@ import pytest
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from crabriks.shapes import TranscriptEntry, UserProfile
-from crabriks.store import LakebaseSessionStore, RunInProgress, SessionForbidden
-from crabriks.turn import TurnContext, run_turn
+from clawhouse.shapes import TranscriptEntry, UserProfile
+from clawhouse.store import LakebaseSessionStore, RunInProgress, SessionForbidden
+from clawhouse.turn import TurnContext, run_turn
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("CRABRIKS_TEST_DATABASE_URL"),
-    reason="CRABRIKS_TEST_DATABASE_URL is not set",
+    not os.environ.get("CLAWHOUSE_TEST_DATABASE_URL"),
+    reason="CLAWHOUSE_TEST_DATABASE_URL is not set",
 )
 
 SESSION = "33333333-3333-4333-8333-333333333333"
@@ -25,7 +25,7 @@ FROZEN = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
 
 
 async def _pool() -> asyncpg.Pool:
-    url = os.environ["CRABRIKS_TEST_DATABASE_URL"]
+    url = os.environ["CLAWHOUSE_TEST_DATABASE_URL"]
     pool = await asyncpg.create_pool(url)
     if pool is None:
         raise RuntimeError("postgres pool was not created")
@@ -55,7 +55,7 @@ async def test_sessions_are_listed_for_their_owner_with_a_title() -> None:
     try:
         await store.migrate()
         await pool.execute(
-            "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+            "TRUNCATE clawhouse.transcript_entries, clawhouse.runs, clawhouse.sessions CASCADE"
         )
         first = await store.create_session(OWNER)
         second = await store.create_session(OWNER)
@@ -80,7 +80,7 @@ async def test_sessions_are_listed_for_their_owner_with_a_title() -> None:
 async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg.Pool) -> None:
     await store.migrate()
     await pool.execute(
-        "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+        "TRUNCATE clawhouse.transcript_entries, clawhouse.runs, clawhouse.sessions CASCADE"
     )
     index = await pool.fetchval(
         "SELECT indexdef FROM pg_indexes WHERE indexname = 'runs_one_running_per_session'"
@@ -100,13 +100,13 @@ async def _assert_lock_and_transcript(store: LakebaseSessionStore, pool: asyncpg
     with pytest.raises(RunInProgress):
         await store.claim_run(SESSION)
     await pool.execute(
-        "UPDATE crabriks.runs SET started_at = now() - make_interval(mins => 11) WHERE id = $1",
+        "UPDATE clawhouse.runs SET started_at = now() - make_interval(mins => 11) WHERE id = $1",
         UUID(first),
     )
     reclaimed = await store.claim_run(SESSION)
     assert reclaimed != first
     assert (
-        await pool.fetchval("SELECT status FROM crabriks.runs WHERE id = $1", UUID(first))
+        await pool.fetchval("SELECT status FROM clawhouse.runs WHERE id = $1", UUID(first))
         == "error"
     )
     await store.finish_run(SESSION, reclaimed, "ok")
@@ -125,7 +125,7 @@ async def test_lakebase_clear_transcript_empties_history_and_guards_ownership() 
     try:
         await store.migrate()
         await pool.execute(
-            "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+            "TRUNCATE clawhouse.transcript_entries, clawhouse.runs, clawhouse.sessions CASCADE"
         )
         session = await store.create_session(OWNER)
         run_id = await store.claim_run(session.id)
@@ -148,8 +148,8 @@ async def test_migration_upgrades_existing_runs_status_constraint() -> None:
         # Simulate an existing database with the old 3-status constraint
         await pool.execute(
             """
-            ALTER TABLE crabriks.runs DROP CONSTRAINT IF EXISTS runs_status_known;
-            ALTER TABLE crabriks.runs ADD CONSTRAINT runs_status_known
+            ALTER TABLE clawhouse.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+            ALTER TABLE clawhouse.runs ADD CONSTRAINT runs_status_known
                 CHECK (status IN ('running', 'ok', 'error'));
             """
         )
@@ -158,7 +158,9 @@ async def test_migration_upgrades_existing_runs_status_constraint() -> None:
         session = await store.create_session(OWNER)
         run_id = await store.claim_run(session.id)
         await store.finish_run(session.id, run_id, "pending_approval")
-        status = await pool.fetchval("SELECT status FROM crabriks.runs WHERE id = $1", UUID(run_id))
+        status = await pool.fetchval(
+            "SELECT status FROM clawhouse.runs WHERE id = $1", UUID(run_id)
+        )
         assert status == "pending_approval"
     finally:
         await store.close()
@@ -170,7 +172,7 @@ async def test_lakebase_list_sessions_reports_run_state_lifecycle() -> None:
     try:
         await store.migrate()
         await pool.execute(
-            "TRUNCATE crabriks.transcript_entries, crabriks.runs, crabriks.sessions CASCADE"
+            "TRUNCATE clawhouse.transcript_entries, clawhouse.runs, clawhouse.sessions CASCADE"
         )
         idle_session = await store.create_session(OWNER)
 
@@ -197,7 +199,7 @@ async def test_lakebase_user_profile_crud() -> None:
     store = LakebaseSessionStore(pool)
     try:
         await store.migrate()
-        await pool.execute("TRUNCATE crabriks.user_profiles CASCADE")
+        await pool.execute("TRUNCATE clawhouse.user_profiles CASCADE")
         assert await store.get_user_profile(OWNER) is None
 
         profile = UserProfile(

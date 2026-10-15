@@ -2,8 +2,8 @@
 
 from pydantic_ai.messages import ModelMessage
 
-from crabriks.history import to_model_messages
-from crabriks.shapes import TranscriptEntry
+from clawhouse.history import to_model_messages
+from clawhouse.shapes import TranscriptEntry
 
 
 def _texts(messages: list[ModelMessage]) -> list[str]:

@@ -8,7 +8,7 @@ Chat can create a spreadsheet in the signed-in user's Google Drive and overwrite
 
 ## Probe (2026-10-13, workspace `dbc-562d9321-2592`)
 
-`system.ai.google_drive` is connected for the CLI user. The write tools that exist are `google_file_create` (`file_type=spreadsheet` creates an empty sheet; `content` is only for Docs) and `google_sheet_update_values` (`file_id`, `range_a1`, `values`). There is no rename-tab tool. A throwaway spreadsheet `crabriks-probe-delete-me` (`1YxrwAgxC3Oid-YjU58IH0nq9QLXjTGhPK0GbxqnpZH4`) came back as:
+`system.ai.google_drive` is connected for the CLI user. The write tools that exist are `google_file_create` (`file_type=spreadsheet` creates an empty sheet; `content` is only for Docs) and `google_sheet_update_values` (`file_id`, `range_a1`, `values`). There is no rename-tab tool. A throwaway spreadsheet `clawhouse-probe-delete-me` (`1YxrwAgxC3Oid-YjU58IH0nq9QLXjTGhPK0GbxqnpZH4`) came back as:
 
 ```json
 {"id": "...", "mimeType": "application/vnd.google-apps.spreadsheet", "webViewLink": "https://docs.google.com/spreadsheets/d/.../edit?usp=drivesdk"}

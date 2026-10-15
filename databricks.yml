@@ -1,5 +1,7 @@
+# Renamed from crabriks. The Databricks-side migration (new app, Lakebase project,
+# grants, jobs) is done separately; this file only reflects the target names.
 bundle:
-  name: crabriks
+  name: clawhouse
 
 sync:
   exclude:
@@ -33,10 +35,10 @@ variables:
     default: databricks-meta-llama-3-3-70b-instruct
   postgres_branch:
     description: Lakebase Autoscaling branch that stores sessions and transcripts.
-    default: projects/crabriks/branches/production
+    default: projects/clawhouse/branches/production
   postgres_database:
     description: Lakebase database that stores sessions and transcripts.
-    default: projects/crabriks/branches/production/databases/databricks-postgres
+    default: projects/clawhouse/branches/production/databases/databricks-postgres
   provider_secret_scope:
     description: Secret scope holding the extra-provider API key.
     default: claw
@@ -49,8 +51,8 @@ variables:
 
 resources:
   apps:
-    crabriks:
-      name: crabriks
+    clawhouse:
+      name: clawhouse
       description: Databricks-native agent chat surface with a model picker.
       source_code_path: .
       user_api_scopes:
@@ -64,7 +66,7 @@ resources:
       config:
         command:
           - uvicorn
-          - crabriks.app:app
+          - clawhouse.app:app
         env:
           - name: PYTHONPATH
             value: src
@@ -74,7 +76,7 @@ resources:
             value_from: postgres
           - name: OPENROUTER_API_KEY
             value_from: openrouter-api-key
-          - name: CRABRIKS_MODELS
+          - name: CLAWHOUSE_MODELS
             value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
           - name: DATABRICKS_WAREHOUSE_ID
             value: ${var.sql_warehouse_id}

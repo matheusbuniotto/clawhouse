@@ -39,7 +39,7 @@ export function mount(root: HTMLElement): void {
             if (list.children.length === 0) {
               list.append(el("li", "empty", "No sessions yet. Start one."));
             }
-            window.dispatchEvent(new CustomEvent("crabriks:session-deleted", { detail: { id: item.id } }));
+            window.dispatchEvent(new CustomEvent("clawhouse:session-deleted", { detail: { id: item.id } }));
           }
         } catch {
           // ignore network failure
