@@ -92,10 +92,15 @@ export function mountShell(root: ParentNode = document): void {
     void loadSessions();
   }
 
+  let renderSeq = 0;
+
   async function render(url: URL): Promise<void> {
     const path = normalize(url.pathname);
     const loader = ROUTES[path] ?? ROUTES["/"];
+    // Only the latest navigation mounts: a slower, older import must not clobber it.
+    const seq = ++renderSeq;
     const module = await loader();
+    if (seq !== renderSeq) return;
     document.title = TITLES[path] ?? "Clawhouse";
     screen.replaceChildren();
     module.mount(screen, { url, navigate });

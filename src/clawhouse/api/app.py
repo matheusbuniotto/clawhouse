@@ -44,6 +44,7 @@ from clawhouse.agent.turn import (
     TurnResult,
     UsageNotice,
     WarningNotice,
+    cancel_turn,
     canonical_session_id,
     iter_turn,
     resume_turn,
@@ -185,10 +186,13 @@ class EntryOut(BaseModel):
     tool_name: str | None = None
     tool_call_id: str | None = None
     agent_id: str | None = None
+    model: str | None = None
 
 
 class TranscriptOut(BaseModel):
     entries: list[EntryOut]
+    # `running` while a turn is still working: a reload polls until it settles.
+    run_state: RunState = "idle"
 
 
 class ApprovalOut(BaseModel):
@@ -322,6 +326,7 @@ def _routes(app: FastAPI) -> None:
     _hatch_routes(app)
     _approval_routes(app)
     _question_routes(app)
+    _cancel_routes(app)
     _status_routes(app)
     _agent_routes(app)
     _schedule_routes(app)
@@ -506,8 +511,12 @@ def _session_item_routes(app: FastAPI) -> None:
         request: Request,
         caller: Caller = _require_caller,
     ) -> TranscriptOut:
-        entries = await _read_entries(request.app.state.store, session_id, caller.user_id)
-        return TranscriptOut(entries=[_entry_out(entry) for entry in entries])
+        store: SessionStore = request.app.state.store
+        entries = await _read_entries(store, session_id, caller.user_id)
+        return TranscriptOut(
+            entries=[_entry_out(entry) for entry in entries],
+            run_state=await _run_state(store, session_id, caller.user_id),
+        )
 
     @app.post("/api/sessions/{session_id}/turns")
     async def post_turn(
@@ -1300,6 +1309,31 @@ def _approval_out(entry: ApprovalEntry) -> ApprovalOut:
         resolved_at=entry.resolved_at.isoformat() if entry.resolved_at else None,
         resolved_by=entry.resolved_by,
     )
+
+
+def _cancel_routes(app: FastAPI) -> None:
+    """The Stop button: a turn no longer ends when its request does."""
+
+    @app.post("/api/sessions/{session_id}/cancel")
+    async def cancel_session_turn(
+        session_id: str, caller: Caller = _require_caller
+    ) -> dict[str, bool]:
+        state = await _run_state(app.state.store, session_id, caller.user_id)
+        if state != "running":
+            return {"cancelled": False}
+        return {"cancelled": await cancel_turn(session_id)}
+
+
+async def _run_state(store: SessionStore, session_id: str, owner_id: str) -> RunState:
+    try:
+        canonical = canonical_session_id(session_id)
+    except InvalidSessionId:
+        return "idle"
+    sessions = await store.list_sessions(owner_id)
+    for summary in sessions:
+        if summary.id == canonical:
+            return summary.run_state
+    return "idle"
 
 
 def _entry_out(entry: TranscriptEntry) -> EntryOut:

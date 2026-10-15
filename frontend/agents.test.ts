@@ -134,8 +134,8 @@ test("a reloaded notice entry renders as a notice, not a bubble", async () => {
   const log = document.querySelector("#log") as HTMLElement;
   expect([...log.children].map((n) => n.className)).toEqual([
     "bubble user",
-    "agent-notice",
     "agent-header",
+    "agent-notice",
     "assistant",
   ]);
 });

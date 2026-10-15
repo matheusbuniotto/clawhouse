@@ -12,6 +12,7 @@ import itertools
 import logging
 import re
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -19,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 from croniter import croniter
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.jobs import BaseJob
 
 from clawhouse.capabilities.schedules import calculate_next_run
 from clawhouse.store.shapes import ScheduleEntry
@@ -33,6 +35,7 @@ DATABRICKS_PREFIX = "databricks:"
 RUN_LEVELS = frozenset({"CAN_MANAGE_RUN", "CAN_MANAGE", "IS_OWNER"})
 JOBS_PAGE = 100
 NAME_MAX = 80
+PARALLEL_CALLS = 8
 
 _WEEKDAYS = ("domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado")
 _DOW_NAMES = {name: i for i, name in enumerate(("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"))}
@@ -280,16 +283,18 @@ class DatabricksJobs:
     def _with_acl(self, now: datetime) -> tuple[JobItem, ...]:
         who = principal_of(self.user_client().current_user.me())
         app = self.app_client()
-        items: list[JobItem] = []
-        for job in itertools.islice(app.jobs.list(limit=25), JOBS_PAGE):
+        jobs = list(itertools.islice(app.jobs.list(limit=25), JOBS_PAGE))
+
+        def one(job: BaseJob) -> JobItem | None:
             levels = self._levels(app, job.job_id, who)
             if levels is None:
-                continue
+                return None
             can_run = who.is_admin or bool(levels & RUN_LEVELS)
-            items.append(
-                databricks_job(job, can_run=can_run, last=self._safe_last(app, job), now=now)
-            )
-        return tuple(items)
+            return databricks_job(job, can_run=can_run, last=self._safe_last(app, job), now=now)
+
+        # Two calls per job (ACL, last run): in parallel, or the screen waits for seconds.
+        with ThreadPoolExecutor(max_workers=PARALLEL_CALLS) as pool:
+            return tuple(item for item in pool.map(one, jobs) if item is not None)
 
     def _levels(self, app: WorkspaceClient, job_id: int | None, who: Principal) -> set[str] | None:
         """The user's levels on a job, or None when the user may not see it."""

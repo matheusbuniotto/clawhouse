@@ -65,8 +65,10 @@ test("one click answers a single-choice question through the answer endpoint", a
   const card = renderQuestionCard(QUESTION, onAnswered);
   document.body.append(card);
 
-  expect(card.querySelector(".question-option.default")?.textContent).toBe(
-    "Oct",
+  const preferred = card.querySelector<HTMLElement>(".question-option.default");
+  expect(preferred?.dataset.option).toBe("Oct");
+  expect(preferred?.querySelector(".question-default-tag")?.textContent).toBe(
+    "padrão",
   );
   (card.querySelector('[data-option="Sept"]') as HTMLButtonElement).click();
 
@@ -151,7 +153,9 @@ test("a reloaded question shows the choice, including a job's default", () => {
     args,
     'No user in this run (scheduled job): picked the default option "Oct".',
   ) as HTMLElement;
-  expect(headless.querySelector(".chosen")?.textContent).toBe("Oct");
+  expect(headless.querySelector<HTMLElement>(".chosen")?.dataset.option).toBe(
+    "Oct",
+  );
   expect(headless.textContent).toContain("seguiu a opção padrão");
 
   expect(
@@ -216,6 +220,13 @@ test("a question frame becomes a card, not a tool row, and the reply lands below
       "Esperando sua resposta na pergunta acima.",
     ),
   );
+  // The pending question holds the composer until it is answered.
+  expect(
+    (document.querySelector("#message") as HTMLTextAreaElement).disabled,
+  ).toBe(true);
+  expect(
+    (document.querySelector("button.send") as HTMLButtonElement).disabled,
+  ).toBe(true);
 
   (document.querySelector('[data-option="Sept"]') as HTMLButtonElement).click();
   await vi.waitFor(() =>
@@ -224,6 +235,9 @@ test("a question frame becomes a card, not a tool row, and the reply lands below
     ),
   );
   expect(document.querySelector("#status")?.textContent).toBe("");
+  expect(
+    (document.querySelector("#message") as HTMLTextAreaElement).disabled,
+  ).toBe(false);
 });
 
 test("reload shows answered questions read-only and pending ones live", async () => {

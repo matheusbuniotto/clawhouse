@@ -5,6 +5,9 @@ import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAss
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
 const WAITING_FOR_ANSWER = "Esperando sua resposta na pergunta acima.";
+const WAITING_FOR_APPROVAL = "Ação aguardando aprovação acima.";
+const STILL_RUNNING = "O agente ainda está trabalhando nesta sessão…";
+const POLL_MS = 1500;
 export function mount(root, ctx) {
     const transcript = el("section", "log");
     transcript.id = "log";
@@ -57,6 +60,10 @@ export function mount(root, ctx) {
     form.append(input, toolbar, statusLine);
     root.append(transcript, form);
     let draft = null;
+    let blocked = null;
+    let running = false;
+    let liveTurn = null;
+    let polling = false;
     let questionAsked = false;
     let draftText = "";
     let controller = null;
@@ -119,7 +126,11 @@ export function mount(root, ctx) {
             return;
         headerOwed = false;
         const id = entry.agent_id || "main";
-        transcript.append(renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }));
+        transcript.append(renderAgentHeader({
+            agent_id: id,
+            emoji: agentEmoji.get(id),
+            model: entry.model ?? undefined,
+        }));
     }
     /** Returns how many entries it consumed: a question is its call plus its result. */
     function renderQuestionEntries(entries, index) {
@@ -138,6 +149,8 @@ export function mount(root, ctx) {
     }
     function renderEntry(entry) {
         if (entry.role === "notice") {
+            // Same order as live: the turn's header first, then its notice.
+            headerFor(entry);
             transcript.append(renderNotice(entry.content));
             return;
         }
@@ -167,10 +180,21 @@ export function mount(root, ctx) {
         });
     }
     function renderTranscript(entries) {
-        dropDraft();
+        // A message sent before the first load landed stays on screen, after the history.
+        const live = liveTurn ? [...transcript.childNodes] : [];
+        if (liveTurn) {
+            const start = entries
+                .map((e) => e.role === "user" && e.content === liveTurn)
+                .lastIndexOf(true);
+            if (start >= 0)
+                entries = entries.slice(0, start);
+        }
+        else {
+            dropDraft();
+        }
         transcript.replaceChildren();
         headerOwed = false;
-        if (entries.length === 0) {
+        if (entries.length === 0 && live.length === 0) {
             showEmpty();
             return;
         }
@@ -193,6 +217,7 @@ export function mount(root, ctx) {
             renderEntry(entry);
             index += 1;
         }
+        transcript.append(...live);
         transcript.scrollTop = transcript.scrollHeight;
     }
     function showThinking() {
@@ -243,13 +268,22 @@ export function mount(root, ctx) {
         input.style.height = `${input.scrollHeight}px`;
     }
     function setBusy(busy) {
-        input.disabled = busy;
-        sendButton.disabled = busy;
+        running = busy;
+        input.disabled = busy || blocked !== null;
+        sendButton.disabled = busy || blocked !== null;
         modelPicker.disabled = busy;
         abortButton.hidden = !busy;
     }
     function setStatus(text) {
         statusLine.textContent = text;
+    }
+    /** A pending question or approval holds the session: no new message until it is resolved. */
+    function setBlocked(reason) {
+        blocked = reason;
+        input.disabled = running || reason !== null;
+        sendButton.disabled = running || reason !== null;
+        form.dataset.blocked = reason === null ? "" : "true";
+        setStatus(reason ?? "");
     }
     async function loadModels() {
         const response = await fetch("/api/models");
@@ -296,7 +330,63 @@ export function mount(root, ctx) {
         }
         const body = (await response.json());
         renderTranscript(body.entries ?? []);
+        if (liveTurn)
+            return;
+        if (body.run_state === "running") {
+            followRunningTurn();
+            return;
+        }
         await loadPendingQuestions();
+        await loadPendingApprovals();
+    }
+    /** After a reload mid-turn: keep the composer closed and poll until the turn settles. */
+    function followRunningTurn() {
+        if (polling)
+            return;
+        polling = true;
+        setBusy(true);
+        showThinking();
+        setStatus(STILL_RUNNING);
+        const tick = async () => {
+            if (!polling)
+                return;
+            try {
+                const response = await fetch(`/api/sessions/${sessionId()}/transcript`);
+                if (response.ok) {
+                    const body = (await response.json());
+                    if (body.run_state !== "running") {
+                        polling = false;
+                        renderTranscript(body.entries ?? []);
+                        setBusy(false);
+                        setStatus("");
+                        await loadPendingQuestions();
+                        await loadPendingApprovals();
+                        return;
+                    }
+                    renderTranscript(body.entries ?? []);
+                    showThinking();
+                }
+            }
+            catch {
+                // Try again on the next tick.
+            }
+            setTimeout(() => void tick(), POLL_MS);
+        };
+        setTimeout(() => void tick(), POLL_MS);
+    }
+    async function loadPendingApprovals() {
+        try {
+            const response = await fetch("/api/approvals");
+            if (!response.ok)
+                return;
+            const body = (await response.json());
+            const mine = (body.pending ?? []).filter((a) => a.session_id === sessionId());
+            if (mine.length > 0 && blocked === null)
+                setBlocked(WAITING_FOR_APPROVAL);
+        }
+        catch {
+            // The approvals screen still lists it.
+        }
     }
     async function loadPendingQuestions() {
         try {
@@ -309,7 +399,7 @@ export function mount(root, ctx) {
             transcript.querySelector(".empty")?.remove();
             for (const question of pending)
                 showQuestion(question);
-            setStatus(WAITING_FOR_ANSWER);
+            setBlocked(WAITING_FOR_ANSWER);
         }
         catch {
             // The transcript is still usable without the live card.
@@ -326,7 +416,7 @@ export function mount(root, ctx) {
             transcript.append(renderAssistantTurn(result.reply));
         for (const question of result.pending)
             showQuestion(question);
-        setStatus(result.pending.length > 0 ? WAITING_FOR_ANSWER : "");
+        setBlocked(result.pending.length > 0 ? WAITING_FOR_ANSWER : null);
         transcript.scrollTop = transcript.scrollHeight;
     }
     function parseFrame(raw) {
@@ -357,6 +447,7 @@ export function mount(root, ctx) {
                 multi: payload.multi ?? false,
             });
             questionAsked = true;
+            setBlocked(WAITING_FOR_ANSWER);
             return;
         }
         // Questions render as cards, not tool rows.
@@ -412,7 +503,7 @@ export function mount(root, ctx) {
                     transcript.append(renderAssistantTurn(reply));
                     transcript.scrollTop = transcript.scrollHeight;
                 }
-                setStatus("");
+                setBlocked(null);
             }, payload.arguments);
             transcript.scrollTop = transcript.scrollHeight;
             return;
@@ -437,10 +528,10 @@ export function mount(root, ctx) {
         if (frame.event === "done") {
             commitReply(payload.reply ?? "");
             if (payload.status === "pending_approval" && questionAsked) {
-                setStatus(WAITING_FOR_ANSWER);
+                setBlocked(WAITING_FOR_ANSWER);
             }
             else if (payload.status === "pending_approval") {
-                setStatus("Action paused waiting for approval above.");
+                setBlocked(WAITING_FOR_APPROVAL);
             }
             else {
                 setStatus("");
@@ -480,7 +571,12 @@ export function mount(root, ctx) {
         return finished;
     }
     async function sendMessage(text) {
+        if (blocked !== null) {
+            setStatus(blocked);
+            return;
+        }
         questionAsked = false;
+        liveTurn = text;
         setBusy(true);
         setStatus("");
         controller = new AbortController();
@@ -488,7 +584,8 @@ export function mount(root, ctx) {
         let finished = false;
         // Immediately render user message and thinking indicator for responsive chat feel
         transcript.querySelector(".empty")?.remove();
-        transcript.append(renderUserTurn(text));
+        const bubble = renderUserTurn(text);
+        transcript.append(bubble);
         showThinking();
         transcript.scrollTop = transcript.scrollHeight;
         try {
@@ -504,14 +601,20 @@ export function mount(root, ctx) {
                 signal,
             });
             if (response.status === 409) {
+                // Nothing was saved: take the message back so it is not lost.
+                bubble.remove();
+                if (!input.value)
+                    input.value = text;
                 dropDraft();
                 const body = (await response.json());
                 setStatus(body.error ?? "A turn is already running for this session.");
+                finished = true; // Reported above; not a broken stream.
                 return;
             }
             if (!response.ok) {
                 dropDraft();
                 setStatus("The turn could not be started.");
+                finished = true; // Reported above; not a broken stream.
                 return;
             }
             finished = await readSse(response);
@@ -527,8 +630,12 @@ export function mount(root, ctx) {
                 setStatus("The turn failed before a reply was completed.");
             }
             controller = null;
+            liveTurn = null;
             setBusy(false);
-            input.focus();
+            if (blocked !== null)
+                setStatus(blocked);
+            else
+                input.focus();
         }
     }
     // Autocomplete popover state
@@ -673,8 +780,11 @@ export function mount(root, ctx) {
         }, 250);
     }
     abortButton.addEventListener("click", () => {
+        // The turn runs on the server past this request: ask it to stop, then let go.
+        void fetch(`/api/sessions/${sessionId()}/cancel`, { method: "POST" }).catch(() => { });
         controller?.abort();
         controller = null;
+        polling = false;
         setBusy(false);
     });
     form.addEventListener("submit", (event) => {

@@ -591,7 +591,18 @@
 }
 
 .question-option.default {
-  border-style: dashed;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.question-default-tag {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: 0.75em;
+  font-weight: 500;
 }
 
 .question-option[aria-pressed="true"],

@@ -26,6 +26,7 @@ function optionButton(label: string, isDefault: boolean): HTMLButtonElement {
   if (isDefault) {
     button.classList.add("default");
     button.title = "Opção padrão";
+    button.append(el("span", "question-default-tag", "padrão"));
   }
   return button;
 }

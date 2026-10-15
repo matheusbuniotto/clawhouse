@@ -9,6 +9,7 @@ function optionButton(label, isDefault) {
     if (isDefault) {
         button.classList.add("default");
         button.title = "Opção padrão";
+        button.append(el("span", "question-default-tag", "padrão"));
     }
     return button;
 }

@@ -125,9 +125,14 @@ def jobs_routes(
         return factory(token_for(caller))
 
     @app.get("/api/jobs", response_model=JobsOut)
-    async def list_jobs(caller: Any = caller_dep) -> JobsOut:
+    async def list_jobs(
+        caller: Any = caller_dep, source: Literal["schedule"] | None = None
+    ) -> JobsOut:
+        """`?source=schedule` answers from the database alone, so the screen paints at once."""
         now = datetime.now(UTC)
         items = await schedule_items(app.state.store, caller.user_id, now)
+        if source == "schedule":
+            return JobsOut(jobs=[job_out(i) for i in items])
         listing = await jobs_for(caller).list(now)
         return JobsOut(
             jobs=[job_out(i) for i in [*items, *listing.jobs]],

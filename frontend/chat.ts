@@ -36,7 +36,17 @@ interface Entry {
   content: string;
   tool_name: string | null;
   agent_id?: string | null;
+  model?: string | null;
 }
+
+interface TranscriptBody {
+  entries?: Entry[];
+  run_state?: string;
+}
+
+const WAITING_FOR_APPROVAL = "Ação aguardando aprovação acima.";
+const STILL_RUNNING = "O agente ainda está trabalhando nesta sessão…";
+const POLL_MS = 1500;
 
 interface ModelOption {
   id: string;
@@ -112,6 +122,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   root.append(transcript, form);
 
   let draft: HTMLElement | null = null;
+  let blocked: string | null = null;
+  let running = false;
+  let liveTurn: string | null = null;
+  let polling = false;
   let questionAsked = false;
   let draftText = "";
   let controller: AbortController | null = null;
@@ -181,7 +195,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     headerOwed = false;
     const id = entry.agent_id || "main";
     transcript.append(
-      renderAgentHeader({ agent_id: id, emoji: agentEmoji.get(id) }),
+      renderAgentHeader({
+        agent_id: id,
+        emoji: agentEmoji.get(id),
+        model: entry.model ?? undefined,
+      }),
     );
   }
 
@@ -204,6 +222,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   function renderEntry(entry: Entry): void {
     if (entry.role === "notice") {
+      // Same order as live: the turn's header first, then its notice.
+      headerFor(entry);
       transcript.append(renderNotice(entry.content));
       return;
     }
@@ -234,10 +254,19 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   function renderTranscript(entries: Entry[]): void {
-    dropDraft();
+    // A message sent before the first load landed stays on screen, after the history.
+    const live = liveTurn ? [...transcript.childNodes] : [];
+    if (liveTurn) {
+      const start = entries
+        .map((e) => e.role === "user" && e.content === liveTurn)
+        .lastIndexOf(true);
+      if (start >= 0) entries = entries.slice(0, start);
+    } else {
+      dropDraft();
+    }
     transcript.replaceChildren();
     headerOwed = false;
-    if (entries.length === 0) {
+    if (entries.length === 0 && live.length === 0) {
       showEmpty();
       return;
     }
@@ -261,6 +290,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       renderEntry(entry);
       index += 1;
     }
+    transcript.append(...live);
     transcript.scrollTop = transcript.scrollHeight;
   }
 
@@ -318,14 +348,24 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   function setBusy(busy: boolean): void {
-    input.disabled = busy;
-    sendButton.disabled = busy;
+    running = busy;
+    input.disabled = busy || blocked !== null;
+    sendButton.disabled = busy || blocked !== null;
     modelPicker.disabled = busy;
     abortButton.hidden = !busy;
   }
 
   function setStatus(text: string): void {
     statusLine.textContent = text;
+  }
+
+  /** A pending question or approval holds the session: no new message until it is resolved. */
+  function setBlocked(reason: string | null): void {
+    blocked = reason;
+    input.disabled = running || reason !== null;
+    sendButton.disabled = running || reason !== null;
+    form.dataset.blocked = reason === null ? "" : "true";
+    setStatus(reason ?? "");
   }
 
   async function loadModels(): Promise<void> {
@@ -369,9 +409,64 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       setStatus("The transcript could not be loaded.");
       return;
     }
-    const body = (await response.json()) as { entries?: Entry[] };
+    const body = (await response.json()) as TranscriptBody;
     renderTranscript(body.entries ?? []);
+    if (liveTurn) return;
+    if (body.run_state === "running") {
+      followRunningTurn();
+      return;
+    }
     await loadPendingQuestions();
+    await loadPendingApprovals();
+  }
+
+  /** After a reload mid-turn: keep the composer closed and poll until the turn settles. */
+  function followRunningTurn(): void {
+    if (polling) return;
+    polling = true;
+    setBusy(true);
+    showThinking();
+    setStatus(STILL_RUNNING);
+    const tick = async (): Promise<void> => {
+      if (!polling) return;
+      try {
+        const response = await fetch(`/api/sessions/${sessionId()}/transcript`);
+        if (response.ok) {
+          const body = (await response.json()) as TranscriptBody;
+          if (body.run_state !== "running") {
+            polling = false;
+            renderTranscript(body.entries ?? []);
+            setBusy(false);
+            setStatus("");
+            await loadPendingQuestions();
+            await loadPendingApprovals();
+            return;
+          }
+          renderTranscript(body.entries ?? []);
+          showThinking();
+        }
+      } catch {
+        // Try again on the next tick.
+      }
+      setTimeout(() => void tick(), POLL_MS);
+    };
+    setTimeout(() => void tick(), POLL_MS);
+  }
+
+  async function loadPendingApprovals(): Promise<void> {
+    try {
+      const response = await fetch("/api/approvals");
+      if (!response.ok) return;
+      const body = (await response.json()) as {
+        pending?: { session_id: string }[];
+      };
+      const mine = (body.pending ?? []).filter(
+        (a) => a.session_id === sessionId(),
+      );
+      if (mine.length > 0 && blocked === null) setBlocked(WAITING_FOR_APPROVAL);
+    } catch {
+      // The approvals screen still lists it.
+    }
   }
 
   async function loadPendingQuestions(): Promise<void> {
@@ -382,7 +477,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       if (!Array.isArray(pending) || pending.length === 0) return;
       transcript.querySelector(".empty")?.remove();
       for (const question of pending) showQuestion(question);
-      setStatus(WAITING_FOR_ANSWER);
+      setBlocked(WAITING_FOR_ANSWER);
     } catch {
       // The transcript is still usable without the live card.
     }
@@ -397,7 +492,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   function onAnswered(result: AnswerResult): void {
     if (result.reply) transcript.append(renderAssistantTurn(result.reply));
     for (const question of result.pending) showQuestion(question);
-    setStatus(result.pending.length > 0 ? WAITING_FOR_ANSWER : "");
+    setBlocked(result.pending.length > 0 ? WAITING_FOR_ANSWER : null);
     transcript.scrollTop = transcript.scrollHeight;
   }
 
@@ -453,6 +548,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         multi: payload.multi ?? false,
       });
       questionAsked = true;
+      setBlocked(WAITING_FOR_ANSWER);
       return;
     }
     // Questions render as cards, not tool rows.
@@ -510,7 +606,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
             transcript.append(renderAssistantTurn(reply));
             transcript.scrollTop = transcript.scrollHeight;
           }
-          setStatus("");
+          setBlocked(null);
         },
         payload.arguments,
       );
@@ -536,9 +632,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (frame.event === "done") {
       commitReply(payload.reply ?? "");
       if (payload.status === "pending_approval" && questionAsked) {
-        setStatus(WAITING_FOR_ANSWER);
+        setBlocked(WAITING_FOR_ANSWER);
       } else if (payload.status === "pending_approval") {
-        setStatus("Action paused waiting for approval above.");
+        setBlocked(WAITING_FOR_APPROVAL);
       } else {
         setStatus("");
       }
@@ -576,7 +672,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   async function sendMessage(text: string): Promise<void> {
+    if (blocked !== null) {
+      setStatus(blocked);
+      return;
+    }
     questionAsked = false;
+    liveTurn = text;
     setBusy(true);
     setStatus("");
     controller = new AbortController();
@@ -585,7 +686,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
     // Immediately render user message and thinking indicator for responsive chat feel
     transcript.querySelector(".empty")?.remove();
-    transcript.append(renderUserTurn(text));
+    const bubble = renderUserTurn(text);
+    transcript.append(bubble);
     showThinking();
     transcript.scrollTop = transcript.scrollHeight;
 
@@ -602,14 +704,19 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         signal,
       });
       if (response.status === 409) {
+        // Nothing was saved: take the message back so it is not lost.
+        bubble.remove();
+        if (!input.value) input.value = text;
         dropDraft();
         const body = (await response.json()) as { error?: string };
         setStatus(body.error ?? "A turn is already running for this session.");
+        finished = true; // Reported above; not a broken stream.
         return;
       }
       if (!response.ok) {
         dropDraft();
         setStatus("The turn could not be started.");
+        finished = true; // Reported above; not a broken stream.
         return;
       }
       finished = await readSse(response);
@@ -622,8 +729,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         setStatus("The turn failed before a reply was completed.");
       }
       controller = null;
+      liveTurn = null;
       setBusy(false);
-      input.focus();
+      if (blocked !== null) setStatus(blocked);
+      else input.focus();
     }
   }
 
@@ -799,8 +908,13 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   abortButton.addEventListener("click", () => {
+    // The turn runs on the server past this request: ask it to stop, then let go.
+    void fetch(`/api/sessions/${sessionId()}/cancel`, { method: "POST" }).catch(
+      () => {},
+    );
     controller?.abort();
     controller = null;
+    polling = false;
     setBusy(false);
   });
 

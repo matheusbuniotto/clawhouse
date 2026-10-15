@@ -1,6 +1,6 @@
 """Cross-module shapes for a chat turn. The store and the agent speak these, nothing else."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -18,6 +18,8 @@ class TranscriptEntry:
     tool_call_id: str | None = None
     # Who produced the entry. None on rows written before agents were tracked: the default agent.
     agent_id: str | None = None
+    # Display only (the agent header after reload); not part of an entry's identity.
+    model: str | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,12 +3,19 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaitable, Callable
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+)
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic_ai import DeferredToolRequests, RunContext
@@ -268,6 +275,7 @@ class _Claimed:
     run_id: str
     ctx: TurnContext
     agent: ActiveAgent = PLATFORM_AGENT
+    model: str | None = None
 
 
 async def iter_turn(
@@ -280,13 +288,10 @@ async def iter_turn(
     claimed = await _claim(canonical_session_id(session_id), user_message, ctx)
     queue: _Queue = asyncio.Queue()
     holder: list[TurnResult] = []
-    task = asyncio.create_task(_worker(claimed, queue, holder))
-    try:
-        async for notice in _drain(queue):
-            yield notice
-    finally:
-        await _stop(task)
-        await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
+    task = _detach(claimed, _worker(claimed, queue, holder), holder)
+    async for notice in _drain(queue):
+        yield notice
+    await asyncio.shield(task)
     if not holder:
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
     res = holder[0]
@@ -308,15 +313,12 @@ async def iter_resume_turn(
     approval = await ctx.store.get_approval(approval_id)
     queue: _Queue = asyncio.Queue()
     holder: list[TurnResult] = []
-    task = asyncio.create_task(
-        _worker_resume(claimed, approval, decision, queue=queue, holder=holder)
+    task = _detach(
+        claimed, _worker_resume(claimed, approval, decision, queue=queue, holder=holder), holder
     )
-    try:
-        async for notice in _drain(queue):
-            yield notice
-    finally:
-        await _stop(task)
-        await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
+    async for notice in _drain(queue):
+        yield notice
+    await asyncio.shield(task)
     if not holder:
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
     res = holder[0]
@@ -415,12 +417,38 @@ async def _drain(queue: _Queue) -> AsyncIterator[TurnNotice]:
         yield item
 
 
-async def _stop(task: asyncio.Task[None]) -> None:
-    if task.done():
-        return
+# Turns outlive the request that started them: a reload or a dropped connection must not
+# cancel the run halfway (it would leave the run row `running` and the session stuck).
+# Only `cancel_turn` stops one. Keyed by canonical session id.
+_RUNNING: dict[str, asyncio.Task[None]] = {}
+
+
+def _detach(
+    claimed: _Claimed, work: Coroutine[Any, Any, None], holder: list[TurnResult]
+) -> asyncio.Task[None]:
+    async def run() -> None:
+        try:
+            await work
+        except asyncio.CancelledError:
+            logger.info("turn cancelled for session %s", claimed.session_id)
+        finally:
+            _RUNNING.pop(claimed.session_id, None)
+            await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
+
+    task = asyncio.create_task(run())
+    _RUNNING[claimed.session_id] = task
+    return task
+
+
+async def cancel_turn(session_id: str) -> bool:
+    """Stop the session's running turn (the Stop button). False when none is running here."""
+    task = _RUNNING.get(canonical_session_id(session_id))
+    if task is None or task.done():
+        return False
     task.cancel()
     with suppress(asyncio.CancelledError):
-        await task
+        await asyncio.shield(task)
+    return True
 
 
 def _status(holder: list[TurnResult]) -> TurnStatus:
@@ -649,7 +677,7 @@ async def _start_agent(claimed: _Claimed, queue: _Queue, agent: ActiveAgent) -> 
         agent_id=agent.agent_id, name=agent.name, emoji=agent.emoji, model=str(model_name)
     )
     await _publish(claimed.ctx, queue, notice)
-    return replace(claimed, agent=agent)
+    return replace(claimed, agent=agent, model=notice.model or None)
 
 
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
@@ -933,6 +961,8 @@ def _scrub_entry(entry: TranscriptEntry, token: str) -> TranscriptEntry:
 async def _append(claimed: _Claimed, entry: TranscriptEntry) -> None:
     if entry.agent_id is None:
         entry = replace(entry, agent_id=claimed.agent.agent_id)
+    if entry.model is None and entry.role != "user":
+        entry = replace(entry, model=claimed.model)
     scrubbed = _scrub_entry(entry, claimed.ctx.user_token)
     await claimed.ctx.store.append_entry(claimed.session_id, claimed.run_id, scrubbed)
 

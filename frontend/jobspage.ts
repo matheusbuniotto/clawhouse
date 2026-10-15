@@ -29,6 +29,17 @@ export interface JobsBody {
   databricks_error?: string | null;
 }
 
+/** How long until a future time, in pt-BR ("em 3h"). `relativeTime` only reads the past. */
+export function timeUntil(iso: string, now: number = Date.now()): string {
+  const minutes = Math.round((new Date(iso).getTime() - now) / 60_000);
+  if (minutes < 1) return "agora";
+  if (minutes < 60) return `em ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `em ${hours}h`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "em 1 dia" : `em ${days} dias`;
+}
+
 const SAFE_URL = /^https?:\/\//i;
 const SOURCE_LABEL: Record<JobRow["source"], string> = {
   schedule: "Agendamento",
@@ -99,7 +110,7 @@ export function renderJobRow(job: JobRow, actions: JobActions): HTMLElement {
       "span",
       "job-next",
       job.next_run_at
-        ? `Próxima: ${relativeTime(job.next_run_at)}`
+        ? `Próxima: ${timeUntil(job.next_run_at)}`
         : "Sem próxima execução",
     ),
     lastRunCell(job.last_run),
@@ -132,16 +143,29 @@ export function mount(root: HTMLElement): void {
   section.append(note, list, status);
   root.append(section);
 
+  function render(body: JobsBody): void {
+    note.textContent = visibilityNote(body) ?? "";
+    list.replaceChildren(...body.jobs.map((job) => renderJobRow(job, actions)));
+    if (body.jobs.length === 0)
+      list.append(el("li", "empty", "Nenhum job ainda."));
+  }
+
+  async function fetchJobs(url: string): Promise<JobsBody | null> {
+    const response = await fetch(url);
+    return response.ok ? ((await response.json()) as JobsBody) : null;
+  }
+
   const actions: JobActions = {
     async run(job) {
       const response = await fetch(
         `/api/jobs/${encodeURIComponent(job.id)}/run`,
-        { method: "POST" },
+        {
+          method: "POST",
+        },
       );
       status.textContent = response.ok
         ? `"${job.name}" foi iniciado.`
         : "Não foi possível iniciar o job.";
-      if (response.ok) void load();
     },
     async remove(job) {
       if (!confirm(`Apagar o agendamento "${job.name}"?`)) return;
@@ -151,24 +175,29 @@ export function mount(root: HTMLElement): void {
       status.textContent = response.ok
         ? "Agendamento apagado."
         : "Não foi possível apagar.";
-      if (response.ok) void load();
+      if (!response.ok) return;
+      // Gone at once: a full reload waits on Databricks.
+      [...list.querySelectorAll<HTMLElement>(".job-row")]
+        .find((row) => row.dataset.id === job.id)
+        ?.remove();
+      if (!list.querySelector(".job-row"))
+        list.append(el("li", "empty", "Nenhum job ainda."));
     },
   };
 
   async function load(): Promise<void> {
+    status.textContent = "Carregando jobs…";
     try {
-      const response = await fetch("/api/jobs");
-      if (!response.ok) {
-        status.textContent = "Não foi possível carregar os jobs.";
+      // App schedules come straight from the database: show them before Databricks answers.
+      const quick = await fetchJobs("/api/jobs?source=schedule");
+      if (quick) render(quick);
+      const full = await fetchJobs("/api/jobs");
+      if (!full) {
+        status.textContent = "Não foi possível carregar os jobs do Databricks.";
         return;
       }
-      const body = (await response.json()) as JobsBody;
-      note.textContent = visibilityNote(body) ?? "";
-      list.replaceChildren(
-        ...body.jobs.map((job) => renderJobRow(job, actions)),
-      );
-      if (body.jobs.length === 0)
-        list.append(el("li", "empty", "Nenhum job ainda."));
+      render(full);
+      status.textContent = "";
     } catch {
       status.textContent = "Erro de rede ao carregar os jobs.";
     }

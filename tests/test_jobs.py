@@ -266,3 +266,13 @@ async def test_api_run_only_for_databricks_and_delete_only_for_schedules() -> No
 async def test_jobs_page_is_served() -> None:
     async with _client(MemorySessionStore(), _fallback(_Jobs([], {}))) as client:
         assert (await client.get("/jobs")).status_code == 200
+
+
+async def test_source_schedule_skips_databricks() -> None:
+    store = MemorySessionStore()
+    await _schedule(store, "resumo")
+    exploding = DatabricksJobs(user_client=lambda: _any(1 / 0), app_client=lambda: _any(1 / 0))
+    async with _client(store, exploding) as client:
+        body = (await client.get("/api/jobs?source=schedule")).json()
+    assert [j["source"] for j in body["jobs"]] == ["schedule"]
+    assert body["databricks_error"] is None

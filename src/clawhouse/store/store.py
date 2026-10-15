@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS clawhouse.transcript_entries (
     tool_name text,
     tool_call_id text,
     agent_id text,
+    model text,
     CONSTRAINT transcript_role_known CHECK (
         role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice')
     ),
@@ -143,9 +144,9 @@ CREATE INDEX IF NOT EXISTS schedules_due_idx
 
 _INSERT_ENTRY = """
 INSERT INTO clawhouse.transcript_entries (
-    session_id, run_id, position, role, content, tool_name, tool_call_id, agent_id
+    session_id, run_id, position, role, content, tool_name, tool_call_id, agent_id, model
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 """
 _INSERT_ENTRY_LEGACY = """
 INSERT INTO clawhouse.transcript_entries (
@@ -546,19 +547,23 @@ class LakebaseSessionStore:
             await self._pool.execute(
                 "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS agent_id text"
             )
-        # Without the privilege to add it, keep writing the old shape instead of failing turns.
-        self._agent_column = bool(
-            await self._pool.fetchval(
-                """
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'clawhouse'
-                  AND table_name = 'transcript_entries'
-                  AND column_name = 'agent_id'
-                """
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS model text"
             )
+        # Without the privilege to add it, keep writing the old shape instead of failing turns.
+        present = await self._pool.fetchval(
+            """
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'clawhouse'
+              AND table_name = 'transcript_entries'
+              AND column_name IN ('agent_id', 'model')
+            """
         )
+        self._agent_column = present == 2
         if not self._agent_column:
-            logger.warning("transcript_entries.agent_id is missing; agent ids are not persisted")
+            logger.warning(
+                "transcript_entries.agent_id/model are missing; agent ids are not persisted"
+            )
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
         session = _uuid(session_id)
@@ -697,7 +702,7 @@ class LakebaseSessionStore:
                 entry.content,
                 entry.tool_name,
                 entry.tool_call_id,
-                *((entry.agent_id,) if self._agent_column else ()),
+                *((entry.agent_id, entry.model) if self._agent_column else ()),
             )
 
     async def finish_run(self, session_id: str, run_id: str, status: TurnStatus) -> None:
@@ -1145,6 +1150,7 @@ def _entry_from_row(row: asyncpg.Record) -> TranscriptEntry:
         tool_name=row["tool_name"],
         tool_call_id=row["tool_call_id"],
         agent_id=row.get("agent_id"),
+        model=row.get("model"),
     )
 
 

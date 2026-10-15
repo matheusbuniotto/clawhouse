@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import {
   mount,
   renderJobRow,
+  timeUntil,
   visibilityNote,
   type JobRow,
 } from "./jobspage.js";
@@ -90,19 +91,61 @@ test("the ACL fallback is explained", () => {
   );
 });
 
-test("mount lists jobs from /api/jobs", async () => {
-  const fetchMock = vi.fn(async () => ({
+function ok(payload: unknown): Response {
+  return {
     ok: true,
-    json: async () => ({
-      jobs: [SCHEDULE, DATABRICKS],
-      databricks_visibility: "acl",
-    }),
-  }));
-  vi.stubGlobal("fetch", fetchMock);
+    status: 200,
+    json: async () => payload,
+  } as unknown as Response;
+}
+
+test("next run reads as time ahead, not 'just now'", () => {
+  const now = Date.parse("2026-10-15T02:00:00Z");
+  expect(timeUntil("2026-10-15T05:00:00+00:00", now)).toBe("em 3h");
+  expect(timeUntil("2026-10-15T02:20:00Z", now)).toBe("em 20 min");
+  expect(timeUntil("2026-10-17T02:00:00Z", now)).toBe("em 2 dias");
+  expect(timeUntil("2026-10-15T01:00:00Z", now)).toBe("agora");
+  const ahead = new Date(Date.now() + 3 * 3600_000).toISOString();
+  const row = renderJobRow({ ...SCHEDULE, next_run_at: ahead }, noop);
+  expect(row.querySelector(".job-next")?.textContent).toBe("Próxima: em 3h");
+});
+
+test("schedules paint before the slow Databricks listing answers", async () => {
+  let releaseFull: (() => void) | undefined;
+  const fullReady = new Promise<void>((resolve) => (releaseFull = resolve));
+  vi.stubGlobal("fetch", async (url: string) => {
+    if (url === "/api/jobs?source=schedule") return ok({ jobs: [SCHEDULE] });
+    await fullReady;
+    return ok({ jobs: [SCHEDULE, DATABRICKS], databricks_visibility: "acl" });
+  });
   const root = document.createElement("div");
   mount(root);
   await vi.waitFor(() =>
+    expect(root.querySelectorAll(".job-row")).toHaveLength(1),
+  );
+  expect(root.querySelector(".status")?.textContent).toBe("Carregando jobs…");
+  releaseFull?.();
+  await vi.waitFor(() =>
     expect(root.querySelectorAll(".job-row")).toHaveLength(2),
   );
-  expect(fetchMock).toHaveBeenCalledWith("/api/jobs");
+  expect(root.querySelector(".status")?.textContent).toBe("");
+});
+
+test("Apagar removes the row at once", async () => {
+  vi.stubGlobal("confirm", () => true);
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (init?.method === "DELETE") return ok({});
+    if (url === "/api/jobs?source=schedule") return ok({ jobs: [SCHEDULE] });
+    return new Promise<Response>(() => {}); // Databricks never answers
+  });
+  const root = document.createElement("div");
+  mount(root);
+  await vi.waitFor(() =>
+    expect(root.querySelectorAll(".job-row")).toHaveLength(1),
+  );
+  root.querySelector<HTMLButtonElement>(".job-action")?.click();
+  await vi.waitFor(() => expect(root.querySelector(".job-row")).toBeNull());
+  expect(root.querySelector(".status")?.textContent).toBe(
+    "Agendamento apagado.",
+  );
 });
