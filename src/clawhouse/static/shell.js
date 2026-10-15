@@ -10,6 +10,7 @@ const TITLES = {
     "/new": "Clawhouse · New session",
     "/approvals": "Clawhouse · Approvals",
     "/status": "Clawhouse · Status",
+    "/jobs": "Clawhouse · Jobs",
 };
 const ROUTES = {
     "/": () => import("./chat.js"),
@@ -18,6 +19,7 @@ const ROUTES = {
     "/new": () => import("./new.js"),
     "/approvals": () => import("./approvals.js"),
     "/status": () => import("./status.js"),
+    "/jobs": () => import("./jobspage.js"),
 };
 function requireElement(parent, selector) {
     const node = parent.querySelector(selector);
@@ -67,10 +69,15 @@ export function mountShell(root = document) {
         void render(url);
         void loadSessions();
     }
+    let renderSeq = 0;
     async function render(url) {
         const path = normalize(url.pathname);
         const loader = ROUTES[path] ?? ROUTES["/"];
+        // Only the latest navigation mounts: a slower, older import must not clobber it.
+        const seq = ++renderSeq;
         const module = await loader();
+        if (seq !== renderSeq)
+            return;
         document.title = TITLES[path] ?? "Clawhouse";
         screen.replaceChildren();
         module.mount(screen, { url, navigate });
@@ -133,7 +140,9 @@ export function mountShell(root = document) {
             if (!confirm(`Delete "${item.title || "Untitled session"}"?`))
                 return;
             try {
-                const res = await fetch(`/api/sessions/${item.id}`, { method: "DELETE" });
+                const res = await fetch(`/api/sessions/${item.id}`, {
+                    method: "DELETE",
+                });
                 if (res.ok || res.status === 204) {
                     const currentSession = new URL(location.href).searchParams.get("session");
                     if (currentSession === item.id) {

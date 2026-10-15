@@ -3,16 +3,23 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Awaitable, Callable
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+)
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic_ai import DeferredToolRequests, RunContext
-from pydantic_ai.capabilities import AbstractCapability, AgentCapability
+from pydantic_ai.capabilities import AbstractCapability, AgentCapability, ProcessHistory
 from pydantic_ai.messages import (
     AgentStreamEvent,
     FunctionToolCallEvent,
@@ -33,13 +40,21 @@ from pydantic_ai_harness.guardrails import GuardrailResult, ToolCallInfo, ToolGu
 
 from clawhouse.agent.commands import Command, CommandContext, dispatch_command, parse_command
 from clawhouse.agent.core import TurnDeps, clawhouse_agent, format_utc
-from clawhouse.agent.history import to_model_messages
+from clawhouse.agent.history import foreign_tool_filter, to_model_messages
 from clawhouse.agent.prompt import (
     BUILTIN_TOOLS,
     RuntimeMeta,
     SystemPrompt,
     ToolCard,
     build_system_prompt,
+)
+from clawhouse.agent.roster import (
+    PLATFORM_AGENT,
+    ActiveAgent,
+    choose_agent,
+    find_agent,
+    missing_agent_warning,
+    session_default,
 )
 from clawhouse.capabilities.agent_tools import AgentManagementCapability
 from clawhouse.capabilities.bootstrap import (
@@ -48,11 +63,25 @@ from clawhouse.capabilities.bootstrap import (
     load_bootstrap_directives,
 )
 from clawhouse.capabilities.databricks import DatabricksCapability
+from clawhouse.capabilities.interaction import (
+    ASK_USER,
+    ASK_USER_DESCRIPTION,
+    REPORT_PROGRESS,
+    REPORT_PROGRESS_DESCRIPTION,
+    InteractionCapability,
+    Question,
+    answer_text,
+    parse_progress,
+)
 from clawhouse.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from clawhouse.capabilities.mentions import resolve_mention_bundles, tiered_compaction
 from clawhouse.capabilities.sheets import GOOGLE_SHEETS_TOOL_CARDS, GoogleSheetsCapability
 from clawhouse.capabilities.skills import loaded_skill_text, skills_capability
-from clawhouse.capabilities.workspace import WorkspacePaths
+from clawhouse.capabilities.workspace import (
+    UnsafeAgentName,
+    WorkspacePaths,
+    resolve_agent_workspace,
+)
 from clawhouse.store.shapes import (
     ApprovalEntry,
     TranscriptEntry,
@@ -71,6 +100,8 @@ from clawhouse.store.store import (
 logger = logging.getLogger("clawhouse.turn")
 
 FAILED_TURN = "The turn failed before a reply was completed."
+QUESTION_TTL = timedelta(hours=24)
+QUESTION_EXPIRED = "Pergunta encerrada sem resposta depois de 24h."
 BUSY_TURN = "A turn is already running for this session."
 
 
@@ -113,6 +144,36 @@ class ApprovalNotice:
 
 
 @dataclass(frozen=True, slots=True)
+class QuestionNotice:
+    """The run paused on `ask_user`: the card to show, answered by `question_id`."""
+
+    question_id: str
+    question: str
+    options: tuple[str, ...]
+    default: str | None
+    multi: bool
+    tool_call_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressNotice:
+    """The current state of a progress card. One card per `task_id`, updated in place."""
+
+    task_id: str
+    steps: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Answer:
+    """The labels the user clicked on a question card."""
+
+    selected: tuple[str, ...]
+
+
+Resolution = Literal["approved", "denied"] | Answer
+
+
+@dataclass(frozen=True, slots=True)
 class UsageNotice:
     """Input tokens of the last model request: the context as sent to the model."""
 
@@ -120,7 +181,34 @@ class UsageNotice:
     context_window: int | None
 
 
-TurnNotice = Token | ToolCallNotice | ToolResultNotice | ApprovalNotice | UsageNotice
+@dataclass(frozen=True, slots=True)
+class AgentNotice:
+    """Opens a turn: which agent answers it, and on which model."""
+
+    agent_id: str
+    name: str
+    emoji: str
+    model: str
+
+
+@dataclass(frozen=True, slots=True)
+class WarningNotice:
+    """A line for the reader, not the model: e.g. an `@agent` that does not exist."""
+
+    text: str
+
+
+TurnNotice = (
+    Token
+    | ToolCallNotice
+    | ToolResultNotice
+    | ApprovalNotice
+    | UsageNotice
+    | AgentNotice
+    | WarningNotice
+    | QuestionNotice
+    | ProgressNotice
+)
 Emit = Callable[[TurnNotice], Awaitable[None]]
 _Queue = asyncio.Queue[TurnNotice | _End]
 MCPToolsetFactory = Callable[[MCPServerConfig, str], AbstractToolset[object]]
@@ -141,6 +229,8 @@ class TurnContext:
     sensitive_tools: tuple[str, ...] = ()
     databricks_capability: DatabricksCapability | None = None
     default_agent: str | None = None
+    # No one is watching (scheduled job): questions take their default instead of pausing.
+    headless: bool = False
 
 
 def canonical_session_id(value: str) -> str:
@@ -164,7 +254,7 @@ async def run_turn(session_id: str, user_message: str, *, ctx: TurnContext) -> T
 async def resume_turn(
     session_id: str,
     approval_id: str,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     *,
     ctx: TurnContext,
 ) -> TurnResult:
@@ -184,6 +274,8 @@ class _Claimed:
     user_message: str
     run_id: str
     ctx: TurnContext
+    agent: ActiveAgent = PLATFORM_AGENT
+    model: str | None = None
 
 
 async def iter_turn(
@@ -196,13 +288,10 @@ async def iter_turn(
     claimed = await _claim(canonical_session_id(session_id), user_message, ctx)
     queue: _Queue = asyncio.Queue()
     holder: list[TurnResult] = []
-    task = asyncio.create_task(_worker(claimed, queue, holder))
-    try:
-        async for notice in _drain(queue):
-            yield notice
-    finally:
-        await _stop(task)
-        await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
+    task = _detach(claimed, _worker(claimed, queue, holder), holder)
+    async for notice in _drain(queue):
+        yield notice
+    await asyncio.shield(task)
     if not holder:
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
     res = holder[0]
@@ -215,7 +304,7 @@ async def iter_turn(
 async def iter_resume_turn(
     session_id: str,
     approval_id: str,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     *,
     ctx: TurnContext,
 ) -> AsyncGenerator[TurnNotice | TurnResult, None]:
@@ -224,15 +313,12 @@ async def iter_resume_turn(
     approval = await ctx.store.get_approval(approval_id)
     queue: _Queue = asyncio.Queue()
     holder: list[TurnResult] = []
-    task = asyncio.create_task(
-        _worker_resume(claimed, approval, decision, queue=queue, holder=holder)
+    task = _detach(
+        claimed, _worker_resume(claimed, approval, decision, queue=queue, holder=holder), holder
     )
-    try:
-        async for notice in _drain(queue):
-            yield notice
-    finally:
-        await _stop(task)
-        await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
+    async for notice in _drain(queue):
+        yield notice
+    await asyncio.shield(task)
     if not holder:
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
     res = holder[0]
@@ -244,19 +330,39 @@ async def iter_resume_turn(
 
 async def _claim(session_id: str, user_message: str, ctx: TurnContext) -> _Claimed:
     await ctx.store.open_session(session_id, ctx.owner_id)
+    expired = await _expire_questions(session_id, ctx)
     run_id = await ctx.store.claim_run(session_id)
-    return _Claimed(
+    claimed = _Claimed(
         session_id=session_id,
         user_message=user_message,
         run_id=run_id,
         ctx=ctx,
     )
+    for _ in range(expired):
+        await _append(claimed, TranscriptEntry(role="notice", content=QUESTION_EXPIRED))
+    return claimed
+
+
+async def _expire_questions(session_id: str, ctx: TurnContext) -> int:
+    """Close questions nobody answered in `QUESTION_TTL`, so the session is not stuck."""
+    pending = await ctx.store.list_approvals(ctx.owner_id, status="pending")
+    cutoff = ctx.now() - QUESTION_TTL
+    stale = [
+        entry
+        for entry in pending
+        if entry.session_id == session_id
+        and entry.tool_name == ASK_USER
+        and entry.created_at < cutoff
+    ]
+    for entry in stale:
+        await ctx.store.resolve_approval(entry.id, "denied", "system:expired", ctx.now())
+    return len(stale)
 
 
 async def _claim_resume(
     session_id: str,
     approval_id: str,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     ctx: TurnContext,
 ) -> _Claimed:
     canonical = canonical_session_id(session_id)
@@ -264,7 +370,8 @@ async def _claim_resume(
     if approval.session_id != canonical:
         raise ApprovalForbidden(approval_id)
     await ctx.store.open_session(canonical, ctx.owner_id)
-    await ctx.store.resolve_approval(approval_id, decision, ctx.owner_id, ctx.now())
+    status = "approved" if isinstance(decision, Answer) else decision
+    await ctx.store.resolve_approval(approval_id, status, ctx.owner_id, ctx.now())
     run_id = await ctx.store.claim_run(canonical)
     return _Claimed(
         session_id=canonical,
@@ -288,7 +395,7 @@ async def _worker(claimed: _Claimed, queue: _Queue, holder: list[TurnResult]) ->
 async def _worker_resume(
     claimed: _Claimed,
     approval: ApprovalEntry,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     *,
     queue: _Queue,
     holder: list[TurnResult],
@@ -310,12 +417,38 @@ async def _drain(queue: _Queue) -> AsyncIterator[TurnNotice]:
         yield item
 
 
-async def _stop(task: asyncio.Task[None]) -> None:
-    if task.done():
-        return
+# Turns outlive the request that started them: a reload or a dropped connection must not
+# cancel the run halfway (it would leave the run row `running` and the session stuck).
+# Only `cancel_turn` stops one. Keyed by canonical session id.
+_RUNNING: dict[str, asyncio.Task[None]] = {}
+
+
+def _detach(
+    claimed: _Claimed, work: Coroutine[Any, Any, None], holder: list[TurnResult]
+) -> asyncio.Task[None]:
+    async def run() -> None:
+        try:
+            await work
+        except asyncio.CancelledError:
+            logger.info("turn cancelled for session %s", claimed.session_id)
+        finally:
+            _RUNNING.pop(claimed.session_id, None)
+            await claimed.ctx.store.finish_run(claimed.session_id, claimed.run_id, _status(holder))
+
+    task = asyncio.create_task(run())
+    _RUNNING[claimed.session_id] = task
+    return task
+
+
+async def cancel_turn(session_id: str) -> bool:
+    """Stop the session's running turn (the Stop button). False when none is running here."""
+    task = _RUNNING.get(canonical_session_id(session_id))
+    if task is None or task.done():
+        return False
     task.cancel()
     with suppress(asyncio.CancelledError):
-        await task
+        await asyncio.shield(task)
+    return True
 
 
 def _status(holder: list[TurnResult]) -> TurnStatus:
@@ -465,6 +598,7 @@ def _capabilities_for_turn(
     if birth_ritual:
         capabilities.append(HatchCapability(store=claimed.ctx.store, owner_id=claimed.ctx.owner_id))
     capabilities.append(GoogleSheetsCapability(user_token=claimed.ctx.user_token))
+    capabilities.append(InteractionCapability(headless=claimed.ctx.headless))
     if claimed.ctx.databricks_capability is not None:
         cap = claimed.ctx.databricks_capability
         if not cap.user_token and claimed.ctx.user_token:
@@ -472,12 +606,14 @@ def _capabilities_for_turn(
         capabilities.append(cap)
     if mcp is not None:
         capabilities.append(mcp)
-    skills_dir = claimed.ctx.workspace.skills if claimed.ctx.workspace else None
-    skills = skills_capability(skills_dir)
+    workspace = _agent_workspace(claimed)
+    skills = skills_capability(workspace.skills if workspace else None)
     if skills is not None:
         capabilities.append(skills)
     if claimed.ctx.sensitive_tools:
         capabilities.append(_sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)))
+    # The history is shared between agents: drop tool parts this agent's toolset lacks.
+    capabilities.append(ProcessHistory(foreign_tool_filter))
     # Compact the in-run history when it approaches the window, then report what was sent.
     capabilities.append(tiered_compaction(target_fraction=0.8))
     capabilities.append(ReportContextUsage())
@@ -495,17 +631,34 @@ def _prompt_for(
     tools_list = mcp.tools if mcp is not None else ()
     mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
     db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
-    base_tools = (*BUILTIN_TOOLS, CREATE_AGENT_TOOL_CARD, *GOOGLE_SHEETS_TOOL_CARDS)
+    base_tools = (
+        *BUILTIN_TOOLS,
+        CREATE_AGENT_TOOL_CARD,
+        ToolCard(name=ASK_USER, description=ASK_USER_DESCRIPTION),
+        ToolCard(name=REPORT_PROGRESS, description=REPORT_PROGRESS_DESCRIPTION),
+        *GOOGLE_SHEETS_TOOL_CARDS,
+    )
     builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
+    workspace = _agent_workspace(claimed)
+    custom = claimed.agent.custom
+    if custom is not None:
+        name, emoji = custom.name, custom.signature_emoji
+        persona = f"{custom.description}\n\n{custom.system_prompt}".strip()
+    else:
+        name = profile.assistant_name if profile else None
+        emoji = profile.signature_emoji if profile else None
+        persona = None
     return build_system_prompt(
         tools=(*builtin, *db_cards, *mcp_cards),
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
-        bootstrap=_bootstrap(ctx, user_directives=user_directives),
-        workspace=ctx.workspace,
-        assistant_name=profile.assistant_name if profile else None,
-        signature_emoji=profile.signature_emoji if profile else None,
+        bootstrap=_bootstrap(workspace, user_directives=user_directives),
+        workspace=workspace,
+        assistant_name=name,
+        signature_emoji=emoji,
         birth_ritual=birth_ritual,
+        agent_id=claimed.agent.agent_id,
+        persona=persona,
     )
 
 
@@ -517,23 +670,40 @@ def _usage_notice(event: ContextUsageEvent) -> UsageNotice:
     )
 
 
+async def _start_agent(claimed: _Claimed, queue: _Queue, agent: ActiveAgent) -> _Claimed:
+    """Bind the turn to its agent and announce it before any other frame."""
+    model_name = getattr(claimed.ctx.model, "model_name", "") or ""
+    notice = AgentNotice(
+        agent_id=agent.agent_id, name=agent.name, emoji=agent.emoji, model=str(model_name)
+    )
+    await _publish(claimed.ctx, queue, notice)
+    return replace(claimed, agent=agent, model=notice.model or None)
+
+
 async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
+    ctx = claimed.ctx
     command = parse_command(claimed.user_message)
     if command is not None:
-        return await _run_command(claimed, command)
+        agent = await session_default(ctx.store, ctx.owner_id, ctx.default_agent)
+        return await _run_command(await _start_agent(claimed, queue, agent), command)
+    choice = await choose_agent(
+        claimed.user_message,
+        store=ctx.store,
+        owner_id=ctx.owner_id,
+        default_handle=ctx.default_agent,
+    )
+    claimed = await _start_agent(claimed, queue, choice.agent)
 
-    ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
     await _append_user(claimed)
+    if choice.missing is not None:
+        await _warn(claimed, queue, missing_agent_warning(choice.missing))
     bundle = await resolve_mention_bundles(
         claimed.user_message,
-        store=ctx.store,
-        owner_id=ctx.owner_id,
-        workspace=ctx.workspace,
+        workspace=_agent_workspace(claimed),
         databricks_cap=ctx.databricks_capability,
-        default_agent=ctx.default_agent,
     )
     user_prompt = claimed.user_message
     if bundle.injected_context:
@@ -546,6 +716,11 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         user_prompt=user_prompt,
         history=to_model_messages(prior) or None,
     )
+
+
+async def _warn(claimed: _Claimed, queue: _Queue, text: str) -> None:
+    await _append(claimed, TranscriptEntry(role="notice", content=text))
+    await _publish(claimed.ctx, queue, WarningNotice(text))
 
 
 async def _run_command(claimed: _Claimed, command: Command) -> TurnResult:
@@ -570,11 +745,12 @@ async def _run_command(claimed: _Claimed, command: Command) -> TurnResult:
 async def _run_model_resume(
     claimed: _Claimed,
     approval: ApprovalEntry,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
     queue: _Queue,
 ) -> TurnResult:
     ctx = claimed.ctx
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
+    claimed = await _start_agent(claimed, queue, await _paused_agent(ctx, prior))
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
     call_args = approval.arguments
@@ -601,6 +777,13 @@ async def _run_model_resume(
         deferred_results=_deferred_results(approval, decision),
         skip_tool_call_id=approval.tool_call_id,
     )
+
+
+async def _paused_agent(ctx: TurnContext, prior: tuple[TranscriptEntry, ...]) -> ActiveAgent:
+    """The agent that paused: the one the last user message addressed."""
+    handle = next((e.agent_id for e in reversed(prior) if e.role == "user"), None)
+    found = await find_agent(ctx.store, ctx.owner_id, handle)
+    return found or await session_default(ctx.store, ctx.owner_id, ctx.default_agent)
 
 
 async def _invoke_agent(  # noqa: PLR0913
@@ -658,8 +841,10 @@ async def _ok_result(claimed: _Claimed, reply: str) -> TurnResult:
 
 def _deferred_results(
     approval: ApprovalEntry,
-    decision: Literal["approved", "denied"],
+    decision: Resolution,
 ) -> DeferredToolResults:
+    if isinstance(decision, Answer):
+        return DeferredToolResults(calls={approval.tool_call_id: answer_text(decision.selected)})
     if decision == "approved":
         return DeferredToolResults(approvals={approval.tool_call_id: ToolApproved()})
     return DeferredToolResults(
@@ -673,26 +858,13 @@ async def _handle_deferred_approvals(
     output: DeferredToolRequests,
 ) -> TurnResult:
     ctx = claimed.ctx
-    first_id: str | None = None
+    ids: list[str] = []
     for call in output.approvals:
-        raw_args = call.args_as_json_str()
-        scrubbed = scrub_token(raw_args, ctx.user_token) if ctx.user_token else raw_args
-        entry = await ctx.store.create_approval(
-            session_id=claimed.session_id,
-            run_id=claimed.run_id,
-            tool_name=call.tool_name,
-            tool_call_id=call.tool_call_id,
-            arguments=scrubbed,
-        )
-        if first_id is None:
-            first_id = entry.id
-        notice = ApprovalNotice(
-            approval_id=entry.id,
-            name=call.tool_name,
-            arguments=scrubbed,
-            tool_call_id=call.tool_call_id,
-        )
-        await _publish(ctx, queue, notice)
+        ids.append(await _pause_for_approval(claimed, queue, call))
+    for call in output.calls:
+        if call.tool_name == ASK_USER:
+            ids.append(await _pause_for_question(claimed, queue, call))
+    first_id = ids[0] if ids else None
     transcript = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     return TurnResult(
         session_id=claimed.session_id,
@@ -704,15 +876,69 @@ async def _handle_deferred_approvals(
     )
 
 
+async def _pause_record(claimed: _Claimed, call: ToolCallPart) -> tuple[str, str]:
+    ctx = claimed.ctx
+    raw_args = call.args_as_json_str()
+    scrubbed = scrub_token(raw_args, ctx.user_token) if ctx.user_token else raw_args
+    entry = await ctx.store.create_approval(
+        session_id=claimed.session_id,
+        run_id=claimed.run_id,
+        tool_name=call.tool_name,
+        tool_call_id=call.tool_call_id,
+        arguments=scrubbed,
+    )
+    return entry.id, scrubbed
+
+
+async def _pause_for_approval(claimed: _Claimed, queue: _Queue, call: ToolCallPart) -> str:
+    approval_id, arguments = await _pause_record(claimed, call)
+    notice = ApprovalNotice(
+        approval_id=approval_id,
+        name=call.tool_name,
+        arguments=arguments,
+        tool_call_id=call.tool_call_id,
+    )
+    await _publish(claimed.ctx, queue, notice)
+    return approval_id
+
+
+async def _pause_for_question(claimed: _Claimed, queue: _Queue, call: ToolCallPart) -> str:
+    """A question pauses like an approval: same row, same lock on the session."""
+    question_id, arguments = await _pause_record(claimed, call)
+    asked = Question.from_arguments(arguments)
+    notice = QuestionNotice(
+        question_id=question_id,
+        question=asked.question,
+        options=asked.options,
+        default=asked.default,
+        multi=asked.multi,
+        tool_call_id=call.tool_call_id,
+    )
+    await _publish(claimed.ctx, queue, notice)
+    return question_id
+
+
 def _bootstrap(
-    ctx: TurnContext,
+    workspace: WorkspacePaths | None,
     user_directives: str | None = None,
 ) -> BootstrapContext | None:
-    if ctx.workspace is None:
+    if workspace is None:
         if user_directives:
             return load_bootstrap_directives(user_directives)
         return None
-    return load_bootstrap(ctx.workspace, user_directives=user_directives)
+    return load_bootstrap(workspace, user_directives=user_directives)
+
+
+def _agent_workspace(claimed: _Claimed) -> WorkspacePaths | None:
+    """The folder of the agent answering: a custom agent's sits next to the platform one."""
+    base = claimed.ctx.workspace
+    custom = claimed.agent.custom
+    if base is None or custom is None:
+        return base
+    try:
+        return resolve_agent_workspace(base.directory.parents[2], custom.name)
+    except UnsafeAgentName:
+        return None
 
 
 async def _append_user(claimed: _Claimed) -> None:
@@ -733,6 +959,10 @@ def _scrub_entry(entry: TranscriptEntry, token: str) -> TranscriptEntry:
 
 
 async def _append(claimed: _Claimed, entry: TranscriptEntry) -> None:
+    if entry.agent_id is None:
+        entry = replace(entry, agent_id=claimed.agent.agent_id)
+    if entry.model is None and entry.role != "user":
+        entry = replace(entry, model=claimed.model)
     scrubbed = _scrub_entry(entry, claimed.ctx.user_token)
     await claimed.ctx.store.append_entry(claimed.session_id, claimed.run_id, scrubbed)
 
@@ -797,9 +1027,24 @@ def _persist_and_emit(
                 continue
             scrubbed = _scrub_notice(notice, token)
             await _record(claimed, scrubbed)
-            await _publish(claimed.ctx, queue, scrubbed)
+            shown = _as_progress(scrubbed)
+            if shown is not None:
+                await _publish(claimed.ctx, queue, shown)
 
     return handle
+
+
+def _as_progress(notice: TurnNotice) -> TurnNotice | None:
+    """`report_progress` streams as its card, not as tool rows; the rows stay in the store."""
+    if not isinstance(notice, ToolCallNotice | ToolResultNotice) or notice.name != REPORT_PROGRESS:
+        return notice
+    if isinstance(notice, ToolResultNotice):
+        return None
+    parsed = parse_progress(notice.arguments)
+    if parsed is None:
+        return None
+    task_id, steps = parsed
+    return ProgressNotice(task_id=task_id, steps=tuple((s.label, s.status) for s in steps))
 
 
 async def _record(claimed: _Claimed, notice: TurnNotice) -> None:
@@ -891,11 +1136,15 @@ def _as_text(content: object) -> str:
 __all__ = [
     "BUSY_TURN",
     "FAILED_TURN",
+    "AgentNotice",
+    "Answer",
     "ApprovalForbidden",
     "ApprovalNotice",
     "ApprovalPending",
     "HatchCapability",
     "InvalidSessionId",
+    "ProgressNotice",
+    "QuestionNotice",
     "RunInProgress",
     "SessionForbidden",
     "Token",
@@ -904,6 +1153,7 @@ __all__ = [
     "TurnContext",
     "TurnNotice",
     "UsageNotice",
+    "WarningNotice",
     "is_wake_up_message",
     "iter_resume_turn",
     "iter_turn",

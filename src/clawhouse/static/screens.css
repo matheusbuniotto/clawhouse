@@ -564,3 +564,77 @@
   color: var(--muted);
   font-size: var(--font-size-sm);
 }
+
+.jobs-note {
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.jobs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.job-row {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.job-head,
+.job-meta,
+.job-actions,
+.job-last {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.job-source,
+.job-agent,
+.job-run-status {
+  font-size: 0.8em;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--muted);
+}
+
+.job-agent {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.job-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.job-meta {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.job-run-status[data-status="failed"] {
+  color: var(--warn);
+}
+
+.job-action {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.job-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}

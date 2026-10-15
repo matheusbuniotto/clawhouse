@@ -25,7 +25,7 @@ from pydantic_ai_harness.compaction import (
     compact_now,
 )
 
-from clawhouse.store.shapes import CustomAgent, TranscriptEntry
+from clawhouse.store.shapes import TranscriptEntry
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
@@ -47,7 +47,6 @@ _SKILL_REGEX = re.compile(r"/skill:([a-zA-Z0-9_\-]+)")
 @dataclass(frozen=True, slots=True)
 class MentionBundle:
     injected_context: str
-    target_agent: CustomAgent | None = None
 
 
 def extract_table_mentions(text: str) -> list[str]:
@@ -73,33 +72,6 @@ def extract_skill_mentions(text: str) -> list[str]:
     return list(dict.fromkeys(_SKILL_REGEX.findall(text)))
 
 
-async def _resolve_agent_context(
-    text: str, store: SessionStore, owner_id: str, default_agent: str | None = None
-) -> tuple[CustomAgent | None, str | None]:
-    agent_names = extract_agent_mentions(text)
-    if not agent_names and default_agent:
-        agent_names = [default_agent]
-    if not agent_names:
-        return None, None
-    custom_agents = await store.list_custom_agents(owner_id)
-    lower_mentions = {a.lower() for a in agent_names}
-    for ca in custom_agents:
-        if ca.name.lower() in lower_mentions:
-            part = (
-                f"### Delegated Agent Persona: @{ca.name} (ALREADY REGISTERED)\n"
-                f"- Name: {ca.name} {ca.signature_emoji}\n"
-                f"- Description: {ca.description}\n"
-                f"- Operating Instructions:\n{ca.system_prompt}\n\n"
-                f"IMPORTANT INSTRUCTION: The user assigned this task to @{ca.name}.\n"
-                f"- You are executing this turn directly AS @{ca.name}.\n"
-                f"- Adopt @{ca.name}'s persona, instructions, and emoji {ca.signature_emoji}.\n"
-                f"- No separate delegation tool is needed; carry out analysis as @{ca.name}.\n"
-                f"- DO NOT call `create_agent` for '@{ca.name}' because it already exists."
-            )
-            return ca, part
-    return None, None
-
-
 def _resolve_skill_context(text: str, workspace: WorkspacePaths | None) -> list[str]:
     skills = extract_skill_mentions(text)
     parts: list[str] = []
@@ -112,15 +84,13 @@ def _resolve_skill_context(text: str, workspace: WorkspacePaths | None) -> list[
     return parts
 
 
-async def resolve_mention_bundles(  # noqa: PLR0913
+async def resolve_mention_bundles(
     text: str,
     *,
-    store: SessionStore,
-    owner_id: str,
     workspace: WorkspacePaths | None = None,
     databricks_cap: DatabricksCapability | None = None,
-    default_agent: str | None = None,
 ) -> MentionBundle:
+    """Context for `@table`, `@file` and `/skill:` mentions. `@agent` picks the executor instead."""
     context_parts: list[str] = []
 
     # 1. Resolve table mentions
@@ -135,18 +105,11 @@ async def resolve_mention_bundles(  # noqa: PLR0913
         if content:
             context_parts.append(f"### File Context: {file_path}\n{content}")
 
-    # 3. Resolve target agent mention
-    target_agent, agent_part = await _resolve_agent_context(
-        text, store, owner_id, default_agent=default_agent
-    )
-    if agent_part:
-        context_parts.append(agent_part)
-
-    # 4. Resolve skill mentions (/skill:{name})
+    # 3. Resolve skill mentions (/skill:{name})
     context_parts.extend(_resolve_skill_context(text, workspace))
 
     injected = "\n\n".join(context_parts)
-    return MentionBundle(injected_context=injected, target_agent=target_agent)
+    return MentionBundle(injected_context=injected)
 
 
 async def _describe_table(

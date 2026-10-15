@@ -29,9 +29,13 @@ from clawhouse.agent.prompt import AGENT_NAME
 from clawhouse.agent.turn import (
     BUSY_TURN,
     FAILED_TURN,
+    AgentNotice,
+    Answer,
     ApprovalNotice,
     InvalidSessionId,
     MCPToolsetFactory,
+    ProgressNotice,
+    QuestionNotice,
     Token,
     ToolCallNotice,
     ToolResultNotice,
@@ -39,13 +43,17 @@ from clawhouse.agent.turn import (
     TurnNotice,
     TurnResult,
     UsageNotice,
+    WarningNotice,
+    cancel_turn,
     canonical_session_id,
     iter_turn,
     resume_turn,
     run_turn,
 )
 from clawhouse.api.identity import Caller, Unauthenticated, resolve_caller
+from clawhouse.api.jobs import jobs_routes
 from clawhouse.capabilities.databricks import DatabricksCapability
+from clawhouse.capabilities.interaction import ASK_USER, InvalidAnswer, Question, check_answer
 from clawhouse.capabilities.schedules import (
     create_schedule_entry,
     schedule_worker,
@@ -177,10 +185,14 @@ class EntryOut(BaseModel):
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    agent_id: str | None = None
+    model: str | None = None
 
 
 class TranscriptOut(BaseModel):
     entries: list[EntryOut]
+    # `running` while a turn is still working: a reload polls until it settles.
+    run_state: RunState = "idle"
 
 
 class ApprovalOut(BaseModel):
@@ -200,6 +212,28 @@ class ApprovalsListOut(BaseModel):
     approvals: list[ApprovalOut]
     pending: list[ApprovalOut]
     history: list[ApprovalOut]
+
+
+class QuestionOut(BaseModel):
+    id: str
+    session_id: str
+    question: str
+    options: list[str]
+    default: str | None = None
+    multi: bool = False
+    status: str
+
+
+class AnswerIn(BaseModel):
+    selected: list[str]
+
+
+class AnswerOut(BaseModel):
+    status: str
+    reply: str
+    question: QuestionOut
+    # A resumed run can stop on another question; the card for it.
+    pending: list[QuestionOut] = []
 
 
 class ApprovalActionOut(BaseModel):
@@ -226,27 +260,7 @@ def create_app(
         stop_event = asyncio.Event()
 
         def _make_turn_ctx(sch: ScheduleEntry) -> TurnContext:
-            caller = Caller(user_id=sch.owner_id, access_token=settings.dev_token or "")
-            model = model_for(caller, None)
-            token = request_token(
-                forwarded=caller.access_token,
-                user_id=caller.user_id,
-                dev_user=settings.dev_user,
-                dev_token=settings.dev_token,
-            )
-            databricks_cap = DatabricksCapability(user_token=token or "")
-            return TurnContext(
-                owner_id=sch.owner_id,
-                store=app.state.store,
-                model=model,
-                now=lambda: datetime.now(UTC),
-                workspace=app.state.workspace,
-                mcp_servers=settings.mcp_servers,
-                user_token=token,
-                sensitive_tools=settings.sensitive_tools,
-                mcp_toolset_factory=getattr(app.state, "mcp_toolset_factory", None),
-                databricks_capability=databricks_cap,
-            )
+            return scheduled_turn_context(app, sch)
 
         worker_task = asyncio.create_task(
             schedule_worker(
@@ -278,6 +292,32 @@ def create_app(
     return app
 
 
+def scheduled_turn_context(app: FastAPI, sch: ScheduleEntry) -> TurnContext:
+    """A schedule runs with nobody watching: questions take their default (`headless`)."""
+    settings: Settings = app.state.settings
+    caller = Caller(user_id=sch.owner_id, access_token=settings.dev_token or "")
+    model = app.state.model_for(caller, None)
+    token = request_token(
+        forwarded=caller.access_token,
+        user_id=caller.user_id,
+        dev_user=settings.dev_user,
+        dev_token=settings.dev_token,
+    )
+    return TurnContext(
+        owner_id=sch.owner_id,
+        store=app.state.store,
+        model=model,
+        now=lambda: datetime.now(UTC),
+        workspace=app.state.workspace,
+        mcp_servers=settings.mcp_servers,
+        user_token=token,
+        sensitive_tools=settings.sensitive_tools,
+        mcp_toolset_factory=getattr(app.state, "mcp_toolset_factory", None),
+        databricks_capability=DatabricksCapability(user_token=token or ""),
+        headless=True,
+    )
+
+
 def _routes(app: FastAPI) -> None:
     _cache_headers(app)
     _page_routes(app)
@@ -285,9 +325,12 @@ def _routes(app: FastAPI) -> None:
     _session_routes(app)
     _hatch_routes(app)
     _approval_routes(app)
+    _question_routes(app)
+    _cancel_routes(app)
     _status_routes(app)
     _agent_routes(app)
     _schedule_routes(app)
+    jobs_routes(app, _require_caller, lambda caller: _caller_token(app.state.settings, caller))
     _composer_routes(app)
 
 
@@ -312,6 +355,7 @@ def _page_routes(app: FastAPI) -> None:
     @app.get("/new")
     @app.get("/approvals")
     @app.get("/status")
+    @app.get("/jobs")
     async def shell_page(caller: Caller = _require_caller) -> FileResponse:
         del caller
         return FileResponse(STATIC / "index.html")
@@ -370,8 +414,20 @@ def _core_script_routes(app: FastAPI) -> None:
     async def jobs_script() -> FileResponse:
         return FileResponse(STATIC / "jobs.js", media_type="text/javascript")
 
+    @app.get("/cards.js")
+    async def cards_script() -> FileResponse:
+        return FileResponse(STATIC / "cards.js", media_type="text/javascript")
+
+    @app.get("/mentions.js")
+    async def mentions_script() -> FileResponse:
+        return FileResponse(STATIC / "mentions.js", media_type="text/javascript")
+
 
 def _screen_script_routes(app: FastAPI) -> None:
+    @app.get("/jobspage.js")
+    async def jobs_page_script() -> FileResponse:
+        return FileResponse(STATIC / "jobspage.js", media_type="text/javascript")
+
     @app.get("/chat.js")
     async def chat_script() -> FileResponse:
         return FileResponse(STATIC / "chat.js", media_type="text/javascript")
@@ -455,8 +511,12 @@ def _session_item_routes(app: FastAPI) -> None:
         request: Request,
         caller: Caller = _require_caller,
     ) -> TranscriptOut:
-        entries = await _read_entries(request.app.state.store, session_id, caller.user_id)
-        return TranscriptOut(entries=[_entry_out(entry) for entry in entries])
+        store: SessionStore = request.app.state.store
+        entries = await _read_entries(store, session_id, caller.user_id)
+        return TranscriptOut(
+            entries=[_entry_out(entry) for entry in entries],
+            run_state=await _run_state(store, session_id, caller.user_id),
+        )
 
     @app.post("/api/sessions/{session_id}/turns")
     async def post_turn(
@@ -525,7 +585,8 @@ def _approval_routes(app: FastAPI) -> None:
         caller: Caller = _require_caller,
     ) -> ApprovalsListOut:
         entries = await request.app.state.store.list_approvals(caller.user_id)
-        out = [_approval_out(entry) for entry in entries]
+        # Questions share the pause mechanism but are answered on their card, not here.
+        out = [_approval_out(entry) for entry in entries if entry.tool_name != ASK_USER]
         pending = [a for a in out if a.status == "pending"]
         history = [a for a in out if a.status != "pending"]
         return ApprovalsListOut(approvals=out, pending=pending, history=history)
@@ -545,6 +606,90 @@ def _approval_routes(app: FastAPI) -> None:
         caller: Caller = _require_caller,
     ) -> ApprovalActionOut:
         return await _resolve_and_resume(request, approval_id, "denied", caller)
+
+
+def _question_routes(app: FastAPI) -> None:
+    @app.get("/api/sessions/{session_id}/questions")
+    async def pending_questions(
+        session_id: str,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> list[QuestionOut]:
+        canonical = canonical_session_id(session_id)
+        return await _pending_questions(request.app.state.store, caller.user_id, canonical)
+
+    @app.post("/api/questions/{question_id}/answer")
+    async def answer_question(
+        question_id: str,
+        body: AnswerIn,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> AnswerOut:
+        return await _answer_and_resume(request, question_id, body.selected, caller)
+
+
+async def _pending_questions(
+    store: SessionStore, owner_id: str, session_id: str
+) -> list[QuestionOut]:
+    pending = await store.list_approvals(owner_id, status="pending")
+    return [
+        _question_out(entry)
+        for entry in reversed(pending)
+        if entry.tool_name == ASK_USER and entry.session_id == session_id
+    ]
+
+
+def _question_out(entry: ApprovalEntry) -> QuestionOut:
+    asked = Question.from_arguments(entry.arguments)
+    return QuestionOut(
+        id=entry.id,
+        session_id=entry.session_id,
+        question=asked.question,
+        options=list(asked.options),
+        default=asked.default,
+        multi=asked.multi,
+        status=entry.status,
+    )
+
+
+async def _answer_and_resume(
+    request: Request,
+    question_id: str,
+    selected: list[str],
+    caller: Caller,
+) -> AnswerOut:
+    store: SessionStore = request.app.state.store
+    try:
+        entry = await store.get_approval(question_id)
+    except ApprovalNotFound as exc:
+        raise HTTPException(status_code=404, detail="Question not found.") from exc
+    if entry.tool_name != ASK_USER:
+        raise HTTPException(status_code=404, detail="Question not found.")
+    if entry.status != "pending":
+        raise HTTPException(status_code=409, detail="Question already answered.")
+    try:
+        picked = check_answer(Question.from_arguments(entry.arguments), selected)
+    except InvalidAnswer as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        resumed = await resume_turn(
+            session_id=entry.session_id,
+            approval_id=question_id,
+            decision=Answer(selected=picked),
+            ctx=_build_turn_context(request, caller),
+        )
+    except (SessionForbidden, ApprovalForbidden) as exc:
+        raise HTTPException(status_code=403, detail="You do not own this session.") from exc
+    except ApprovalAlreadyResolved as exc:
+        raise HTTPException(status_code=409, detail="Question already answered.") from exc
+    except RunInProgress as exc:
+        raise HTTPException(status_code=409, detail=BUSY_TURN) from exc
+    return AnswerOut(
+        status=resumed.status,
+        reply=resumed.reply,
+        question=_question_out(await store.get_approval(question_id)),
+        pending=await _pending_questions(store, caller.user_id, entry.session_id),
+    )
 
 
 def _status_routes(app: FastAPI) -> None:
@@ -922,6 +1067,18 @@ async def _read_entries(
         raise HTTPException(status_code=403, detail="You do not own this session.") from exc
 
 
+def _caller_token(settings: Settings, caller: Caller) -> str:
+    """The forwarded caller token wins. Dev token fallback applies strictly to dev_user."""
+    dev_user = settings.dev_user
+    dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
+    return request_token(
+        forwarded=caller.access_token,
+        user_id=caller.user_id,
+        dev_user=dev_user,
+        dev_token=dev_token,
+    )
+
+
 def _build_turn_context(
     request: Request,
     caller: Caller,
@@ -930,15 +1087,7 @@ def _build_turn_context(
 ) -> TurnContext:
     model = _model_for_caller(request, caller, model_id)
     settings: Settings = request.app.state.settings
-    # The forwarded caller token wins. Dev token fallback applies strictly to dev_user.
-    dev_user = settings.dev_user
-    dev_token = settings.dev_token if (dev_user and caller.user_id == dev_user) else None
-    token = request_token(
-        forwarded=caller.access_token,
-        user_id=caller.user_id,
-        dev_user=dev_user,
-        dev_token=dev_token,
-    )
+    token = _caller_token(settings, caller)
     databricks_cap = DatabricksCapability(user_token=token or "")
     return TurnContext(
         owner_id=caller.user_id,
@@ -990,6 +1139,8 @@ async def _resolve_and_resume(
 
     if approval.status != "pending":
         raise HTTPException(status_code=409, detail="Approval already resolved.")
+    if approval.tool_name == ASK_USER:
+        raise HTTPException(status_code=409, detail="Questions are answered on their card.")
 
     ctx = _build_turn_context(request, caller)
     try:
@@ -1072,33 +1223,63 @@ def _encode(item: TurnNotice | TurnResult) -> bytes:
 
 
 def _notice_frame(item: TurnNotice) -> tuple[str, dict[str, object]]:
-    frame: tuple[str, dict[str, object]]
-    if isinstance(item, Token):
-        frame = "token", {"text": item.text}
-    elif isinstance(item, ToolCallNotice):
-        frame = "tool_call", {"name": item.name, "arguments": item.arguments}
-    elif isinstance(item, ToolResultNotice):
-        frame = "tool_result", {"name": item.name, "content": item.content}
-    elif isinstance(item, ApprovalNotice):
-        frame = (
-            "approval_required",
-            {
-                "approval_id": item.approval_id,
-                "name": item.name,
-                "arguments": item.arguments,
-            },
-        )
-    elif isinstance(item, UsageNotice):
-        frame = (
-            "usage",
-            {
-                "input_tokens": item.input_tokens,
-                "context_window": item.context_window,
-            },
-        )
-    else:
-        frame = "error", {"status": "error", "reply": "", "error": FAILED_TURN}
+    frame = _stream_frame(item) or _interaction_frame(item) or _card_frame(item)
+    if frame is None:
+        return "error", {"status": "error", "reply": "", "error": FAILED_TURN}
     return frame
+
+
+def _stream_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None:
+    """Tokens, tool rows and approvals."""
+    if isinstance(item, Token):
+        return "token", {"text": item.text}
+    if isinstance(item, ToolCallNotice):
+        return "tool_call", {"name": item.name, "arguments": item.arguments}
+    if isinstance(item, ToolResultNotice):
+        return "tool_result", {"name": item.name, "content": item.content}
+    if isinstance(item, ApprovalNotice):
+        return "approval_required", {
+            "approval_id": item.approval_id,
+            "name": item.name,
+            "arguments": item.arguments,
+        }
+    return None
+
+
+def _interaction_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None:
+    """Usage, who answers, and notices for the reader."""
+    if isinstance(item, UsageNotice):
+        return "usage", {
+            "input_tokens": item.input_tokens,
+            "context_window": item.context_window,
+        }
+    if isinstance(item, AgentNotice):
+        return "agent", {
+            "type": "agent",
+            "agent_id": item.agent_id,
+            "name": item.name,
+            "emoji": item.emoji,
+            "model": item.model,
+        }
+    if isinstance(item, WarningNotice):
+        return "notice", {"text": item.text}
+    return None
+
+
+def _card_frame(item: TurnNotice) -> tuple[str, dict[str, object]] | None:
+    """Question and progress cards."""
+    if isinstance(item, ProgressNotice):
+        steps = [{"label": label, "status": status} for label, status in item.steps]
+        return "progress", {"type": "progress", "task_id": item.task_id, "steps": steps}
+    if isinstance(item, QuestionNotice):
+        return "question", {
+            "question_id": item.question_id,
+            "question": item.question,
+            "options": list(item.options),
+            "default": item.default,
+            "multi": item.multi,
+        }
+    return None
 
 
 def _frame(item: TurnNotice | TurnResult) -> tuple[str, dict[str, object]]:
@@ -1128,6 +1309,31 @@ def _approval_out(entry: ApprovalEntry) -> ApprovalOut:
         resolved_at=entry.resolved_at.isoformat() if entry.resolved_at else None,
         resolved_by=entry.resolved_by,
     )
+
+
+def _cancel_routes(app: FastAPI) -> None:
+    """The Stop button: a turn no longer ends when its request does."""
+
+    @app.post("/api/sessions/{session_id}/cancel")
+    async def cancel_session_turn(
+        session_id: str, caller: Caller = _require_caller
+    ) -> dict[str, bool]:
+        state = await _run_state(app.state.store, session_id, caller.user_id)
+        if state != "running":
+            return {"cancelled": False}
+        return {"cancelled": await cancel_turn(session_id)}
+
+
+async def _run_state(store: SessionStore, session_id: str, owner_id: str) -> RunState:
+    try:
+        canonical = canonical_session_id(session_id)
+    except InvalidSessionId:
+        return "idle"
+    sessions = await store.list_sessions(owner_id)
+    for summary in sessions:
+        if summary.id == canonical:
+            return summary.run_state
+    return "idle"
 
 
 def _entry_out(entry: TranscriptEntry) -> EntryOut:

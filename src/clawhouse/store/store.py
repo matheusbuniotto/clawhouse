@@ -72,8 +72,10 @@ CREATE TABLE IF NOT EXISTS clawhouse.transcript_entries (
     content text NOT NULL,
     tool_name text,
     tool_call_id text,
+    agent_id text,
+    model text,
     CONSTRAINT transcript_role_known CHECK (
-        role IN ('user', 'assistant', 'tool_call', 'tool_result')
+        role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice')
     ),
     CONSTRAINT transcript_position_unique UNIQUE (session_id, position)
 );
@@ -139,6 +141,19 @@ CREATE INDEX IF NOT EXISTS schedules_due_idx
     WHERE status = 'active';
 """
 
+
+_INSERT_ENTRY = """
+INSERT INTO clawhouse.transcript_entries (
+    session_id, run_id, position, role, content, tool_name, tool_call_id, agent_id, model
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+"""
+_INSERT_ENTRY_LEGACY = """
+INSERT INTO clawhouse.transcript_entries (
+    session_id, run_id, position, role, content, tool_name, tool_call_id
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+"""
 
 _RUNNING_INDEX = "runs_one_running_per_session"
 _STALE_RUN_MINUTES = 10
@@ -504,6 +519,7 @@ class LakebaseSessionStore:
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
+        self._agent_column = True
 
     async def migrate(self) -> None:
         try:
@@ -518,10 +534,35 @@ class LakebaseSessionStore:
                     ALTER TABLE clawhouse.runs DROP CONSTRAINT IF EXISTS runs_status_known;
                     ALTER TABLE clawhouse.runs ADD CONSTRAINT runs_status_known
                         CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+                    ALTER TABLE clawhouse.transcript_entries
+                        DROP CONSTRAINT IF EXISTS transcript_role_known;
+                    ALTER TABLE clawhouse.transcript_entries ADD CONSTRAINT transcript_role_known
+                        CHECK (role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice'));
                 EXCEPTION
                     WHEN undefined_table OR insufficient_privilege THEN NULL;
                 END $$;
                 """
+            )
+        with suppress(asyncpg.InsufficientPrivilegeError):
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS agent_id text"
+            )
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS model text"
+            )
+        # Without the privilege to add it, keep writing the old shape instead of failing turns.
+        present = await self._pool.fetchval(
+            """
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'clawhouse'
+              AND table_name = 'transcript_entries'
+              AND column_name IN ('agent_id', 'model')
+            """
+        )
+        self._agent_column = present == 2
+        if not self._agent_column:
+            logger.warning(
+                "transcript_entries.agent_id/model are missing; agent ids are not persisted"
             )
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
@@ -653,12 +694,7 @@ class LakebaseSessionStore:
                 session,
             )
             await conn.execute(
-                """
-                INSERT INTO clawhouse.transcript_entries (
-                    session_id, run_id, position, role, content, tool_name, tool_call_id
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                """,
+                _INSERT_ENTRY if self._agent_column else _INSERT_ENTRY_LEGACY,
                 session,
                 run,
                 position,
@@ -666,6 +702,7 @@ class LakebaseSessionStore:
                 entry.content,
                 entry.tool_name,
                 entry.tool_call_id,
+                *((entry.agent_id, entry.model) if self._agent_column else ()),
             )
 
     async def finish_run(self, session_id: str, run_id: str, status: TurnStatus) -> None:
@@ -683,7 +720,7 @@ class LakebaseSessionStore:
     async def transcript(self, session_id: str, owner_id: str) -> tuple[TranscriptEntry, ...]:
         rows = await self._pool.fetch(
             """
-            SELECT t.role, t.content, t.tool_name, t.tool_call_id
+            SELECT t.*
             FROM clawhouse.transcript_entries AS t
             JOIN clawhouse.sessions AS s ON s.id = t.session_id
             WHERE t.session_id = $1 AND s.owner_id = $2
@@ -1112,6 +1149,8 @@ def _entry_from_row(row: asyncpg.Record) -> TranscriptEntry:
         content=row["content"],
         tool_name=row["tool_name"],
         tool_call_id=row["tool_call_id"],
+        agent_id=row.get("agent_id"),
+        model=row.get("model"),
     )
 
 

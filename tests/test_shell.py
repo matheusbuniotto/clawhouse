@@ -15,7 +15,7 @@ from clawhouse.store import MemorySessionStore
 
 OWNER = "ada@example.com"
 HEADERS = {"x-forwarded-email": OWNER, "x-forwarded-access-token": "tok_" + "ada"}
-PAGES = ("/chat", "/sessions", "/new", "/approvals", "/status")
+PAGES = ("/chat", "/sessions", "/new", "/approvals", "/status", "/jobs")
 
 
 def _reply(text: str):

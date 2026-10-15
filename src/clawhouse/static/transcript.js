@@ -10,6 +10,23 @@ export function renderAssistantTurn(source) {
     node.append(renderMarkdown(source));
     return node;
 }
+/** Names who answers the turn below it, and on which model (switching agents can switch models). */
+export function renderAgentHeader(agent) {
+    const node = el("div", "agent-header");
+    node.dataset.agentId = agent.agent_id;
+    if (agent.emoji)
+        node.append(el("span", "agent-header-emoji", agent.emoji));
+    node.append(el("strong", "agent-header-name", `@${agent.name || agent.agent_id}`));
+    if (agent.model)
+        node.append(el("span", "agent-header-model", agent.model));
+    return node;
+}
+/** A line for the reader, never sent to the model, e.g. "@x não encontrado". */
+export function renderNotice(text) {
+    const node = el("p", "agent-notice", text);
+    node.setAttribute("role", "note");
+    return node;
+}
 const STATUS_LABEL = {
     running: "Running",
     ok: "OK",

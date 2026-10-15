@@ -521,3 +521,160 @@
   color: var(--accent);
   text-decoration: underline;
 }
+
+/* Agent per message (#97): who answers the turn below. */
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.agent-header-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.agent-header-model {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.agent-notice {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--warn);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Question cards (#97): ask_user answered with buttons, not typing. */
+.question-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.question-card[data-state="pending"] {
+  border-color: var(--accent);
+}
+
+.question-text {
+  margin: 0 0 0.6rem;
+  color: var(--text-strong);
+}
+
+.question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.question-option,
+.question-submit {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.question-option:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+}
+
+.question-option.default {
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.question-default-tag {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: 0.75em;
+  font-weight: 500;
+}
+
+.question-option[aria-pressed="true"],
+.question-option.chosen {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--text-strong);
+}
+
+.question-option:disabled:not(.chosen) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.question-submit {
+  margin-top: 0.6rem;
+}
+
+.question-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.question-note:empty {
+  display: none;
+}
+
+.progress-card {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  padding: 10px 14px;
+  margin: 8px 0;
+}
+
+.progress-count {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.progress-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.progress-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.progress-mark {
+  font-family: var(--font-mono);
+  width: 1.2em;
+  color: var(--muted);
+}
+
+.progress-step[data-status="running"] .progress-mark,
+.progress-step[data-status="running"] .progress-label {
+  color: var(--accent);
+}
+
+.progress-step[data-status="done"] .progress-label {
+  color: var(--muted);
+}
+
+.progress-step[data-status="failed"] .progress-mark,
+.progress-step[data-status="failed"] .progress-label {
+  color: var(--warn);
+}

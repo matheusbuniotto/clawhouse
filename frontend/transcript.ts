@@ -16,6 +16,30 @@ export function renderAssistantTurn(source: string): HTMLElement {
   return node;
 }
 
+export interface AgentLabel {
+  agent_id: string;
+  name?: string;
+  emoji?: string;
+  model?: string;
+}
+
+/** Names who answers the turn below it, and on which model (switching agents can switch models). */
+export function renderAgentHeader(agent: AgentLabel): HTMLElement {
+  const node = el("div", "agent-header");
+  node.dataset.agentId = agent.agent_id;
+  if (agent.emoji) node.append(el("span", "agent-header-emoji", agent.emoji));
+  node.append(el("strong", "agent-header-name", `@${agent.name || agent.agent_id}`));
+  if (agent.model) node.append(el("span", "agent-header-model", agent.model));
+  return node;
+}
+
+/** A line for the reader, never sent to the model, e.g. "@x não encontrado". */
+export function renderNotice(text: string): HTMLElement {
+  const node = el("p", "agent-notice", text);
+  node.setAttribute("role", "note");
+  return node;
+}
+
 export interface ToolFrame {
   event: "tool_call" | "tool_result";
   name?: string;

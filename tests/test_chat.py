@@ -283,6 +283,7 @@ async def test_a_turn_streams_over_sse_and_survives_reload() -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _events(response.text)
     assert [event for event, _ in events] == [
+        "agent",
         "tool_call",
         "tool_result",
         "token",
@@ -353,7 +354,8 @@ async def test_a_failed_turn_streams_an_empty_reply() -> None:
         reloaded = await client.get(f"/api/sessions/{SESSION}/transcript", headers=HEADERS)
 
     events = _events(response.text)
-    assert events == [("error", {"status": "error", "reply": "", "error": FAILED_TURN})]
+    assert events[-1] == ("error", {"status": "error", "reply": "", "error": FAILED_TURN})
+    assert [event for event, _ in events] == ["agent", "error"]
     assert [entry["role"] for entry in reloaded.json()["entries"]] == ["user"]
 
 
@@ -500,6 +502,7 @@ async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) ->
         "/transcript.js",
         "/highlight.js",
         "/jobs.js",
+        "/jobspage.js",
         "/sessions.js",
         "/new.js",
         "/approvals.js",

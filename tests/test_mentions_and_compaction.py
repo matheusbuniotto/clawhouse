@@ -10,6 +10,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from clawhouse.agent.history import to_model_messages
+from clawhouse.agent.roster import choose_agent
 from clawhouse.agent.turn import TurnContext, run_turn
 from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.mentions import (
@@ -41,7 +42,6 @@ def test_mention_extractors() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_mention_bundles_injects_table_and_file(tmp_path: Path) -> None:
-    store = MemorySessionStore()
     workspace = resolve_agent_workspace(tmp_path, "main")
     workspace.directory.mkdir(parents=True, exist_ok=True)
     (workspace.directory / "SOUL.md").write_text("Be concise.", encoding="utf-8")
@@ -60,8 +60,6 @@ async def test_resolve_mention_bundles_injects_table_and_file(tmp_path: Path) ->
 
     bundle = await resolve_mention_bundles(
         "Analyze @samples.nyctaxi.trips with @file:SOUL.md",
-        store=store,
-        owner_id=OWNER,
         workspace=workspace,
         databricks_cap=db_cap,
     )
@@ -72,7 +70,7 @@ async def test_resolve_mention_bundles_injects_table_and_file(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_agent_mention_routes_persona(tmp_path: Path) -> None:
+async def test_agent_mention_picks_the_executor_not_a_persona(tmp_path: Path) -> None:
     store = MemorySessionStore()
     await store.create_custom_agent(
         CustomAgent(
@@ -85,17 +83,15 @@ async def test_agent_mention_routes_persona(tmp_path: Path) -> None:
         )
     )
 
-    bundle = await resolve_mention_bundles(
-        "Hey @data_wizard how are the numbers?",
-        store=store,
-        owner_id=OWNER,
-        workspace=None,
-        databricks_cap=None,
-    )
+    text = "Hey @data_wizard how are the numbers?"
+    choice = await choose_agent(text, store=store, owner_id=OWNER, default_handle=None)
+    bundle = await resolve_mention_bundles(text, workspace=None, databricks_cap=None)
 
-    assert bundle.target_agent is not None
-    assert bundle.target_agent.name == "data_wizard"
-    assert "wizard" in bundle.target_agent.system_prompt
+    assert choice.agent.agent_id == "data_wizard"
+    assert choice.agent.custom is not None
+    assert "wizard" in choice.agent.custom.system_prompt
+    # The agent runs for real; its persona is no longer pasted into the prompt.
+    assert "Persona" not in bundle.injected_context
 
 
 @pytest.mark.asyncio
@@ -190,7 +186,6 @@ async def test_compact_rewrites_tool_history_into_a_replayable_checkpoint() -> N
 
 @pytest.mark.asyncio
 async def test_resolve_mention_bundles_injects_skill_instructions(tmp_path: Path) -> None:
-    store = MemorySessionStore()
     workspace = resolve_agent_workspace(tmp_path, "main")
     skill_dir = workspace.skills / "sql_optimizer"
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -198,8 +193,6 @@ async def test_resolve_mention_bundles_injects_skill_instructions(tmp_path: Path
 
     bundle = await resolve_mention_bundles(
         "/skill:sql_optimizer help optimize this query",
-        store=store,
-        owner_id=OWNER,
         workspace=workspace,
         databricks_cap=None,
     )
@@ -210,14 +203,11 @@ async def test_resolve_mention_bundles_injects_skill_instructions(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_resolve_mention_bundles_missing_skill(tmp_path: Path) -> None:
-    store = MemorySessionStore()
     workspace = resolve_agent_workspace(tmp_path, "main")
     workspace.directory.mkdir(parents=True, exist_ok=True)
 
     bundle = await resolve_mention_bundles(
         "/skill:nonexistent_skill please help",
-        store=store,
-        owner_id=OWNER,
         workspace=workspace,
         databricks_cap=None,
     )
