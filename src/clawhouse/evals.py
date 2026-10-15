@@ -11,9 +11,7 @@ from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import EvaluationReason, Evaluator, EvaluatorContext
 from pydantic_evals.reporting import EvaluationReport
 
-from clawhouse.shapes import TranscriptEntry, TurnResult, TurnStatus
-from clawhouse.store import MemorySessionStore
-from clawhouse.turn import (
+from clawhouse.agent.turn import (
     FAILED_TURN,
     ToolCallNotice,
     ToolResultNotice,
@@ -21,6 +19,8 @@ from clawhouse.turn import (
     TurnNotice,
     run_turn,
 )
+from clawhouse.store.shapes import TranscriptEntry, TurnResult, TurnStatus
+from clawhouse.store.store import MemorySessionStore
 
 EVAL_FROZEN_TIME = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 EVAL_FROZEN_TIME_STR = "2026-10-11T12:00:00Z"

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from clawhouse.bootstrap import BootstrapContext, BootstrapFile
-from clawhouse.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
-from clawhouse.workspace import resolve_agent_workspace
+from clawhouse.agent.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
+from clawhouse.capabilities.bootstrap import BootstrapContext, BootstrapFile
+from clawhouse.capabilities.workspace import resolve_agent_workspace
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
 SESSION_B = "22222222-2222-4222-8222-222222222222"

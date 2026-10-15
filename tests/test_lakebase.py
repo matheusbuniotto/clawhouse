@@ -10,9 +10,9 @@ import pytest
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from clawhouse.shapes import TranscriptEntry, UserProfile
-from clawhouse.store import LakebaseSessionStore, RunInProgress, SessionForbidden
-from clawhouse.turn import TurnContext, run_turn
+from clawhouse.agent.turn import TurnContext, run_turn
+from clawhouse.store.shapes import TranscriptEntry, UserProfile
+from clawhouse.store.store import LakebaseSessionStore, RunInProgress, SessionForbidden
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("CLAWHOUSE_TEST_DATABASE_URL"),

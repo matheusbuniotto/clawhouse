@@ -2,8 +2,8 @@
 
 from pydantic_ai.messages import ModelMessage
 
-from clawhouse.history import to_model_messages
-from clawhouse.shapes import TranscriptEntry
+from clawhouse.agent.history import to_model_messages
+from clawhouse.store.shapes import TranscriptEntry
 
 
 def _texts(messages: list[ModelMessage]) -> list[str]:

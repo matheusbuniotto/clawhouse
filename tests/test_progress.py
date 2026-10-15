@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from clawhouse.turn import (  # isort: skip
+from clawhouse.agent.turn import (
     ProgressNotice,
     ToolCallNotice,
     ToolResultNotice,
@@ -17,7 +17,7 @@ from clawhouse.turn import (  # isort: skip
 )
 from clawhouse.api.app import _frame  # pyright: ignore[reportPrivateUsage]
 from clawhouse.capabilities.interaction import parse_progress
-from clawhouse.store import MemorySessionStore
+from clawhouse.store.store import MemorySessionStore
 
 SESSION = "55555555-5555-4555-8555-555555555555"
 OWNER = "ada@example.com"

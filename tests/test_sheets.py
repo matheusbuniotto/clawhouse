@@ -27,7 +27,7 @@ from clawhouse.capabilities.sheets import (
     write_new_sheet,
     write_sheet_update,
 )
-from clawhouse.store import MemorySessionStore
+from clawhouse.store.store import MemorySessionStore
 
 SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
 TOKEN = "forwarded-user-token"

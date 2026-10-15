@@ -15,8 +15,8 @@ from databricks.sdk.service.jobs import (
 )
 from httpx import ASGITransport, AsyncClient
 
-from clawhouse.turn import TurnContext  # noqa: F401  # isort: skip
-from clawhouse.app import create_app
+from clawhouse.api.app import create_app
+from clawhouse.api.identity import Caller
 from clawhouse.capabilities.jobs import (
     DatabricksJobs,
     Principal,
@@ -24,10 +24,9 @@ from clawhouse.capabilities.jobs import (
     levels_for,
     quartz_to_cron,
 )
-from clawhouse.identity import Caller
 from clawhouse.settings import Settings
-from clawhouse.shapes import ScheduleEntry
-from clawhouse.store import MemorySessionStore
+from clawhouse.store.shapes import ScheduleEntry
+from clawhouse.store.store import MemorySessionStore
 
 OWNER = "ada@example.com"
 HEADERS = {"x-forwarded-email": OWNER, "x-forwarded-access-token": "dapi-secret"}

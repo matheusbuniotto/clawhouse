@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from clawhouse.bootstrap import load_bootstrap
-from clawhouse.workspace import resolve_agent_workspace
+from clawhouse.capabilities.bootstrap import load_bootstrap
+from clawhouse.capabilities.workspace import resolve_agent_workspace
 
 ORDER = ("AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md")
 

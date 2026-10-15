@@ -6,7 +6,7 @@
 # `model-serving`, or the forwarded user token cannot call the endpoint.
 command:
   - uvicorn
-  - clawhouse.app:app
+  - clawhouse.api.app:app
 env:
   - name: PYTHONPATH
     value: src

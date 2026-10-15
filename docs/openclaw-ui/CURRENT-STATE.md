@@ -29,7 +29,7 @@ Verified against the working tree on 2026-10-11.
 2. **The installed package is missing 8 of the 11 served files.** `app.py` serves
    `chat.js`, `chat.css`, `sessions.js`, `new.js`, `approvals.js`, `status.js` and five
    HTML pages, but the wheel force-includes only three files. Under `databricks.yml`
-   (`command: uvicorn clawhouse.app:app` with `PYTHONPATH: src`) the synced source tree is
+   (`command: uvicorn clawhouse.api.app:app` with `PYTHONPATH: src`) the synced source tree is
    used and everything resolves — the inconsistency is latent, not live.
 
 ---

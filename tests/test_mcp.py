@@ -16,7 +16,7 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from clawhouse.mcp import (
+from clawhouse.capabilities.mcp import (
     MAX_TOOL_NAME_LENGTH,
     DuplicateMCPServerName,
     InsecureMCPEndpoint,

@@ -16,14 +16,14 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from clawhouse.app import create_app
-from clawhouse.identity import Caller
-from clawhouse.mcp import MCPServerConfig
-from clawhouse.model import MissingAccessToken, ModelEntry, UnknownModel
+from clawhouse.agent.model import MissingAccessToken, ModelEntry, UnknownModel
+from clawhouse.agent.turn import BUSY_TURN, FAILED_TURN
+from clawhouse.api.app import create_app
+from clawhouse.api.identity import Caller
+from clawhouse.capabilities.mcp import MCPServerConfig
+from clawhouse.capabilities.workspace import resolve_agent_workspace
 from clawhouse.settings import Settings
-from clawhouse.store import MemorySessionStore
-from clawhouse.turn import BUSY_TURN, FAILED_TURN
-from clawhouse.workspace import resolve_agent_workspace
+from clawhouse.store.store import MemorySessionStore
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 HEADERS = {

@@ -2,7 +2,7 @@
 
 import pytest
 
-from clawhouse.store import (
+from clawhouse.store.store import (
     SCHEMA,
     MemorySessionStore,
     MissingDatabaseCredential,

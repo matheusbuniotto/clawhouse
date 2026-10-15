@@ -69,38 +69,6 @@ _APPROVAL_REQUIRED_TOOLS = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ColumnDef:
-    name: str
-    type_name: str
-    comment: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TableMetadata:
-    catalog: str
-    schema: str
-    name: str
-    columns: tuple[ColumnDef, ...]
-    comment: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class QueryResult:
-    columns: tuple[str, ...]
-    rows: tuple[tuple[object, ...], ...]
-    row_count: int
-    truncated: bool = False
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "columns": list(self.columns),
-            "rows": [list(row) for row in self.rows],
-            "row_count": self.row_count,
-            "truncated": self.truncated,
-        }
-
-
 def strip_sql_comments(sql: str) -> str:
     return _SQL_COMMENT_PATTERN.sub(" ", sql).strip()
 

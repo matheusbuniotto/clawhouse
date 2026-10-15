@@ -12,20 +12,20 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from clawhouse.app import create_app
-from clawhouse.identity import Caller
-from clawhouse.mcp import MCPServerConfig
-from clawhouse.model import MissingAccessToken
+from clawhouse.agent.model import MissingAccessToken
+from clawhouse.agent.turn import ApprovalNotice, TurnContext, resume_turn, run_turn
+from clawhouse.api.app import create_app
+from clawhouse.api.identity import Caller
+from clawhouse.capabilities.mcp import MCPServerConfig
+from clawhouse.capabilities.workspace import resolve_agent_workspace
 from clawhouse.settings import Settings, sensitive_tools_from_env
-from clawhouse.shapes import TranscriptEntry
-from clawhouse.store import (
+from clawhouse.store.shapes import TranscriptEntry
+from clawhouse.store.store import (
     ApprovalAlreadyResolved,
     ApprovalNotFound,
     ApprovalPending,
     MemorySessionStore,
 )
-from clawhouse.turn import ApprovalNotice, TurnContext, resume_turn, run_turn
-from clawhouse.workspace import resolve_agent_workspace
 
 OWNER = "ada@example.com"
 OTHER = "grace@example.com"

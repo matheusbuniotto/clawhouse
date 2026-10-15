@@ -16,12 +16,8 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
-from clawhouse.mcp import InsecureMCPEndpoint, MCPServerConfig
-from clawhouse.prompt import CLOCK_DESCRIPTION
-from clawhouse.shapes import CustomAgent, TranscriptEntry, UserProfile
-from clawhouse.skills import loaded_skill_text
-from clawhouse.store import MemorySessionStore
-from clawhouse.turn import (
+from clawhouse.agent.prompt import CLOCK_DESCRIPTION
+from clawhouse.agent.turn import (
     FAILED_TURN,
     AgentNotice,
     RunInProgress,
@@ -34,7 +30,11 @@ from clawhouse.turn import (
     UsageNotice,
     run_turn,
 )
-from clawhouse.workspace import WorkspacePaths, resolve_agent_workspace
+from clawhouse.capabilities.mcp import InsecureMCPEndpoint, MCPServerConfig
+from clawhouse.capabilities.skills import loaded_skill_text
+from clawhouse.capabilities.workspace import WorkspacePaths, resolve_agent_workspace
+from clawhouse.store.shapes import CustomAgent, TranscriptEntry, UserProfile
+from clawhouse.store.store import MemorySessionStore
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 OWNER = "ada@example.com"

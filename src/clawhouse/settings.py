@@ -10,22 +10,9 @@ from typing import TypeGuard
 from clawhouse.agent.model import ModelEntry
 from clawhouse.capabilities.mcp import DuplicateMCPServerName, MCPServerConfig
 
-ENV_PREFIX = "CLAWHOUSE_"
-# Pre-rename prefix, still honoured so existing deployments keep working.
-LEGACY_ENV_PREFIX = "CRABRIKS_"
 MODELS_ENV = "CLAWHOUSE_MODELS"
 MCP_SERVERS_ENV = "CLAWHOUSE_MCP_SERVERS"
 DEFAULT_MODEL_ID = "databricks"
-
-
-def app_env(env: Mapping[str, str], name: str) -> str | None:
-    """Read a CLAWHOUSE_* variable, falling back to its old CRABRIKS_* name."""
-    value = env.get(name)
-    if value:
-        return value
-    if name.startswith(ENV_PREFIX):
-        return env.get(LEGACY_ENV_PREFIX + name.removeprefix(ENV_PREFIX)) or None
-    return value
 
 
 def default_agent_root() -> Path:
@@ -48,19 +35,19 @@ class Settings:
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
     return Settings(
-        dev_user=app_env(env, "CLAWHOUSE_DEV_USER") or None,
+        dev_user=env.get("CLAWHOUSE_DEV_USER") or None,
         dev_token=env.get("DATABRICKS_TOKEN") or None,
         serving_endpoint=env.get("SERVING_ENDPOINT") or env.get("DATABRICKS_MODEL") or None,
         workspace_host=env.get("DATABRICKS_HOST") or None,
         models=models_from_env(env),
         mcp_servers=mcp_servers_from_env(env),
         sensitive_tools=sensitive_tools_from_env(env),
-        log_tail_url=app_env(env, "CLAWHOUSE_LOG_TAIL_URL") or env.get("LOG_TAIL_URL") or None,
+        log_tail_url=env.get("CLAWHOUSE_LOG_TAIL_URL") or env.get("LOG_TAIL_URL") or None,
     )
 
 
 def sensitive_tools_from_env(env: Mapping[str, str]) -> tuple[str, ...]:
-    raw = app_env(env, "CLAWHOUSE_SENSITIVE_TOOLS")
+    raw = env.get("CLAWHOUSE_SENSITIVE_TOOLS")
     if not raw:
         return ()
     stripped = raw.strip()
@@ -84,7 +71,7 @@ def models_from_env(env: Mapping[str, str]) -> tuple[ModelEntry, ...]:
     `CLAWHOUSE_MODELS` is a JSON array of OpenAI-compatible models:
     `[{"id": "...", "label": "...", "model": "...", "base_url": "...", "api_key_env": "..."}]`.
     """
-    compat = list(_compatible_models(app_env(env, MODELS_ENV)))
+    compat = list(_compatible_models(env.get(MODELS_ENV)))
     has_compat_default = any(entry.is_default for entry in compat)
     db_entries = list(_databricks_models(env, is_default=not has_compat_default))
     return _mark_default(db_entries + compat)
@@ -150,7 +137,7 @@ def _mark_default(entries: list[ModelEntry]) -> tuple[ModelEntry, ...]:
 
 
 def mcp_servers_from_env(env: Mapping[str, str]) -> tuple[MCPServerConfig, ...]:
-    raw = app_env(env, MCP_SERVERS_ENV) or env.get("MCP_SERVERS")
+    raw = env.get(MCP_SERVERS_ENV) or env.get("MCP_SERVERS")
     if not raw:
         return ()
     items: list[dict[str, object]] = json.loads(raw)

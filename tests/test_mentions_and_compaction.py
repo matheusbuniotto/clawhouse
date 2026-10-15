@@ -10,13 +10,12 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from clawhouse.agent.history import to_model_messages
-from clawhouse.agent.roster import choose_agent
+from clawhouse.agent.roster import choose_agent, first_agent_mention
 from clawhouse.agent.turn import TurnContext, run_turn
 from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.mentions import (
     CompactionResult,
     execute_compaction,
-    extract_agent_mentions,
     extract_file_mentions,
     extract_skill_mentions,
     extract_table_mentions,
@@ -36,7 +35,7 @@ def test_mention_extractors() -> None:
     )
     assert extract_table_mentions(text) == ["samples.nyctaxi.trips"]
     assert extract_file_mentions(text) == ["SOUL.md"]
-    assert extract_agent_mentions(text) == ["sql_analyst"]
+    assert first_agent_mention(text) == "sql_analyst"
     assert extract_skill_mentions(text) == ["code-review"]
 
 

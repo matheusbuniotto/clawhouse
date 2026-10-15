@@ -8,6 +8,7 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_evals import Case, Dataset
 
+from clawhouse.agent.turn import FAILED_TURN
 from clawhouse.evals import (
     ExactMessageSequenceMatch,
     ExactToolCallsMatch,
@@ -20,8 +21,7 @@ from clawhouse.evals import (
     execute_turn_eval,
     run_trace_evals,
 )
-from clawhouse.shapes import TranscriptEntry
-from clawhouse.turn import FAILED_TURN
+from clawhouse.store.shapes import TranscriptEntry
 
 SESSION_ID = "22222222-2222-4222-8222-222222222222"
 OWNER_ID = "eval-user@example.com"

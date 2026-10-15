@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from clawhouse.settings import default_agent_root
-from clawhouse.workspace import (
+from clawhouse.capabilities.workspace import (
     UnsafeAgentName,
     provision_agent_workspace,
     resolve_agent_workspace,
 )
+from clawhouse.settings import default_agent_root
 
 
 def test_a_safe_name_composes_the_platform_layout() -> None:

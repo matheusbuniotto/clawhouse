@@ -40,7 +40,6 @@ _TABLE_REGEX = re.compile(r"@([a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+)")
 _SUMMARY_PREFIX = "Summary of previous conversation:\n\n"
 _FILE_PREFIX_REGEX = re.compile(r"@file:([^\s]+)")
 _FILE_EXT_REGEX = re.compile(r"@([a-zA-Z0-9_\-\./]+\.(?:md|py|json|txt|ya?ml|sql))")
-_AGENT_REGEX = re.compile(r"@([a-zA-Z0-9_]+)(?![\.\:\/])")
 _SKILL_REGEX = re.compile(r"/skill:([a-zA-Z0-9_\-]+)")
 
 
@@ -60,12 +59,6 @@ def extract_file_mentions(text: str) -> list[str]:
         if "." in m and m not in files and not _TABLE_REGEX.fullmatch(f"@{m}"):
             files.append(m)
     return list(dict.fromkeys(files))
-
-
-def extract_agent_mentions(text: str) -> list[str]:
-    raw_tokens = re.findall(r"@([a-zA-Z0-9_\-\.\:\/]+)", text)
-    agents = [t for t in raw_tokens if not any(c in t for c in (".", ":", "/"))]
-    return list(dict.fromkeys(agents))
 
 
 def extract_skill_mentions(text: str) -> list[str]:

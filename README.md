@@ -1,58 +1,66 @@
 # Clawhouse 🦀
 
-> Databricks-native agent runtime & chat app powered by **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
-
----
-
-## Architecture
-
-Clawhouse is organized into clean domain boundaries with zero circular dependencies:
-
-```
-src/clawhouse/
-├── agent/         # Reasoning engine, prompt composition, turn execution, models
-├── capabilities/  # Tools, skill catalogs (SKILL.md), Model Context Protocol (MCP)
-├── api/           # FastAPI chat endpoints, SSE streaming, Databricks SSO identity
-├── store/         # Lakebase Postgres (OAuth-authenticated) & in-memory session store
-└── settings.py    # Environment configuration & typed settings
-```
+> Databricks-native agent runtime and chat app built on **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
 
 ---
 
 ## Quickstart
 
-### 1. Install dependencies
 ```bash
 uv sync
-```
-
-### 2. Run locally
-```bash
 CLAWHOUSE_DEV_USER=you@example.com \
 CLAWHOUSE_STORE=memory \
-uv run uvicorn clawhouse.app:app --reload
+uv run uvicorn clawhouse.api.app:app --reload
 ```
+
 Open **`http://localhost:8000/chat`**.
 
-> **Note**: To execute turns locally, provide `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and `SERVING_ENDPOINT`.
+> Provide `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and `SERVING_ENDPOINT` (or `CLAWHOUSE_MODELS`) to run live turns locally.
 
 ---
 
-## Features
+## Architecture
 
-- **Databricks Native**: Deploys as a Databricks App with SSO reverse-proxy header auth (`X-Forwarded-Access-Token`).
-- **Lakebase Storage**: Sessions, transcripts, and run locks persist in managed Lakebase Postgres with auto-minted OAuth tokens.
-- **Multi-Model Picker**: Defaults to Databricks Model Serving; supports any OpenAI-compatible provider (OpenRouter, local gateways).
-- **Tool Capabilities**:
-  - **Skills**: Discover and run markdown-based skills (`claw/agents/main/skills/*/SKILL.md`).
-  - **MCP**: Connect to Model Context Protocol HTTP endpoints with automatic secret scrubbing.
-  - **Approvals & Guardrails**: Pause sensitive tool calls for interactive approval before execution.
+```text
+src/clawhouse/
+├── agent/         # Turn execution, @agent roster, command dispatch, prompt & history
+├── capabilities/  # Databricks (UC/SQL/Jobs), Sheets, MCP, skills, ask_user & progress
+├── api/           # FastAPI routes, SSE turn streaming, unified /api/jobs, SSO identity
+├── store/         # Lakebase Postgres (OAuth) & in-memory session/transcript/schedule store
+└── settings.py    # Environment configuration
+```
 
 ---
 
-## Model Providers
+## Core Capabilities
 
-Add external OpenAI-compatible endpoints via `CLAWHOUSE_MODELS`:
+- **Per-Message `@agent` Routing**: Mention `@agent` in any message to route the turn to that agent's persona, workspace (`claw/agents/<name>/`), and skills while sharing conversation history.
+- **Interactive Turn Cards**:
+  - **`ask_user`**: Pauses the run and renders an inline question card with option buttons (headless scheduled runs automatically select `default`).
+  - **`report_progress`**: Streams and updates a single in-place step checklist per `task_id`.
+  - **Tool Approvals**: Sensitive tools (`jobs_*`, `sheets_*`, `delivery_*`, and `CLAWHOUSE_SENSITIVE_TOOLS`) pause the run for inline `[Approve]` / `[Deny]` confirmation or resolution in `/approvals`.
+- **Unified Jobs (`/jobs`)**: Lists in-app cron schedules and Databricks Lakeflow Jobs visible to the caller (via OBO token or workspace ACL fallback), with **Run now**, schedule deletion, and links to run transcripts.
+- **Composer Commands & Context**:
+  - Slash commands: `/compact`, `/clear`, `/schedule <cron> | <prompt>`, `/skill:<name>`.
+  - Context mentions: `@catalog.schema.table` (Unity Catalog schema), `@file:<path>`, `@agent` autocomplete.
+  - Context-window ring indicator tracking sent input tokens.
+- **Databricks & MCP Tools**: Unity Catalog discovery, read-only DBSQL queries, Lakeflow Jobs (`sql`, `agentic` via `ai_query`, `python`), Google Sheets (`system.ai.google_drive`), Slack/webhook delivery, and external HTTPS MCP servers with token scrubbing.
+
+---
+
+## Configuration
+
+| Variable | Purpose |
+| :--- | :--- |
+| `SERVING_ENDPOINT` | Default Databricks Model Serving endpoint name |
+| `LAKEBASE_ENDPOINT` | Lakebase Autoscaling resource key (omit or set `CLAWHOUSE_STORE=memory` locally) |
+| `DATABRICKS_WAREHOUSE_ID` | SQL Warehouse ID for DBSQL queries and SQL/agentic job tasks |
+| `CLAWHOUSE_MODELS` | JSON list of extra OpenAI-compatible model entries (`id`, `label`, `model`, `base_url`, `api_key_env`, `default`) |
+| `CLAWHOUSE_MCP_SERVERS` | JSON list of HTTPS MCP servers (`name`, `url`, `timeout_seconds`) |
+| `CLAWHOUSE_SENSITIVE_TOOLS` | Comma-separated list or JSON array of tool names requiring interactive approval |
+| `CLAWHOUSE_DEV_USER` | Local dev identity fallback when `X-Forwarded-Email` is absent |
+
+Example `CLAWHOUSE_MODELS`:
 
 ```bash
 export CLAWHOUSE_MODELS='[
@@ -70,47 +78,36 @@ export OPENROUTER_API_KEY=sk-or-...
 
 ---
 
-## Sensitive Tool Guardrails
+## Deploy
 
-Protect destructive or privileged tools with interactive user approvals. Provide a
-comma-separated list of tool names, or an equivalent JSON array (both parse the same way):
+Direct sync and deploy to Databricks Apps:
 
 ```bash
-export CLAWHOUSE_SENSITIVE_TOOLS="bash,delete_file,drop_table"
-# or: export CLAWHOUSE_SENSITIVE_TOOLS='["bash", "delete_file", "drop_table"]'
+make deploy
 ```
 
-Pending approvals freeze the run and appear in the UI approvals inbox (`/approvals`).
-
----
-
-## Deploy to Databricks
-
-Deploy as a Databricks Asset Bundle (DAB):
+Or deploy via Databricks Asset Bundles (DAB):
 
 ```bash
-databricks bundle deploy --profile <PROFILE> \
-  --var serving_endpoint=databricks-meta-llama-3-3-70b-instruct \
-  --var postgres_branch=projects/clawhouse/branches/production \
-  --var postgres_database=projects/clawhouse/branches/production/databases/databricks-postgres
+databricks bundle deploy --profile <PROFILE>
 ```
 
 ---
 
 ## Quality Gates
 
-Clawhouse enforces zero-warning code quality across all files:
-
 ```bash
-prek run -a          # Fast staged / all-file checks (ruff, complexipy, pyright)
-uv run pytest        # Run test suite
+make check           # Runs prek (ruff, complexipy, pyright), pytest, tsc, build check, and vitest
 ```
 
-Manual checks:
+Individual checks:
+
 ```bash
 uv run ruff check --fix . && uv run ruff format .
 uv run complexipy src --max-complexity-allowed 15
 uv run pyright
 uv run vulture src --min-confidence 80
 npx jscpd@5 src --threshold 3 --min-lines 5 --min-tokens 50
+uv run pytest
+npm test
 ```

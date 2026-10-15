@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.function import FunctionModel
 
 from clawhouse.agent.turn import TurnContext
-from clawhouse.app import create_app
+from clawhouse.api.app import create_app
 from clawhouse.capabilities.schedules import (
     InvalidScheduleCommand,
     calculate_next_run,

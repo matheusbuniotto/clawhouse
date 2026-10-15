@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.messages import ModelMessage, RetryPromptPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from clawhouse.turn import (  # isort: skip
+from clawhouse.agent.turn import (
     Answer,
     QuestionNotice,
     TurnContext,
@@ -19,12 +19,11 @@ from clawhouse.turn import (  # isort: skip
     resume_turn,
     run_turn,
 )
-from clawhouse.api.app import scheduled_turn_context
-from clawhouse.app import create_app
-from clawhouse.identity import Caller
+from clawhouse.api.app import create_app, scheduled_turn_context
+from clawhouse.api.identity import Caller
 from clawhouse.settings import Settings
-from clawhouse.shapes import ScheduleEntry
-from clawhouse.store import ApprovalPending, MemorySessionStore
+from clawhouse.store.shapes import ScheduleEntry
+from clawhouse.store.store import ApprovalPending, MemorySessionStore
 
 SESSION = "44444444-4444-4444-8444-444444444444"
 OWNER = "ada@example.com"

@@ -16,7 +16,9 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from clawhouse.turn import (  # isort: skip
+from clawhouse.agent.history import drop_foreign_tool_parts
+from clawhouse.agent.roster import first_agent_mention, missing_agent_warning
+from clawhouse.agent.turn import (
     AgentNotice,
     TurnContext,
     TurnNotice,
@@ -24,10 +26,8 @@ from clawhouse.turn import (  # isort: skip
     resume_turn,
     run_turn,
 )
-from clawhouse.agent.history import drop_foreign_tool_parts
-from clawhouse.agent.roster import first_agent_mention, missing_agent_warning
-from clawhouse.shapes import CustomAgent, TranscriptEntry
-from clawhouse.store import MemorySessionStore
+from clawhouse.store.shapes import CustomAgent, TranscriptEntry
+from clawhouse.store.store import MemorySessionStore
 
 SESSION = "22222222-2222-4222-8222-222222222222"
 OWNER = "ada@example.com"

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from clawhouse.model import (
+from clawhouse.agent.model import (
     MissingAccessToken,
     MissingModelConfig,
     ModelEntry,

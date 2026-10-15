@@ -22,7 +22,6 @@ from uuid import UUID, uuid4
 import asyncpg
 from databricks.sdk import WorkspaceClient
 
-from clawhouse.settings import app_env
 from clawhouse.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
@@ -1379,9 +1378,7 @@ async def _connect_with_retry(env: Mapping[str, str]) -> asyncpg.Pool:
 async def open_store(env: Mapping[str, str] | None = None) -> SessionStore:
     """Lakebase when the platform injected a database; memory otherwise."""
     source = os.environ if env is None else env
-    if (app_env(source, "CLAWHOUSE_STORE") or "").lower() == "memory" or not _lakebase_configured(
-        source
-    ):
+    if source.get("CLAWHOUSE_STORE", "").lower() == "memory" or not _lakebase_configured(source):
         return MemorySessionStore()
     pool = await _connect_with_retry(source)
     store = LakebaseSessionStore(pool)
