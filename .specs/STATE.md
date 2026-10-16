@@ -18,9 +18,9 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 ## Handoff
 
 **Feature**: scheduled-turns
-**Where**: Slices 1 and 2 built; all 10 checks (C1-C10) passing locally
-**In progress**: Verifier subagent dispatch
-**Next step**: Run independent verification and record verification.md
+**Where**: Slices 1 and 2 built; independent verification complete (10/10 PASS)
+**In progress**: Feature completed
+**Next step**: Ready for PR / merge
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: main
+**Branch**: feat/scheduled-turns
