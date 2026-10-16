@@ -52,19 +52,19 @@ Proof: `uv run pytest tests/test_chat.py -k test_session_title_fallback_order`
 
 ### S2 - Chat Pane Header with Inline Rename & Reset · 1 file · 33 KB · ~8k
 
-**C14** - Chat screen mounts sticky header element #chat-header displaying active session title or fallback (AC 8)
+**C14** - Chat screen mounts sticky header element #chat-header displaying active session title or fallback (AC 8) · done
 Proof: `npm test frontend/chat.test.ts -t "renders chat header with session title"`
 
-**C15** - Clicking rename in #chat-header replaces title text with pre-populated input #chat-title-input (AC 9)
+**C15** - Clicking rename in #chat-header replaces title text with pre-populated input #chat-title-input (AC 9) · done
 Proof: `npm test frontend/chat.test.ts -t "displays inline title input on rename click"`
 
-**C16** - Submitting #chat-title-input sends PATCH request, updates header text, and fires clawhouse:session-renamed (AC 10)
+**C16** - Submitting #chat-title-input sends PATCH request, updates header text, and fires clawhouse:session-renamed (AC 10) · done
 Proof: `npm test frontend/chat.test.ts -t "saves new session title and dispatches renamed event"`
 
-**C17** - Pressing Escape in #chat-title-input cancels edit mode without dispatching network request (AC 11)
+**C17** - Pressing Escape in #chat-title-input cancels edit mode without dispatching network request (AC 11) · done
 Proof: `npm test frontend/chat.test.ts -t "cancels title edit on Escape key"`
 
-**C18** - Confirming clear transcript in #chat-header calls POST clear endpoint and purges entries from #log (AC 12)
+**C18** - Confirming clear transcript in #chat-header calls POST clear endpoint and purges entries from #log (AC 12) · done
 Proof: `npm test frontend/chat.test.ts -t "clears transcript after confirmation"`
 
 ### S3 - Sidebar Rail Inline Rename Action · 1 file · 11 KB · ~3k

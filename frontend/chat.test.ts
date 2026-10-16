@@ -614,3 +614,119 @@ test("submitting form clears saved draft", async () => {
 
   expect(sessionStorage.getItem(`clawhouse.draft.${SESSION}`)).toBeNull();
 });
+
+type FetchCall = { url: string; method: string; body?: string };
+
+function sessionFetch(calls: FetchCall[], title = "Quarterly revenue") {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push({ url, method, body: init?.body as string | undefined });
+    if (url.endsWith("/transcript")) {
+      return jsonResponse({ entries: [{ role: "user", content: "hello", tool_name: null }] });
+    }
+    if (url === `/api/sessions/${SESSION}` && method === "PATCH") {
+      const sent = JSON.parse(String(init?.body)) as { title: string };
+      return jsonResponse({ id: SESSION, title: sent.title, created_at: "", run_state: "idle" });
+    }
+    if (url === `/api/sessions/${SESSION}`) {
+      return jsonResponse({ id: SESSION, title, created_at: "", run_state: "idle" });
+    }
+    if (url.endsWith("/clear")) return jsonResponse({ cleared: true });
+    return jsonResponse({});
+  };
+}
+
+async function mountWithHeader(
+  calls: FetchCall[],
+  title = "Quarterly revenue",
+): Promise<HTMLElement> {
+  vi.stubGlobal("fetch", sessionFetch(calls, title));
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const header = document.querySelector("#chat-header") as HTMLElement;
+  await vi.waitFor(() =>
+    expect(header.querySelector(".chat-title")?.textContent).toBe(title || "Untitled session"),
+  );
+  return header;
+}
+
+test("renders chat header with session title", async () => {
+  const header = await mountWithHeader([]);
+  const log = document.querySelector("#log") as HTMLElement;
+
+  expect(header.querySelector(".chat-title")?.textContent).toBe("Quarterly revenue");
+  expect(header.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  document.body.innerHTML = "";
+  const untitled = await mountWithHeader([], "");
+  expect(untitled.querySelector(".chat-title")?.textContent).toBe("Untitled session");
+});
+
+test("displays inline title input on rename click", async () => {
+  const header = await mountWithHeader([]);
+
+  (header.querySelector("#chat-rename") as HTMLButtonElement).click();
+
+  const input = document.querySelector("#chat-title-input") as HTMLInputElement;
+  expect(input).not.toBeNull();
+  expect(input.value).toBe("Quarterly revenue");
+  expect((header.querySelector(".chat-title") as HTMLElement).hidden).toBe(true);
+});
+
+test("saves new session title and dispatches renamed event", async () => {
+  const calls: FetchCall[] = [];
+  const header = await mountWithHeader(calls);
+  const renamed: unknown[] = [];
+  window.addEventListener("clawhouse:session-renamed", (event) =>
+    renamed.push((event as CustomEvent).detail),
+  );
+
+  (header.querySelector("#chat-rename") as HTMLButtonElement).click();
+  const input = document.querySelector("#chat-title-input") as HTMLInputElement;
+  input.value = "  Refactor Lakeflow  ";
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  await vi.waitFor(() =>
+    expect(header.querySelector(".chat-title")?.textContent).toBe("Refactor Lakeflow"),
+  );
+  const patch = calls.find((call) => call.method === "PATCH");
+  expect(patch?.url).toBe(`/api/sessions/${SESSION}`);
+  expect(JSON.parse(String(patch?.body))).toEqual({ title: "Refactor Lakeflow" });
+  expect(renamed).toEqual([{ id: SESSION, title: "Refactor Lakeflow" }]);
+  expect(document.querySelector("#chat-title-input")).toBeNull();
+});
+
+test("cancels title edit on Escape key", async () => {
+  const calls: FetchCall[] = [];
+  const header = await mountWithHeader(calls);
+
+  (header.querySelector("#chat-rename") as HTMLButtonElement).click();
+  const input = document.querySelector("#chat-title-input") as HTMLInputElement;
+  input.value = "Discarded";
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+  expect(document.querySelector("#chat-title-input")).toBeNull();
+  const title = header.querySelector(".chat-title") as HTMLElement;
+  expect(title.textContent).toBe("Quarterly revenue");
+  expect(title.hidden).toBe(false);
+  expect(calls.filter((call) => call.method === "PATCH")).toEqual([]);
+});
+
+test("clears transcript after confirmation", async () => {
+  const calls: FetchCall[] = [];
+  const header = await mountWithHeader(calls);
+  await vi.waitFor(() => expect(document.querySelector(".bubble.user")).not.toBeNull());
+  const confirm = vi.fn(() => true);
+  vi.stubGlobal("confirm", confirm);
+
+  (header.querySelector("#chat-clear") as HTMLButtonElement).click();
+
+  await vi.waitFor(() => expect(document.querySelector(".bubble.user")).toBeNull());
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(calls.filter((call) => call.method === "POST").map((call) => call.url)).toEqual([
+    `/api/sessions/${SESSION}/clear`,
+  ]);
+  const log = document.querySelector("#log") as HTMLElement;
+  expect(log.children).toHaveLength(1);
+  expect(log.textContent).toContain("Transcript cleared.");
+});
