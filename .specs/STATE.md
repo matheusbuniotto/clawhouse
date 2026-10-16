@@ -18,9 +18,9 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 ## Handoff
 
 **Feature**: runtime-telemetry
-**Where**: Starting build (C1-C14 defined in checks.md)
-**In progress**: S1, S2, S3
-**Next step**: Implement telemetry configuration, turn spans, and Pydantic AI instrumentation
+**Where**: Complete - Verified PASS (14/14 checks proven)
+**In progress**: none
+**Next step**: Ready to commit verification report or select next feature
 **Blockers**: none
-**Uncommitted**: .specs/
+**Uncommitted**: none
 **Branch**: main
