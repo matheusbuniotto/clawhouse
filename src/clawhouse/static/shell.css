@@ -382,12 +382,37 @@ body {
 }
 
 .screen {
+  position: relative;
   display: flex;
   min-width: 0;
   height: 100vh;
   flex-direction: column;
   overflow-y: auto;
   padding: 20px 24px;
+}
+
+.scroll-bottom-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 84px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--card, var(--bg-elevated));
+  color: var(--text-strong, var(--ink));
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 20;
+  transition: opacity var(--duration-fast) var(--ease), transform var(--duration-fast) var(--ease);
+}
+
+.scroll-bottom-btn:hover {
+  background: var(--bg-hover);
+  transform: translateY(-2px);
 }
 
 /* Composer — one container with the model pill inline and abort only while busy. */

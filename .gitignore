@@ -53,3 +53,8 @@ logs/
 
 # Databricks Asset Bundle state
 .databricks/
+
+# Third-party assistant caches
+.cursor/
+.windsurf/
+.claude/
