@@ -87,6 +87,8 @@ resources:
             value: ${var.sql_warehouse_id}
           - name: CLAWHOUSE_MLFLOW_TRACING
             value: "true"
+          - name: MLFLOW_TRACKING_URI
+            value: "databricks"
           - name: MLFLOW_EXPERIMENT_NAME
             value: "/Users/matheus.buniotto@gmail.com/clawhouse-traces"
       resources:

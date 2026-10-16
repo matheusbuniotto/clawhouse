@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -42,6 +43,17 @@ def setup_mlflow_tracing(settings: Settings) -> None:
     if not settings.mlflow_enabled:
         return
     try:
+        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+        if not tracking_uri:
+            if (
+                settings.workspace_host
+                or os.environ.get("DATABRICKS_HOST")
+                or (settings.mlflow_experiment and settings.mlflow_experiment.startswith("/"))
+            ):
+                mlflow.set_tracking_uri("databricks")
+        else:
+            mlflow.set_tracking_uri(tracking_uri)
+
         if settings.mlflow_experiment:
             mlflow.set_experiment(settings.mlflow_experiment)
         pydantic_ai_mod = getattr(mlflow, "pydantic_ai", None)
@@ -50,6 +62,24 @@ def setup_mlflow_tracing(settings: Settings) -> None:
             logger.info("MLflow Pydantic AI autologging enabled")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to initialize MLflow tracing: %s", exc)
+
+
+def flush_telemetry() -> None:
+    """Flush pending OpenTelemetry spans and MLflow traces."""
+    try:
+        provider = trace.get_tracer_provider()
+        force_flush = getattr(provider, "force_flush", None)
+        if callable(force_flush):
+            force_flush()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to flush OpenTelemetry provider: %s", exc)
+
+    try:
+        flush_fn = getattr(mlflow, "flush_trace_async_logging", None)
+        if callable(flush_fn):
+            flush_fn()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to flush MLflow traces: %s", exc)
 
 
 def setup_telemetry(settings: Settings) -> None:

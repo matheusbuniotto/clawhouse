@@ -20,6 +20,7 @@ from clawhouse.api.app import create_app
 from clawhouse.settings import Settings, settings_from_env
 from clawhouse.store.store import MemorySessionStore
 from clawhouse.telemetry import (
+    flush_telemetry,
     parse_otlp_headers,
     setup_telemetry,
 )
@@ -393,3 +394,36 @@ async def test_app_lifespan_telemetry_setup() -> None:
         async with app.router.lifespan_context(app):
             pass
         mock_setup.assert_called_once_with(settings)
+
+
+def test_flush_telemetry() -> None:
+    with (
+        patch("clawhouse.telemetry.trace.get_tracer_provider") as mock_get_provider,
+        patch("clawhouse.telemetry.mlflow.flush_trace_async_logging") as mock_flush_trace,
+    ):
+        mock_provider = mock_get_provider.return_value
+        flush_telemetry()
+        mock_provider.force_flush.assert_called_once()
+        mock_flush_trace.assert_called_once()
+
+
+def test_setup_telemetry_mlflow_tracking_uri_databricks() -> None:
+    settings = Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host="https://adb-1234.net",
+        telemetry_enabled=True,
+        mlflow_enabled=True,
+        mlflow_experiment="/Users/test/traces",
+    )
+    with (
+        patch("clawhouse.telemetry.mlflow.set_tracking_uri") as mock_set_uri,
+        patch("clawhouse.telemetry.mlflow.set_experiment") as mock_set_exp,
+        patch("clawhouse.telemetry.mlflow.pydantic_ai.autolog") as mock_autolog,
+        patch("clawhouse.telemetry.Agent.instrument_all"),
+    ):
+        setup_telemetry(settings)
+        mock_set_uri.assert_called_once_with("databricks")
+        mock_set_exp.assert_called_once_with("/Users/test/traces")
+        mock_autolog.assert_called_once()
