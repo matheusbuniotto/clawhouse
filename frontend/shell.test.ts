@@ -29,6 +29,7 @@ function stubFetch(): void {
     if (url === "/api/me") return jsonResponse({ user_id: "ada@example.com" });
     if (url === "/api/sessions") return jsonResponse({ sessions: SESSIONS });
     if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url === "/api/agents") return jsonResponse([]);
     if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
     if (url === "/api/status") {
       return jsonResponse({
@@ -68,7 +69,7 @@ test("renders the persistent rail, caller identity, and dark-by-default theme", 
     [...document.querySelectorAll("#rail .rail-nav a[data-nav]")].map((link) =>
       link.getAttribute("href"),
     ),
-  ).toEqual(["/chat", "/sessions", "/approvals", "/jobs", "/status"]);
+  ).toEqual(["/chat", "/sessions", "/agents", "/approvals", "/jobs", "/status"]);
   expect(document.querySelector("#rail .rail-heading")?.textContent).toBe("Sessions");
   expect(document.querySelector("#rail-search")).not.toBeNull();
   expect(document.querySelector("#rail-new")).not.toBeNull();
@@ -320,4 +321,16 @@ test("updates rail session title on renamed event", async () => {
   expect(row.dataset.title).toBe("renamed elsewhere");
   const untouched = document.querySelector('.rail-session[data-id="s2"]') as HTMLElement;
   expect(untouched.querySelector(".rail-session-title")?.textContent).toBe("Second");
+});
+
+test("highlights the active screen in the rail and updates the title", async () => {
+  await mount();
+  await vi.waitFor(() => expect(document.querySelector("#screen #log")).not.toBeNull());
+
+  (document.querySelector('a[href="/agents"]') as HTMLAnchorElement).click();
+
+  await vi.waitFor(() => expect(document.querySelector("#screen .agents-page")).not.toBeNull());
+  expect(location.pathname).toBe("/agents");
+  expect(document.title).toBe("Clawhouse · Agentes");
+  expect(document.querySelector("#nav-agents")?.getAttribute("aria-current")).toBe("page");
 });

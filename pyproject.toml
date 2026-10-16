@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
+"src/clawhouse/static/agents.js" = "clawhouse/static/agents.js"
 "src/clawhouse/static/approvals.js" = "clawhouse/static/approvals.js"
 "src/clawhouse/static/boot.js" = "clawhouse/static/boot.js"
 "src/clawhouse/static/cards.js" = "clawhouse/static/cards.js"

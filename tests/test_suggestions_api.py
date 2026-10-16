@@ -156,3 +156,131 @@ async def test_custom_agents_lifecycle_and_inclusion_in_suggestions(
         agent_names_2 = [a["name"] for a in list_resp_2.json()]
         assert "sql_analyst" not in agent_names_2
         assert not agent_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_agents_api_enriches_model_and_default_activity(tmp_path: Path) -> None:
+    store = MemorySessionStore()
+
+    async def _stream(_msgs: object, _info: object) -> AsyncIterator[str]:
+        yield "ok"
+
+    app = create_app(
+        store=store,
+        settings=Settings(
+            dev_user=None,
+            dev_token=None,
+            serving_endpoint="databricks-claude-sonnet-4-6",
+            workspace_host=None,
+            agent_root=tmp_path,
+        ),
+        model_for=lambda _c, _m: FunctionModel(stream_function=_stream),  # type: ignore[arg-type]
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers=HEADERS
+    ) as client:
+        create_resp = await client.post(
+            "/api/agents",
+            json={
+                "name": "fraud",
+                "description": "Fraud specialist",
+                "system_prompt": "Investigate fraud.",
+                "signature_emoji": "🕵️",
+            },
+        )
+        assert create_resp.status_code == 201
+        created = create_resp.json()
+        assert created["model"] == "databricks-claude-sonnet-4-6"
+        assert created["last_active_at"] is None
+        assert created["last_activity"] == "Fraud specialist"
+
+        list_resp = await client.get("/api/agents")
+        assert list_resp.status_code == 200
+        agents = list_resp.json()
+        assert [a["name"] for a in agents] == ["main", "fraud"]
+        assert agents[0]["model"] == "databricks-claude-sonnet-4-6"
+        assert agents[0]["last_active_at"] is None
+        assert agents[0]["last_activity"] == "Heartbeat & platform operations"
+        assert agents[1]["model"] == "databricks-claude-sonnet-4-6"
+        assert agents[1]["last_active_at"] is None
+        assert agents[1]["last_activity"] == "Fraud specialist"
+
+
+@pytest.mark.asyncio
+async def test_agents_api_populates_last_active_at_and_activity_from_turns(
+    tmp_path: Path,
+) -> None:
+    store = MemorySessionStore(now=lambda: NOW)
+
+    async def _stream(_msgs: object, _info: object) -> AsyncIterator[str]:
+        yield "Investigated 14 high-risk transactions across three regions."
+
+    app = create_app(
+        store=store,
+        settings=_settings(tmp_path),
+        model_for=lambda _c, _m: FunctionModel(stream_function=_stream),  # type: ignore[arg-type]
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers=HEADERS
+    ) as client:
+        await client.post(
+            "/api/agents",
+            json={
+                "name": "fraud",
+                "description": "Fraud specialist",
+                "system_prompt": "Investigate fraud.",
+                "signature_emoji": "🕵️",
+            },
+        )
+        sess_resp = await client.post("/api/sessions")
+        session_id = sess_resp.json()["id"]
+
+        long_prompt = "@fraud " + ("analyze transaction batch " * 6)
+        turn_resp = await client.post(
+            f"/api/sessions/{session_id}/turns",
+            json={"message": long_prompt},
+        )
+        assert turn_resp.status_code == 200
+
+        list_resp = await client.get("/api/agents")
+        assert list_resp.status_code == 200
+        by_name = {a["name"]: a for a in list_resp.json()}
+        assert by_name["fraud"]["last_active_at"] == NOW.isoformat()
+        assert len(by_name["fraud"]["last_activity"]) <= 120
+        assert "Investigated 14 high-risk transactions" in by_name["fraud"]["last_activity"]
+
+
+@pytest.mark.asyncio
+async def test_create_agent_rejects_unsafe_or_reserved_names_and_unauthenticated_requests(
+    test_app, tmp_path: Path
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://test"
+    ) as anon_client:
+        anon_get = await anon_client.get("/api/agents")
+        assert anon_get.status_code == 401
+        anon_post = await anon_client.post(
+            "/api/agents",
+            json={"name": "valid_name", "description": "d", "system_prompt": "p"},
+        )
+        assert anon_post.status_code == 401
+
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://test", headers=HEADERS
+    ) as client:
+        for invalid_name in ("main", "../evil", "bad name"):
+            resp = await client.post(
+                "/api/agents",
+                json={
+                    "name": invalid_name,
+                    "description": "desc",
+                    "system_prompt": "prompt",
+                },
+            )
+            assert resp.status_code == 422
+
+        list_resp = await client.get("/api/agents")
+        assert [a["name"] for a in list_resp.json()] == ["main"]
+        assert not (tmp_path / "claw" / "agents" / "main").exists()

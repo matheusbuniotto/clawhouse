@@ -243,6 +243,8 @@ class SessionStore(Protocol):
 
     async def delete_custom_agent(self, agent_id: str, owner_id: str) -> bool: ...
 
+    async def agent_activities(self, owner_id: str) -> dict[str, tuple[datetime, str]]: ...
+
     async def create_schedule(self, schedule: ScheduleEntry) -> ScheduleEntry: ...
 
     async def list_schedules(
@@ -288,17 +290,19 @@ class _MemorySession:
     running: str | None = None
     last_status: TurnStatus | None = None
     title: str | None = None
+    last_run_at: datetime | None = None
 
 
 class MemorySessionStore:
     """In-process stand-in. `running` is the partial unique index."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         self._sessions: dict[str, _MemorySession] = {}
         self._approvals: dict[str, ApprovalEntry] = {}
         self._profiles: dict[str, UserProfile] = {}
         self._custom_agents: dict[str, list[CustomAgent]] = {}
         self._schedules: dict[str, ScheduleEntry] = {}
+        self._now = now
         self._lock = asyncio.Lock()
 
     async def open_session(self, session_id: str, owner_id: str) -> None:
@@ -306,7 +310,7 @@ class MemorySessionStore:
             existing = self._sessions.get(session_id)
             if existing is None:
                 self._sessions[session_id] = _MemorySession(
-                    owner_id=owner_id, created_at=datetime.now(UTC)
+                    owner_id=owner_id, created_at=self._now()
                 )
                 return
             if existing.owner_id != owner_id:
@@ -315,7 +319,7 @@ class MemorySessionStore:
     async def create_session(self, owner_id: str) -> SessionSummary:
         async with self._lock:
             session_id = str(uuid4())
-            session = _MemorySession(owner_id=owner_id, created_at=datetime.now(UTC))
+            session = _MemorySession(owner_id=owner_id, created_at=self._now())
             self._sessions[session_id] = session
             return _memory_summary(session_id, session)
 
@@ -380,6 +384,7 @@ class MemorySessionStore:
             if session.running != run_id:
                 raise RunNotActive(run_id)
             session.entries.append(entry)
+            session.last_run_at = self._now()
 
     async def finish_run(self, session_id: str, run_id: str, status: TurnStatus) -> None:
         async with self._lock:
@@ -512,6 +517,11 @@ class MemorySessionStore:
             initial_len = len(agents)
             self._custom_agents[owner_id] = [a for a in agents if a.id != agent_id]
             return len(self._custom_agents[owner_id]) < initial_len
+
+    async def agent_activities(self, owner_id: str) -> dict[str, tuple[datetime, str]]:
+        async with self._lock:
+            owned = [s for s in self._sessions.values() if s.owner_id == owner_id]
+        return _collect_session_activities(owned)
 
     async def create_schedule(self, schedule: ScheduleEntry) -> ScheduleEntry:
         async with self._lock:
@@ -1002,6 +1012,28 @@ class LakebaseSessionStore:
         )
         return res.startswith("DELETE 1")
 
+    async def agent_activities(self, owner_id: str) -> dict[str, tuple[datetime, str]]:
+        if not self._agent_column:
+            return {}
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (COALESCE(t.agent_id, 'main'))
+                COALESCE(t.agent_id, 'main') AS agent_id,
+                r.started_at AS last_active_at,
+                t.content AS last_activity
+            FROM clawhouse.transcript_entries AS t
+            JOIN clawhouse.runs AS r ON r.id = t.run_id
+            JOIN clawhouse.sessions AS s ON s.id = t.session_id
+            WHERE s.owner_id = $1
+              AND t.role IN ('assistant', 'user')
+            ORDER BY COALESCE(t.agent_id, 'main'), r.started_at DESC, t.position DESC
+            """,
+            owner_id,
+        )
+        return {
+            str(row["agent_id"]): (row["last_active_at"], str(row["last_activity"])) for row in rows
+        }
+
     async def create_schedule(self, schedule: ScheduleEntry) -> ScheduleEntry:
         now = datetime.now(UTC)
         row = await self._pool.fetchrow(
@@ -1217,6 +1249,32 @@ def _memory_summary(session_id: str, session: _MemorySession) -> SessionSummary:
             status=session.last_status,
         ),
     )
+
+
+def _collect_session_activities(
+    sessions: list[_MemorySession],
+) -> dict[str, tuple[datetime, str]]:
+    out: dict[str, tuple[datetime, str]] = {}
+    for session in sessions:
+        when = session.last_run_at or session.created_at
+        for aid, text in _session_entry_pairs(session.entries):
+            prev = out.get(aid)
+            if prev is None or when >= prev[0]:
+                out[aid] = (when, text)
+    return out
+
+
+def _session_entry_pairs(entries: list[TranscriptEntry]) -> list[tuple[str, str]]:
+    return [
+        (entry.agent_id or "main", entry.content)
+        for entry in entries
+        if entry.role in ("assistant", "user") and entry.content.strip()
+    ]
+
+
+async def agent_activities(store: SessionStore, owner_id: str) -> dict[str, tuple[datetime, str]]:
+    """Most recent (last_active_at, last_activity) per agent_id for an owner's sessions."""
+    return await store.agent_activities(owner_id)
 
 
 async def _insert_or_check_owner(conn: _Querier, session: UUID, owner_id: str) -> None:
