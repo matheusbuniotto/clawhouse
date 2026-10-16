@@ -96,6 +96,7 @@ from clawhouse.store.store import (
     SessionForbidden,
     SessionStore,
 )
+from clawhouse.telemetry import record_turn_agent, record_turn_status, turn_span
 
 logger = logging.getLogger("clawhouse.turn")
 
@@ -288,17 +289,19 @@ async def iter_turn(
     claimed = await _claim(canonical_session_id(session_id), user_message, ctx)
     queue: _Queue = asyncio.Queue()
     holder: list[TurnResult] = []
-    task = _detach(claimed, _worker(claimed, queue, holder), holder)
-    async for notice in _drain(queue):
-        yield notice
-    await asyncio.shield(task)
-    if not holder:
-        holder.append(await _error_result(claimed.session_id, claimed.ctx))
-    res = holder[0]
-    token = claimed.ctx.user_token
-    if token and res.error and token in res.error:
-        res = replace(res, error=scrub_token(res.error, token))
-    yield res
+    with turn_span(claimed.session_id, ctx.owner_id, claimed.run_id):
+        task = _detach(claimed, _worker(claimed, queue, holder), holder)
+        async for notice in _drain(queue):
+            yield notice
+        await asyncio.shield(task)
+        if not holder:
+            holder.append(await _error_result(claimed.session_id, claimed.ctx))
+        res = holder[0]
+        token = claimed.ctx.user_token
+        if token and res.error and token in res.error:
+            res = replace(res, error=scrub_token(res.error, token))
+        record_turn_status(res.status)
+        yield res
 
 
 async def iter_resume_turn(
@@ -313,19 +316,21 @@ async def iter_resume_turn(
     approval = await ctx.store.get_approval(approval_id)
     queue: _Queue = asyncio.Queue()
     holder: list[TurnResult] = []
-    task = _detach(
-        claimed, _worker_resume(claimed, approval, decision, queue=queue, holder=holder), holder
-    )
-    async for notice in _drain(queue):
-        yield notice
-    await asyncio.shield(task)
-    if not holder:
-        holder.append(await _error_result(claimed.session_id, claimed.ctx))
-    res = holder[0]
-    token = claimed.ctx.user_token
-    if token and res.error and token in res.error:
-        res = replace(res, error=scrub_token(res.error, token))
-    yield res
+    with turn_span(claimed.session_id, ctx.owner_id, claimed.run_id):
+        task = _detach(
+            claimed, _worker_resume(claimed, approval, decision, queue=queue, holder=holder), holder
+        )
+        async for notice in _drain(queue):
+            yield notice
+        await asyncio.shield(task)
+        if not holder:
+            holder.append(await _error_result(claimed.session_id, claimed.ctx))
+        res = holder[0]
+        token = claimed.ctx.user_token
+        if token and res.error and token in res.error:
+            res = replace(res, error=scrub_token(res.error, token))
+        record_turn_status(res.status)
+        yield res
 
 
 async def _claim(session_id: str, user_message: str, ctx: TurnContext) -> _Claimed:
@@ -387,6 +392,7 @@ async def _worker(claimed: _Claimed, queue: _Queue, holder: list[TurnResult]) ->
     except Exception as exc:  # noqa: BLE001 — a failed turn is an empty reply, never a partial one
         # Model failures can echo request headers. Log the type only.
         logger.error("turn failed: %s", type(exc).__name__)  # noqa: TRY400
+        record_turn_status("error", exc)
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
     finally:
         await queue.put(_END)
@@ -404,6 +410,7 @@ async def _worker_resume(
         holder.append(await _run_model_resume(claimed, approval, decision, queue))
     except Exception as exc:  # noqa: BLE001
         logger.error("resume turn failed: %s", type(exc).__name__)  # noqa: TRY400
+        record_turn_status("error", exc)
         holder.append(await _error_result(claimed.session_id, claimed.ctx))
     finally:
         await queue.put(_END)
@@ -672,6 +679,7 @@ def _usage_notice(event: ContextUsageEvent) -> UsageNotice:
 
 async def _start_agent(claimed: _Claimed, queue: _Queue, agent: ActiveAgent) -> _Claimed:
     """Bind the turn to its agent and announce it before any other frame."""
+    record_turn_agent(agent.agent_id)
     model_name = getattr(claimed.ctx.model, "model_name", "") or ""
     notice = AgentNotice(
         agent_id=agent.agent_id, name=agent.name, emoji=agent.emoji, model=str(model_name)

@@ -31,6 +31,17 @@ class Settings:
     agent_root: Path = field(default_factory=default_agent_root)
     sensitive_tools: tuple[str, ...] = ()
     log_tail_url: str | None = None
+    telemetry_enabled: bool = True
+    otel_endpoint: str | None = None
+    otel_headers: str | None = None
+    logfire_token: str | None = None
+
+
+def telemetry_enabled_from_env(env: Mapping[str, str]) -> bool:
+    raw = env.get("CLAWHOUSE_TELEMETRY")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no"}
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -43,6 +54,10 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         mcp_servers=mcp_servers_from_env(env),
         sensitive_tools=sensitive_tools_from_env(env),
         log_tail_url=env.get("CLAWHOUSE_LOG_TAIL_URL") or env.get("LOG_TAIL_URL") or None,
+        telemetry_enabled=telemetry_enabled_from_env(env),
+        otel_endpoint=env.get("OTEL_EXPORTER_OTLP_ENDPOINT") or None,
+        otel_headers=env.get("OTEL_EXPORTER_OTLP_HEADERS") or None,
+        logfire_token=env.get("LOGFIRE_TOKEN") or None,
     )
 
 
