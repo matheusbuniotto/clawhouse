@@ -14,6 +14,52 @@ export interface AgentOverviewItem {
   last_activity?: string;
 }
 
+interface RolePreset {
+  label: string;
+  name: string;
+  emoji: string;
+  description: string;
+  system_prompt: string;
+}
+
+const ROLE_PRESETS: RolePreset[] = [
+  {
+    label: "Chief of staff",
+    name: "chief_of_staff",
+    emoji: "🧭",
+    description: "Coordinates the others and is your single point of contact.",
+    system_prompt:
+      "You are the Chief of Staff. Coordinate specialist agents, break plans into actionable steps, and serve as the single point of contact.",
+  },
+  {
+    label: "Researcher",
+    name: "researcher",
+    emoji: "🔍",
+    description:
+      "Find reliable evidence, compare sources, and return a cited research brief.",
+    system_prompt:
+      "You are a Researcher. Find reliable evidence, compare data sources, and return a concise, cited research brief.",
+  },
+  {
+    label: "Writer",
+    name: "writer",
+    emoji: "✍️",
+    description:
+      "Turn a brief and verified source material into a clear, usable draft.",
+    system_prompt:
+      "You are a Writer. Turn briefs and verified source material into clear, well-structured drafts.",
+  },
+  {
+    label: "Reviewer",
+    name: "reviewer",
+    emoji: "🛡️",
+    description:
+      "Check artifacts against requirements and report actionable findings with evidence.",
+    system_prompt:
+      "You are a Reviewer. Check artifacts against requirements and report actionable findings with concrete evidence.",
+  },
+];
+
 export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let currentAgents: AgentOverviewItem[] = [];
   let activeCleanup: (() => void) | null = null;
@@ -22,20 +68,20 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   const header = el("header", "agents-header");
   const titleWrap = el("div", "agents-title-group");
-  const heading = el("h2", "agents-heading", "Agentes");
+  const heading = el("h2", "agents-heading", "Agents");
   const subtitle = el(
     "p",
     "agents-subtitle",
-    "Quem está na sua equipe e o que está fazendo",
+    "Who is on your team and what they are doing",
   );
   titleWrap.append(heading, subtitle);
 
   const actions = el("div", "agents-header-actions");
-  const manageBtn = el("button", "btn-secondary", "Gerenciar agentes");
+  const manageBtn = el("button", "btn-secondary", "Manage agents");
   manageBtn.id = "btn-manage-agents";
   manageBtn.type = "button";
 
-  const newBtn = el("button", "btn-primary", "Novo agente");
+  const newBtn = el("button", "btn-primary", "New agent");
   newBtn.id = "btn-new-agent";
   newBtn.type = "button";
 
@@ -121,15 +167,15 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       top.append(avatar, identity);
 
       const statusText = ag.last_active_at
-        ? relativeTime(ag.last_active_at, Date.now())
-        : "Recém-criado";
+        ? `Active ${relativeTime(ag.last_active_at, Date.now())}`
+        : "Newly created";
       const statusRow = el("p", "agent-card-status", statusText);
 
       const activityText = ag.last_activity || ag.description || "";
       const activityP = el("p", "agent-card-activity", activityText);
 
       const footer = el("div", "agent-card-footer");
-      const openBtn = el("button", "btn-open-chat", "Abrir chat");
+      const openBtn = el("button", "btn-open-chat", "Open chat");
       openBtn.type = "button";
       openBtn.addEventListener("click", () => {
         void launchAgentSession(ag, openBtn);
@@ -142,7 +188,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   async function loadAgents(): Promise<void> {
-    grid.replaceChildren(el("p", "agents-loading", "Carregando agentes…"));
+    grid.replaceChildren(el("p", "agents-loading", "Loading agents…"));
     try {
       const res = await fetch("/api/agents");
       if (!res.ok) {
@@ -152,12 +198,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       renderGrid(currentAgents);
     } catch {
       const errBox = el("div", "agents-error");
-      const msg = el(
-        "p",
-        "agents-error-text",
-        "Não foi possível carregar os agentes.",
-      );
-      const retryBtn = el("button", "btn-retry-agents", "Tentar novamente");
+      const msg = el("p", "agents-error-text", "Could not load agents.");
+      const retryBtn = el("button", "btn-retry-agents", "Try again");
       retryBtn.type = "button";
       retryBtn.addEventListener("click", () => {
         void loadAgents();
@@ -174,12 +216,20 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     dialog.setAttribute("aria-modal", "true");
 
     const head = el("header", "modal-header");
-    const title = el("h3", "modal-title", "Novo agente");
+    const title = el("h3", "modal-title", "New agent");
     const closeBtn = el("button", "modal-close", "×");
     closeBtn.type = "button";
-    closeBtn.setAttribute("aria-label", "Fechar");
+    closeBtn.setAttribute("aria-label", "Close");
     closeBtn.addEventListener("click", closeModal);
     head.append(title, closeBtn);
+
+    const presetsWrap = el("div", "agent-role-presets");
+    const presetsIntro = el(
+      "p",
+      "modal-presets-intro",
+      "Start with a role or describe your own:",
+    );
+    const presetsGrid = el("div", "role-presets-grid");
 
     const form = document.createElement("form");
     form.className = "modal-form";
@@ -187,46 +237,65 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     const nameInput = document.createElement("input");
     nameInput.className = "agent-input";
     nameInput.name = "name";
-    nameInput.placeholder = "Nome do agente (ex: data_analyst)";
+    nameInput.placeholder = "Agent name (e.g. data_analyst)";
     nameInput.required = true;
 
     const emojiInput = document.createElement("input");
     emojiInput.className = "agent-input";
     emojiInput.name = "signature_emoji";
-    emojiInput.placeholder = "Emoji (ex: 📊, 🤖)";
+    emojiInput.placeholder = "Emoji (e.g. 📊, 🤖)";
     emojiInput.maxLength = 4;
     emojiInput.value = "🤖";
 
     const descInput = document.createElement("input");
     descInput.className = "agent-input";
     descInput.name = "description";
-    descInput.placeholder = "Descrição curta";
+    descInput.placeholder = "Short description";
     descInput.required = true;
 
     const promptArea = document.createElement("textarea");
     promptArea.className = "agent-prompt";
     promptArea.name = "system_prompt";
-    promptArea.placeholder = "Instruções de operação (AGENTS.md)";
+    promptArea.placeholder = "Operating instructions (AGENTS.md)";
     promptArea.rows = 3;
     promptArea.required = true;
+
+    for (const preset of ROLE_PRESETS) {
+      const chip = el(
+        "button",
+        "btn-role-preset",
+        `${preset.emoji} ${preset.label}`,
+      );
+      chip.type = "button";
+      chip.dataset.rolePreset = preset.name;
+      chip.title = preset.description;
+      chip.addEventListener("click", () => {
+        nameInput.value = preset.name;
+        emojiInput.value = preset.emoji;
+        descInput.value = preset.description;
+        promptArea.value = preset.system_prompt;
+      });
+      presetsGrid.append(chip);
+    }
+    presetsWrap.append(presetsIntro, presetsGrid);
 
     const soulArea = document.createElement("textarea");
     soulArea.className = "agent-prompt";
     soulArea.name = "soul";
-    soulArea.placeholder = "Opcional: SOUL.md (persona, tom de voz)";
+    soulArea.placeholder = "Optional: SOUL.md (persona, tone of voice)";
     soulArea.rows = 2;
 
     const contextArea = document.createElement("textarea");
     contextArea.className = "agent-prompt";
     contextArea.name = "context";
-    contextArea.placeholder = "Opcional: CONTEXT.md (contexto de domínio e tabelas)";
+    contextArea.placeholder = "Optional: CONTEXT.md (domain and table context)";
     contextArea.rows = 2;
 
     const statusLine = el("p", "modal-status");
     statusLine.setAttribute("role", "status");
 
     const actionsRow = el("div", "modal-actions");
-    const submitBtn = el("button", "btn-primary", "Criar agente");
+    const submitBtn = el("button", "btn-primary", "Create agent");
     submitBtn.type = "submit";
     actionsRow.append(submitBtn);
 
@@ -259,19 +328,19 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
           }),
         });
         if (!res.ok) {
-          statusLine.textContent = `Erro ao criar agente (${res.status}).`;
+          statusLine.textContent = `Failed to create agent (${res.status}).`;
           submitBtn.disabled = false;
           return;
         }
         closeModal();
         await loadAgents();
       } catch {
-        statusLine.textContent = "Erro ao criar agente.";
+        statusLine.textContent = "Failed to create agent.";
         submitBtn.disabled = false;
       }
     });
 
-    dialog.append(head, form);
+    dialog.append(head, presetsWrap, form);
     openModal(dialog);
   }
 
@@ -282,10 +351,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     dialog.setAttribute("aria-modal", "true");
 
     const head = el("header", "modal-header");
-    const title = el("h3", "modal-title", "Gerenciar agentes");
+    const title = el("h3", "modal-title", "Manage agents");
     const closeBtn = el("button", "modal-close", "×");
     closeBtn.type = "button";
-    closeBtn.setAttribute("aria-label", "Fechar");
+    closeBtn.setAttribute("aria-label", "Close");
     closeBtn.addEventListener("click", closeModal);
     head.append(title, closeBtn);
 
@@ -308,9 +377,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         row.append(info);
 
         if (ag.is_platform || ag.name === "main") {
-          row.append(el("span", "agent-protected-badge", "Plataforma"));
+          row.append(el("span", "agent-protected-badge", "Platform"));
         } else {
-          const delBtn = el("button", "btn-delete-agent", "Excluir");
+          const delBtn = el("button", "btn-delete-agent", "Delete");
           delBtn.type = "button";
           delBtn.addEventListener("click", async () => {
             delBtn.disabled = true;
@@ -321,14 +390,14 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
                 { method: "DELETE" },
               );
               if (!delRes.ok) {
-                statusLine.textContent = `Falha ao excluir @${ag.name}.`;
+                statusLine.textContent = `Failed to delete @${ag.name}.`;
                 delBtn.disabled = false;
                 return;
               }
               await loadAgents();
               renderRows();
             } catch {
-              statusLine.textContent = `Falha ao excluir @${ag.name}.`;
+              statusLine.textContent = `Failed to delete @${ag.name}.`;
               delBtn.disabled = false;
             }
           });
@@ -347,4 +416,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   manageBtn.addEventListener("click", openManageAgentsModal);
 
   void loadAgents();
+  if (ctx.url.searchParams.get("new") === "1") {
+    openNewAgentModal();
+  }
 }

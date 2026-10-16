@@ -4,15 +4,15 @@
 
 Today, Clawhouse allows custom agents to be registered in the backend (`/api/agents`) with workspace folders provisioned on disk (`AGENTS.md`, `SOUL.md`, `CONTEXT.md`) and addressed in chat via `@agent_name` or `?agent=<name>`. However, the UI has no dedicated agents overview or management screen. Workspace operators and end users must use the cluttered `/new` (New session) screen—which mixes session creation with inline custom agent forms and deletion lists—or memorize agent handles to type `@mentions` directly in chat without knowing which agents exist, what model they run on, or what they were most recently doing.
 
-Reference: OpenClaw's `/agents` screen (`docs/openclaw-ui/SHOTS.md` §9-10) provides a dedicated `/agents` route with header "Agentes", subtitle "Quem está na sua equipe e o que está fazendo", actions "Gerenciar agentes" and "Novo agente", and a card grid showing avatars, models, activity status, and direct "Abrir chat" launch buttons.
+Reference: OpenClaw's `/agents` screen (`docs/openclaw-ui/SHOTS.md` §9-10) provides a dedicated `/agents` route with header "Agents", subtitle "Who is on your team and what they are doing", actions "Manage agents" and "New agent", and a card grid showing avatars, models, activity status, and direct "Open chat" launch buttons.
 
-When this ships, an operator can navigate to `/agents` from the primary navigation rail, see all platform and custom agents in a card grid with their signature emoji, model badge, relative activity timestamp, and recent activity snippet, click "Abrir chat" on any card to immediately start a session with that agent as the session default, create a new custom agent or delete custom agents via overlay modals on `/agents`, and use a clean `/new` screen focused on session creation with a link to `/agents`.
+When this ships, an operator can navigate to `/agents` from the primary navigation rail, see all platform and custom agents in a card grid with their signature emoji, model badge, relative activity timestamp, and recent activity snippet, click "Open chat" on any card to immediately start a session with that agent as the session default, create a new custom agent or delete custom agents via overlay modals on `/agents`, and use a clean `/new` screen focused on session creation with a link to `/agents`.
 
 ## Flow
 
 This feature reuses the existing persistent shell router (`frontend/shell.ts`), `/api/agents` CRUD routes, `provision_agent_workspace` filesystem provisioning, and `/api/sessions` session creation.
 
-1. User clicks `#nav-agents` ("Agentes") in `src/clawhouse/static/index.html` (exists) -> `frontend/shell.ts` (exists) dynamically imports `/agents.js` and mounts `frontend/agents.ts` (door 1) into `#screen`
+1. User clicks `#nav-agents` ("Agents") in `src/clawhouse/static/index.html` (exists) -> `frontend/shell.ts` (exists) dynamically imports `/agents.js` and mounts `frontend/agents.ts` (door 1) into `#screen`
 2. `frontend/agents.ts` (door 1) requests `GET /api/agents` -> `clawhouse.api.app` (exists) queries `clawhouse.store.store` (exists) for custom agents and recent agent activity (door 2), returning enriched `CustomAgentOut` items with `model`, `last_active_at`, and `last_activity`
 3. `frontend/agents.ts` (door 1) renders `.agents-page` header and `.agents-grid` cards; clicking `.btn-open-chat` posts to `POST /api/sessions` and navigates to `/chat?session=<id>&agent=<name>` (or `/chat?session=<id>` for `main`)
 4. Clicking `#btn-new-agent` or `#btn-manage-agents` in `frontend/agents.ts` (door 1) opens the creation modal (`POST /api/agents`) or management modal (`DELETE /api/agents/{id}`) and refreshes the grid in-place; `frontend/new.ts` (exists) removes inline agent creation/deletion forms and links to `/agents`
@@ -59,13 +59,13 @@ Primary navigation link, client-side route registration, backend shell route, an
 
 **Acceptance Criteria**
 
-1. The shell HTML (`index.html`) SHALL include `<a class="rail-link" id="nav-agents" data-nav href="/agents">Agentes</a>` inside `.rail-nav`.
+1. The shell HTML (`index.html`) SHALL include `<a class="rail-link" id="nav-agents" data-nav href="/agents">Agents</a>` inside `.rail-nav`.
 2. WHEN a signed-in client requests `GET /agents` THEN the backend SHALL return HTTP 200 with the shell HTML document (`index.html`).
 3. IF an unauthenticated client requests `GET /agents` THEN the backend SHALL return HTTP 401.
 4. WHEN a client requests `GET /agents.js` THEN the backend SHALL return HTTP 200 with `src/clawhouse/static/agents.js` and `text/javascript` media type.
-5. WHEN the user navigates to `/agents` in the shell THEN `shell.ts` SHALL set `document.title` to `"Clawhouse · Agentes"`, mark `#nav-agents` with `aria-current="page"`, and mount `agents.js` into `#screen`.
+5. WHEN the user navigates to `/agents` in the shell THEN `shell.ts` SHALL set `document.title` to `"Clawhouse · Agents"`, mark `#nav-agents` with `aria-current="page"`, and mount `agents.js` into `#screen`.
 
-**Independent test:** Request `GET /agents` and `GET /agents.js` via HTTP client and verify 200 responses; click `#nav-agents` in the shell and verify `location.pathname` is `"/agents"`, `document.title` is `"Clawhouse · Agentes"`, and `#nav-agents` has `aria-current="page"`.
+**Independent test:** Request `GET /agents` and `GET /agents.js` via HTTP client and verify 200 responses; click `#nav-agents` in the shell and verify `location.pathname` is `"/agents"`, `document.title` is `"Clawhouse · Agents"`, and `#nav-agents` has `aria-current="page"`.
 
 ### S2: Enriched Agent API (`GET /api/agents` & `POST /api/agents`) (P1)
 
@@ -82,14 +82,14 @@ Agent listing and creation responses enriched with configured model identifier, 
 
 ### S3: Agents Overview Grid Screen (`agents.ts` & CSS) (P1)
 
-Dedicated `/agents` screen displaying the team header, loading/error states, agent cards grid, and direct "Abrir chat" session launcher.
+Dedicated `/agents` screen displaying the team header, loading/error states, agent cards grid, and direct "Open chat" session launcher.
 
 **Acceptance Criteria**
 
-10. WHEN `agents.ts` mounts into `#screen` THEN it SHALL render `.agents-page` with header title `"Agentes"`, subtitle `"Quem está na sua equipe e o que está fazendo"`, button `#btn-manage-agents` (`"Gerenciar agentes"`), and button `#btn-new-agent` (`"Novo agente"`).
+10. WHEN `agents.ts` mounts into `#screen` THEN it SHALL render `.agents-page` with header title `"Agents"`, subtitle `"Who is on your team and what they are doing"`, button `#btn-manage-agents` (`"Manage agents"`), and button `#btn-new-agent` (`"New agent"`).
 11. WHILE `GET /api/agents` is in flight THEN `agents.ts` SHALL render a loading state element `.agents-loading` inside `.agents-grid`.
 12. IF `GET /api/agents` fails or returns a non-OK status THEN `agents.ts` SHALL render `.agents-error` with an error message and a `.btn-retry-agents` button that re-triggers `GET /api/agents` when clicked.
-13. WHEN `GET /api/agents` succeeds THEN `agents.ts` SHALL render one `.agent-card` per returned agent inside `.agents-grid`, displaying `.agent-card-avatar` (signature emoji), `.agent-card-title` (agent name), `.agent-card-model` (model badge), `.agent-card-status` (relative time from `last_active_at` or `"Recém-criado"` when `null`), `.agent-card-activity` (`last_activity` or `description`), and a `.btn-open-chat` button (`"Abrir chat"`).
+13. WHEN `GET /api/agents` succeeds THEN `agents.ts` SHALL render one `.agent-card` per returned agent inside `.agents-grid`, displaying `.agent-card-avatar` (signature emoji), `.agent-card-title` (agent name), `.agent-card-model` (model badge), `.agent-card-status` (relative time from `last_active_at` or `"Newly created"` when `null`), `.agent-card-activity` (`last_activity` or `description`), and a `.btn-open-chat` button (`"Open chat"`).
 14. WHEN the user clicks `.btn-open-chat` on an `.agent-card` THEN the system SHALL send `POST /api/sessions` and navigate to `/chat?session=<id>` for `main` or `/chat?session=<id>&agent=<encodeURIComponent(agent.name)>` for a custom agent.
 
 **Independent test:** Mount `agents.ts` with mocked `/api/agents`, verify header copy and card fields for `main` and custom agents, click `.btn-open-chat` on a custom agent card, and verify `POST /api/sessions` is called followed by navigation to `/chat?session=<id>&agent=<name>`.

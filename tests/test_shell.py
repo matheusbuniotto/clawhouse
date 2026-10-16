@@ -58,9 +58,8 @@ async def test_every_route_serves_the_same_shell_document() -> None:
         documents = [await _page(client, path) for path in PAGES]
 
     assert len(set(documents)) == 1
-    assert (
-        '<a class="rail-link" id="nav-agents" data-nav href="/agents">Agentes</a>' in documents[0]
-    )
+    assert '<a class="rail-link" id="nav-agents" data-nav href="/agents">Agents</a>' in documents[0]
+    assert 'id="rail-agent-menu"' in documents[0]
 
 
 async def test_assets_ask_the_browser_to_revalidate() -> None:

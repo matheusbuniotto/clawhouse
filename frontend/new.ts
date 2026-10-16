@@ -16,7 +16,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const pickerSection = el("section", "agent-picker-section");
   const pickerHeading = el("h2", "agent-picker-heading", "Choose Agent");
   const agentCards = el("div", "agent-cards-grid");
-  const manageLink = el("a", "manage-agents-link", "Gerenciar ou criar agentes →");
+  const manageLink = el("a", "manage-agents-link", "Manage or create agents →");
   manageLink.href = "/agents";
   manageLink.setAttribute("data-nav", "");
   pickerSection.append(pickerHeading, agentCards, manageLink);

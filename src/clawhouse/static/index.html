@@ -13,7 +13,33 @@
     <div class="shell" id="shell">
       <aside class="rail" id="rail" aria-label="Navigation">
         <header class="rail-head">
-          <p class="rail-brand">Clawhouse</p>
+          <div class="rail-brand-group">
+            <p class="rail-brand">Clawhouse</p>
+            <button
+              class="rail-agent-trigger"
+              id="rail-agent-menu"
+              type="button"
+              aria-label="Agent menu"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              title="Agents"
+            >
+              <span class="rail-agent-trigger-label">🦀 main</span>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M6 9l6 6 6-6"></path>
+              </svg>
+            </button>
+          </div>
           <div class="rail-head-actions">
             <button
               class="rail-action"
@@ -60,9 +86,9 @@
           </div>
         </header>
         <nav class="rail-nav" aria-label="Primary">
+          <a class="rail-link" id="nav-agents" data-nav href="/agents">Agents</a>
           <a class="rail-link" id="nav-chat" data-nav href="/chat">Chat</a>
           <a class="rail-link" id="nav-sessions" data-nav href="/sessions">Sessions</a>
-          <a class="rail-link" id="nav-agents" data-nav href="/agents">Agentes</a>
           <a class="rail-link" id="nav-approvals" data-nav href="/approvals">Approvals</a>
           <a class="rail-link" id="nav-jobs" data-nav href="/jobs">Jobs</a>
           <a class="rail-link" id="nav-status" data-nav href="/status">Status</a>

@@ -11,7 +11,7 @@ Grouped by the spec's slices; numbering runs across the whole feature.
 
 ### S1 - Rail Navigation & Route Mounting (`/agents`) · 6 files · 90 KB · ~23k
 
-**C1** - `GET /agents` returns HTTP 200 with the shell HTML document containing `<a class="rail-link" id="nav-agents" data-nav href="/agents">Agentes</a>` inside `.rail-nav` for a signed-in client (AC 1, AC 2)
+**C1** - `GET /agents` returns HTTP 200 with the shell HTML document containing `<a class="rail-link" id="nav-agents" data-nav href="/agents">Agents</a>` inside `.rail-nav` for a signed-in client (AC 1, AC 2)
 Proof: `uv run pytest tests/test_shell.py::test_every_route_serves_the_same_shell_document`
 
 **C2** - `GET /agents` without caller identity returns HTTP 401 (AC 3)
@@ -20,7 +20,7 @@ Proof: `uv run pytest tests/test_shell.py::test_every_route_requires_a_signed_in
 **C3** - `GET /agents.js` returns HTTP 200 with `text/javascript` content type and is registered in the wheel build manifest (AC 4)
 Proof: `uv run pytest tests/test_build.py::test_every_served_script_has_a_typescript_source`
 
-**C4** - Navigating to `/agents` in `shell.ts` sets `document.title` to `"Clawhouse · Agentes"`, sets `aria-current="page"` on `#nav-agents`, and mounts `agents.js` into `#screen` (AC 5)
+**C4** - Navigating to `/agents` in `shell.ts` sets `document.title` to `"Clawhouse · Agents"`, sets `aria-current="page"` on `#nav-agents`, and mounts `agents.js` into `#screen` (AC 5)
 Proof: `npm test -- frontend/shell.test.ts -t "highlights the active screen in the rail and updates the title"`
 
 ### S2 - Enriched Agent API (`GET /api/agents` & `POST /api/agents`) · 4 files · 59 KB · ~15k
@@ -36,17 +36,17 @@ Proof: `uv run pytest tests/test_suggestions_api.py::test_create_agent_rejects_u
 
 ### S3 - Agents Overview Grid Screen (`agents.ts` & CSS) · 3 files · 28 KB · ~7k
 
-**C8** - Mounting `agents.ts` renders `.agents-page` with header title `"Agentes"`, subtitle `"Quem está na sua equipe e o que está fazendo"`, `#btn-manage-agents` (`"Gerenciar agentes"`), `#btn-new-agent` (`"Novo agente"`), and `.agents-loading` while `GET /api/agents` is in flight (AC 10, AC 11)
+**C8** - Mounting `agents.ts` renders `.agents-page` with header title `"Agents"`, subtitle `"Who is on your team and what they are doing"`, `#btn-manage-agents` (`"Manage agents"`), `#btn-new-agent` (`"New agent"`), and `.agents-loading` while `GET /api/agents` is in flight (AC 10, AC 11)
 Proof: `npm test -- frontend/agents-page.test.ts -t "renders header copy and loading state while fetching agents"`
 
 **C9** - When `GET /api/agents` fails or returns HTTP 500, `agents.ts` renders `.agents-error` with `.btn-retry-agents`, and clicking `.btn-retry-agents` re-requests `GET /api/agents` and renders `.agent-card` items (AC 12)
 Proof: `npm test -- frontend/agents-page.test.ts -t "renders error state on fetch failure and retries when clicking retry button"`
 
-**C10** - When `GET /api/agents` returns agents, `agents.ts` renders one `.agent-card` per agent inside `.agents-grid` with `.agent-card-avatar`, `.agent-card-title`, `.agent-card-model`, `.agent-card-status` (relative time or `"Recém-criado"` when `last_active_at` is `null`), `.agent-card-activity`, and `.btn-open-chat` (`"Abrir chat"`) (AC 13)
+**C10** - When `GET /api/agents` returns agents, `agents.ts` renders one `.agent-card` per agent inside `.agents-grid` with `.agent-card-avatar`, `.agent-card-title`, `.agent-card-model`, `.agent-card-status` (relative time or `"Newly created"` when `last_active_at` is `null`), `.agent-card-activity`, and `.btn-open-chat` (`"Open chat"`) (AC 13)
 Proof: `npm test -- frontend/agents-page.test.ts -t "renders agent cards with avatar, model badge, relative status, activity, and open chat button"`
 
 **C11** - Clicking `.btn-open-chat` on an `.agent-card` sends `POST /api/sessions` and navigates to `/chat?session=<id>` for `main` or `/chat?session=<id>&agent=<encodeURIComponent(name)>` for a custom agent (AC 14)
-Proof: `npm test -- frontend/agents-page.test.ts -t "creates a session and navigates to chat with agent parameter when clicking Abrir chat"`
+Proof: `npm test -- frontend/agents-page.test.ts -t "creates a session and navigates to chat with agent parameter when clicking Open chat"`
 
 ### S4 - "Novo agente" & "Gerenciar agentes" Modals + `/new` Cleanup · 4 files · 25 KB · ~6k
 

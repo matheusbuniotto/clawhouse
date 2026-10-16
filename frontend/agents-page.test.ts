@@ -33,12 +33,12 @@ test("renders header copy and loading state while fetching agents", async () => 
   const { mount } = await import("./agents.js");
   mount(document.body, ctx);
 
-  expect(document.querySelector(".agents-page h2")?.textContent).toBe("Agentes");
+  expect(document.querySelector(".agents-page h2")?.textContent).toBe("Agents");
   expect(document.querySelector(".agents-subtitle")?.textContent).toBe(
-    "Quem está na sua equipe e o que está fazendo",
+    "Who is on your team and what they are doing",
   );
-  expect(document.querySelector("#btn-manage-agents")?.textContent).toBe("Gerenciar agentes");
-  expect(document.querySelector("#btn-new-agent")?.textContent).toBe("Novo agente");
+  expect(document.querySelector("#btn-manage-agents")?.textContent).toBe("Manage agents");
+  expect(document.querySelector("#btn-new-agent")?.textContent).toBe("New agent");
   expect(document.querySelector(".agents-grid .agents-loading")).not.toBeNull();
 
   resolveAgents(jsonResponse([]));
@@ -120,20 +120,20 @@ test("renders agent cards with avatar, model badge, relative status, activity, a
   expect(cards[0].querySelector(".agent-card-model")?.textContent).toBe(
     "databricks-claude-sonnet-4-6",
   );
-  expect(cards[0].querySelector(".agent-card-status")?.textContent).toContain("2h ago");
+  expect(cards[0].querySelector(".agent-card-status")?.textContent).toContain("Active 2h ago");
   expect(cards[0].querySelector(".agent-card-activity")?.textContent).toBe(
     "Investigated 14 high-risk transactions",
   );
-  expect(cards[0].querySelector(".btn-open-chat")?.textContent).toBe("Abrir chat");
+  expect(cards[0].querySelector(".btn-open-chat")?.textContent).toBe("Open chat");
 
   expect(cards[1].querySelector(".agent-card-avatar")?.textContent).toBe("🕵️");
   expect(cards[1].querySelector(".agent-card-title")?.textContent).toBe("fraud");
-  expect(cards[1].querySelector(".agent-card-status")?.textContent).toContain("Recém-criado");
+  expect(cards[1].querySelector(".agent-card-status")?.textContent).toContain("Newly created");
   expect(cards[1].querySelector(".agent-card-activity")?.textContent).toBe("Fraud specialist");
-  expect(cards[1].querySelector(".btn-open-chat")?.textContent).toBe("Abrir chat");
+  expect(cards[1].querySelector(".btn-open-chat")?.textContent).toBe("Open chat");
 });
 
-test("creates a session and navigates to chat with agent parameter when clicking Abrir chat", async () => {
+test("creates a session and navigates to chat with agent parameter when clicking Open chat", async () => {
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/agents") {

@@ -64,12 +64,13 @@ test("renders the persistent rail, caller identity, and dark-by-default theme", 
   await mount();
 
   expect(document.querySelector("#rail .rail-brand")?.textContent).toBe("Clawhouse");
+  expect(document.querySelector("#rail-agent-menu")).not.toBeNull();
   expect(document.querySelector("#rail-collapse")?.getAttribute("aria-expanded")).toBe("true");
   expect(
     [...document.querySelectorAll("#rail .rail-nav a[data-nav]")].map((link) =>
       link.getAttribute("href"),
     ),
-  ).toEqual(["/chat", "/sessions", "/agents", "/approvals", "/jobs", "/status"]);
+  ).toEqual(["/agents", "/chat", "/sessions", "/approvals", "/jobs", "/status"]);
   expect(document.querySelector("#rail .rail-heading")?.textContent).toBe("Sessions");
   expect(document.querySelector("#rail-search")).not.toBeNull();
   expect(document.querySelector("#rail-new")).not.toBeNull();
@@ -331,6 +332,25 @@ test("highlights the active screen in the rail and updates the title", async () 
 
   await vi.waitFor(() => expect(document.querySelector("#screen .agents-page")).not.toBeNull());
   expect(location.pathname).toBe("/agents");
-  expect(document.title).toBe("Clawhouse · Agentes");
+  expect(document.title).toBe("Clawhouse · Agents");
   expect(document.querySelector("#nav-agents")?.getAttribute("aria-current")).toBe("page");
+});
+
+test("opens the agent menu near the Clawhouse title and navigates to /agents", async () => {
+  await mount();
+  const trigger = document.querySelector("#rail-agent-menu") as HTMLButtonElement;
+  expect(trigger).not.toBeNull();
+
+  trigger.click();
+  const popover = document.querySelector("#rail-agent-popover") as HTMLElement;
+  expect(popover).not.toBeNull();
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+  const overviewBtn = popover.querySelector('[data-action="overview"]') as HTMLButtonElement;
+  expect(overviewBtn?.textContent).toBe("Agents overview");
+  overviewBtn.click();
+
+  await vi.waitFor(() => expect(document.querySelector("#screen .agents-page")).not.toBeNull());
+  expect(location.pathname).toBe("/agents");
+  expect(document.querySelector("#rail-agent-popover")).toBeNull();
 });

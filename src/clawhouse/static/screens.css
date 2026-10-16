@@ -879,6 +879,41 @@
   gap: 10px;
 }
 
+.agent-role-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-presets-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.role-presets-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn-role-preset {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.btn-role-preset:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text-strong);
+}
+
 .modal-status {
   margin: 0;
   color: var(--danger);
