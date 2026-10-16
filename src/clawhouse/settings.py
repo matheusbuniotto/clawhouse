@@ -37,6 +37,8 @@ class Settings:
     logfire_token: str | None = None
     mlflow_enabled: bool = False
     mlflow_experiment: str | None = None
+    jobs_sp_client_id: str | None = None
+    jobs_sp_client_secret: str | None = None
 
 
 def telemetry_enabled_from_env(env: Mapping[str, str]) -> bool:
@@ -73,6 +75,8 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         logfire_token=env.get("LOGFIRE_TOKEN") or None,
         mlflow_enabled=mlflow_enabled_from_env(env),
         mlflow_experiment=env.get("MLFLOW_EXPERIMENT_NAME") or env.get("MLFLOW_EXPERIMENT") or None,
+        jobs_sp_client_id=env.get("CLAWHOUSE_JOBS_SP_CLIENT_ID") or None,
+        jobs_sp_client_secret=env.get("CLAWHOUSE_JOBS_SP_CLIENT_SECRET") or None,
     )
 
 

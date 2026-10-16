@@ -167,7 +167,12 @@ async def test_natural_language_schedule_passes_quartz_cron_schedule_to_jobs_cre
     )
 
     assert resumed.status == "ok"
-    assert _tool_result(resumed) == {"job_id": 7801, "name": "relatorio_vendas", "scheduled": True}
+    assert _tool_result(resumed) == {
+        "job_id": 7801,
+        "name": "relatorio_vendas",
+        "scheduled": True,
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     client.jobs.create.assert_called_once()
     kwargs = client.jobs.create.call_args.kwargs
     assert kwargs["name"] == "relatorio_vendas"
@@ -280,18 +285,17 @@ async def test_jobs_create_silently_retries_on_ambient_client_when_user_call_fai
     user_client.jobs.create.side_effect = PermissionError("missing jobs scope")
     ambient_client = MagicMock(name="ambient")
     ambient_client.jobs.create.return_value = MagicMock(job_id=7804)
-    tools = DatabricksTools(user_client, warehouse_id="wh-1")
+    tools = DatabricksTools(user_client, warehouse_id="wh-1", user_token="tok")
     tools._fallback_client = lambda: ambient_client  # type: ignore[method-assign]
 
     result = await tools.jobs_create(
         "fallback", task_type="python", path="/W/f.py", cron_expression="0 9 * * *"
     )
 
-    # Current behavior: the job is created by the ambient identity and nothing in the
-    # result says which identity was used (issue #78 will make this explicit).
-    assert result == {"job_id": 7804, "name": "fallback", "scheduled": True}
+    # Issue #78: Zero silent ambient fallback for mutating Lakeflow jobs operations.
+    assert result == {"error": "Failed to create job fallback: missing jobs scope"}
     user_client.jobs.create.assert_called_once()
-    ambient_client.jobs.create.assert_called_once()
+    ambient_client.jobs.create.assert_not_called()
 
 
 async def test_jobs_create_reports_error_when_both_identities_fail() -> None:
@@ -299,12 +303,13 @@ async def test_jobs_create_reports_error_when_both_identities_fail() -> None:
     user_client.jobs.create.side_effect = PermissionError("user denied")
     ambient_client = MagicMock(name="ambient")
     ambient_client.jobs.create.side_effect = PermissionError("sp denied")
-    tools = DatabricksTools(user_client, warehouse_id="wh-1")
+    tools = DatabricksTools(user_client, warehouse_id="wh-1", user_token="tok")
     tools._fallback_client = lambda: ambient_client  # type: ignore[method-assign]
 
     result = await tools.jobs_create("x", task_type="python", path="/W/x.py")
 
-    assert result == {"error": "Failed to create job x: sp denied"}
+    assert result == {"error": "Failed to create job x: user denied"}
+    ambient_client.jobs.create.assert_not_called()
 
 
 def test_capability_toolset_falls_back_to_ambient_when_user_client_factory_fails() -> None:

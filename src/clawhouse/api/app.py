@@ -324,7 +324,7 @@ def scheduled_turn_context(app: FastAPI, sch: ScheduleEntry) -> TurnContext:
         user_token=token,
         sensitive_tools=settings.sensitive_tools,
         mcp_toolset_factory=getattr(app.state, "mcp_toolset_factory", None),
-        databricks_capability=DatabricksCapability(user_token=token or ""),
+        databricks_capability=DatabricksCapability(user_token=token or "", settings=settings),
         headless=True,
     )
 
@@ -1224,7 +1224,7 @@ def _build_turn_context(
     model = _model_for_caller(request, caller, model_id)
     settings: Settings = request.app.state.settings
     token = _caller_token(settings, caller)
-    databricks_cap = DatabricksCapability(user_token=token or "")
+    databricks_cap = DatabricksCapability(user_token=token or "", settings=settings)
     return TurnContext(
         owner_id=caller.user_id,
         store=request.app.state.store,

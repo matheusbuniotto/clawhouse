@@ -14,7 +14,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import (
@@ -36,7 +36,67 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, AgentToolset, FunctionToolset
 from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
 
+if TYPE_CHECKING:
+    from clawhouse.settings import Settings
+
 logger = logging.getLogger("clawhouse.databricks")
+
+
+@dataclass(frozen=True, slots=True)
+class JobsIdentity:
+    kind: Literal["service_principal", "user_obo"]
+    client: WorkspaceClient
+    label: str
+
+
+class MissingJobsIdentityError(RuntimeError):
+    """Raised when neither a dedicated service principal nor a user token is available."""
+
+
+def jobs_identity(
+    settings: Settings | None = None,
+    user_token: str = "",
+    *,
+    client_factory: Callable[..., WorkspaceClient] | None = None,
+) -> JobsIdentity:
+    """Resolve acting identity for Lakeflow Jobs execution.
+
+    Precedence:
+    1. Dedicated Service Principal if `jobs_sp_client_id` and `jobs_sp_client_secret`
+       are set in settings
+    2. User OBO token if `user_token` is non-empty
+    3. Raise `MissingJobsIdentityError` (no silent ambient fallback)
+    """
+    if settings is not None and settings.jobs_sp_client_id and settings.jobs_sp_client_secret:
+        sp_id = settings.jobs_sp_client_id
+        sp_secret = settings.jobs_sp_client_secret
+        kwargs: dict[str, Any] = {
+            "client_id": sp_id,
+            "client_secret": sp_secret,
+            "auth_type": "oauth-m2m",
+        }
+        if settings.workspace_host:
+            kwargs["host"] = settings.workspace_host
+        client = (
+            client_factory(**kwargs) if client_factory is not None else WorkspaceClient(**kwargs)
+        )
+        return JobsIdentity(kind="service_principal", client=client, label=sp_id)
+
+    token = user_token.strip() if user_token else ""
+    if token:
+        kwargs = {"token": token, "auth_type": "pat"}
+        if settings is not None and settings.workspace_host:
+            kwargs["host"] = settings.workspace_host
+        client = (
+            client_factory(**kwargs) if client_factory is not None else WorkspaceClient(**kwargs)
+        )
+        return JobsIdentity(kind="user_obo", client=client, label="user")
+
+    raise MissingJobsIdentityError(
+        "No jobs execution identity configured: "
+        "neither dedicated Service Principal nor user token is available"
+    )
+
 
 _SQL_COMMENT_PATTERN = re.compile(r"(--[^\n]*|\/\*[\s\S]*?\*\/)")
 _MUTATING_KEYWORDS = {
@@ -215,9 +275,48 @@ _T = TypeVar("_T")
 class DatabricksTools:
     """Methods exposed as agent tools for Unity Catalog and SQL execution."""
 
-    def __init__(self, client: WorkspaceClient, warehouse_id: str | None) -> None:
+    def __init__(  # noqa: PLR0913
+        self,
+        client: WorkspaceClient,
+        warehouse_id: str | None,
+        *,
+        jobs_identity: JobsIdentity | None = None,
+        jobs_identity_resolver: Callable[[], JobsIdentity] | None = None,
+        user_token: str = "",
+        settings: Settings | None = None,
+    ) -> None:
         self.client = client
         self.warehouse_id = warehouse_id
+        self._jobs_identity = jobs_identity
+        self._jobs_identity_resolver = jobs_identity_resolver
+        self.user_token = user_token
+        self.settings = settings
+
+    def _resolve_jobs_identity(self) -> JobsIdentity:
+        if self._jobs_identity is not None:
+            return self._jobs_identity
+        if self._jobs_identity_resolver is not None:
+            self._jobs_identity = self._jobs_identity_resolver()
+            return self._jobs_identity
+        if (
+            self.settings is not None
+            and self.settings.jobs_sp_client_id
+            and self.settings.jobs_sp_client_secret
+        ):
+            self._jobs_identity = jobs_identity(settings=self.settings)
+            return self._jobs_identity
+        token = self.user_token.strip() if self.user_token else ""
+        if token:
+            self._jobs_identity = JobsIdentity(
+                kind="user_obo",
+                client=self.client,
+                label="user",
+            )
+            return self._jobs_identity
+        raise MissingJobsIdentityError(
+            "No jobs execution identity configured: "
+            "neither dedicated Service Principal nor user token is available"
+        )
 
     def _fallback_client(self) -> WorkspaceClient | None:
         try:
@@ -383,25 +482,35 @@ class DatabricksTools:
         Pass `wait=True` to poll until the run finishes and return its final status and output.
         """
         try:
-            wait_handle = self._call(
-                lambda cl: cl.jobs.run_now(job_id=job_id, job_parameters=parameters)
-            )
+            identity = self._resolve_jobs_identity()
+        except MissingJobsIdentityError as exc:
+            return {"error": str(exc)}
+
+        try:
+            wait_handle = identity.client.jobs.run_now(job_id=job_id, job_parameters=parameters)
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to run job {job_id}: {exc}"}
+        identity_meta = {"kind": identity.kind, "label": identity.label}
         if wait:
-            return await self.jobs_wait_run(wait_handle.run_id, timeout_seconds=timeout_seconds)
-        return {"run_id": wait_handle.run_id, "job_id": job_id}
+            res = await self.jobs_wait_run(wait_handle.run_id, timeout_seconds=timeout_seconds)
+            if "error" not in res:
+                res["identity"] = identity_meta
+            return res
+        return {"run_id": wait_handle.run_id, "job_id": job_id, "identity": identity_meta}
 
-    def _save_workspace_sql_file(self, path: str, sql_text: str) -> None:
+    def _save_workspace_sql_file(
+        self, path: str, sql_text: str, *, client: WorkspaceClient | None = None
+    ) -> None:
         parent_dir = str(Path(path).parent)
         content = sql_text.encode("utf-8")
+        target_client = client or self.client
 
-        def _do_upload(client: WorkspaceClient) -> None:
+        def _do_upload(cl: WorkspaceClient) -> None:
             try:
-                client.workspace.mkdirs(parent_dir)
+                cl.workspace.mkdirs(parent_dir)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("mkdirs %s: %s", parent_dir, exc)
-            client.workspace.upload(
+            cl.workspace.upload(
                 path=path,
                 content=io.BytesIO(content),
                 overwrite=True,
@@ -409,18 +518,19 @@ class DatabricksTools:
             )
 
         try:
-            self._call(_do_upload)
+            _do_upload(target_client)
         except Exception as exc:
-            fallback = self._fallback_client()
-            if fallback is not None:
-                try:
-                    _do_upload(fallback)
-                except Exception as fb_exc:  # noqa: BLE001
-                    raise RuntimeError(
-                        f"Failed to upload workspace SQL file to {path}: {fb_exc}"
-                    ) from exc
-                else:
-                    return
+            if client is None:
+                fallback = self._fallback_client()
+                if fallback is not None and fallback is not target_client:
+                    try:
+                        _do_upload(fallback)
+                    except Exception as fb_exc:  # noqa: BLE001
+                        raise RuntimeError(
+                            f"Failed to upload workspace SQL file to {path}: {fb_exc}"
+                        ) from exc
+                    else:
+                        return
             raise RuntimeError(f"Failed to upload workspace SQL file to {path}: {exc}") from exc
 
     def _build_sql_task(  # noqa: PLR0913
@@ -432,6 +542,7 @@ class DatabricksTools:
         warehouse_id: str | None,
         agent_name: str | None = None,
         instructions: str | None = None,
+        client: WorkspaceClient | None = None,
     ) -> tuple[Task | None, str | None]:
         sql_warehouse = warehouse_id or self.effective_warehouse_id
         if not sql_warehouse:
@@ -450,7 +561,7 @@ class DatabricksTools:
             if not effective_path or sql_text == effective_path or agent_name:
                 effective_path = f"/Workspace/Shared/clawhouse/{task_key}.sql"
             try:
-                self._save_workspace_sql_file(effective_path, sql_text)
+                self._save_workspace_sql_file(effective_path, sql_text, client=client)
             except Exception as exc:  # noqa: BLE001
                 return None, f"Failed to save SQL file to workspace: {exc}"
         elif not effective_path:
@@ -486,6 +597,11 @@ class DatabricksTools:
         For `sql`: pass SQL statement in `query` or workspace file in `path`.
         For scheduling: pass `cron_expression` (e.g. '0 0 12 * * ?' or '0 12 * * *').
         """
+        try:
+            identity = self._resolve_jobs_identity()
+        except MissingJobsIdentityError as exc:
+            return {"error": str(exc)}
+
         task_key = _TASK_KEY_UNSAFE.sub("_", name)
         effective_agent = agent_name or (name if task_type == "agentic" else None)
         if task_type == "python":
@@ -501,6 +617,7 @@ class DatabricksTools:
                 warehouse_id=warehouse_id,
                 agent_name=effective_agent,
                 instructions=instructions,
+                client=identity.client,
             )
             if error or task is None:
                 return {"error": error or "Failed to build SQL task."}
@@ -510,10 +627,14 @@ class DatabricksTools:
         if schedule is not None:
             create_kwargs["schedule"] = schedule
         try:
-            created = self._call(lambda cl: cl.jobs.create(**create_kwargs))
+            created = identity.client.jobs.create(**create_kwargs)
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to create job {name}: {exc}"}
-        result: dict[str, object] = {"job_id": created.job_id, "name": name}
+        result: dict[str, object] = {
+            "job_id": created.job_id,
+            "name": name,
+            "identity": {"kind": identity.kind, "label": identity.label},
+        }
         if task_type == "agentic" or effective_agent:
             result["task_type"] = task_type
             result["agent_name"] = effective_agent
@@ -527,6 +648,8 @@ class DatabricksTools:
         query: str,
         agent_name: str | None = None,
         instructions: str | None = None,
+        *,
+        client: WorkspaceClient | None = None,
     ) -> str | None:
         sql_text = (
             build_agentic_query(query, agent_name=agent_name or "Agent", instructions=instructions)
@@ -534,7 +657,9 @@ class DatabricksTools:
             else query
         )
         try:
-            self._save_workspace_sql_file(f"/Workspace/Shared/clawhouse/job_{job_id}.sql", sql_text)
+            self._save_workspace_sql_file(
+                f"/Workspace/Shared/clawhouse/job_{job_id}.sql", sql_text, client=client
+            )
         except Exception as exc:  # noqa: BLE001
             return f"Failed to save updated SQL file: {exc}"
         else:
@@ -572,8 +697,15 @@ class DatabricksTools:
         instructions: str | None = None,
     ) -> dict[str, object]:
         """Update a Lakeflow job settings, schedule, or query."""
+        try:
+            identity = self._resolve_jobs_identity()
+        except MissingJobsIdentityError as exc:
+            return {"error": str(exc)}
+
         if query:
-            err = self._update_job_sql_file(job_id, query, agent_name, instructions)
+            err = self._update_job_sql_file(
+                job_id, query, agent_name, instructions, client=identity.client
+            )
             if err:
                 return {"error": err}
 
@@ -584,24 +716,33 @@ class DatabricksTools:
             timezone_id=timezone_id,
             pause_status=pause_status,
         )
+        identity_meta = {"kind": identity.kind, "label": identity.label}
         if not settings_dict and not query:
-            return {"job_id": job_id, "updated": False, "message": "No settings to update"}
+            return {
+                "job_id": job_id,
+                "updated": False,
+                "message": "No settings to update",
+                "identity": identity_meta,
+            }
 
         if settings_dict:
             try:
-                self._call(
-                    lambda cl: cl.jobs.update(
-                        job_id=job_id, new_settings=JobSettings.from_dict(settings_dict)
-                    )
+                identity.client.jobs.update(
+                    job_id=job_id, new_settings=JobSettings.from_dict(settings_dict)
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"error": f"Failed to update job {job_id}: {exc}"}
-        return {"job_id": job_id, "updated": True}
+        return {"job_id": job_id, "updated": True, "identity": identity_meta}
 
     async def jobs_delete(self, job_id: int) -> dict[str, object]:
         """Delete a Lakeflow job from the workspace."""
         try:
-            self._call(lambda cl: cl.jobs.delete(job_id=job_id))
+            identity = self._resolve_jobs_identity()
+        except MissingJobsIdentityError as exc:
+            return {"error": str(exc)}
+
+        try:
+            identity.client.jobs.delete(job_id=job_id)
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to delete job {job_id}: {exc}"}
         return {"job_id": job_id, "deleted": True}
@@ -609,10 +750,19 @@ class DatabricksTools:
     async def jobs_cancel_run(self, run_id: int) -> dict[str, object]:
         """Request cancellation of an active Lakeflow job run."""
         try:
-            self._call(lambda cl: cl.jobs.cancel_run(run_id=run_id))
+            identity = self._resolve_jobs_identity()
+        except MissingJobsIdentityError as exc:
+            return {"error": str(exc)}
+
+        try:
+            identity.client.jobs.cancel_run(run_id=run_id)
         except Exception as exc:  # noqa: BLE001
             return {"error": f"Failed to cancel run {run_id}: {exc}"}
-        return {"run_id": run_id, "cancel_requested": True}
+        return {
+            "run_id": run_id,
+            "cancel_requested": True,
+            "identity": {"kind": identity.kind, "label": identity.label},
+        }
 
     async def jobs_get_run(self, run_id: int) -> dict[str, object]:
         """Get the state of a Lakeflow job run."""
@@ -861,13 +1011,32 @@ class DatabricksCapability(AbstractCapability[Any]):
     )
     warehouse_id: str | None = None
     user_token: str = ""
+    settings: Settings | None = None
     id: str | None = "databricks"
+
+    def _resolve_jobs_identity(self) -> JobsIdentity:
+        def _factory(**kwargs: Any) -> WorkspaceClient:
+            if "token" in kwargs:
+                return self.client_factory(kwargs["token"])
+            return WorkspaceClient(**kwargs)
+
+        return jobs_identity(
+            settings=self.settings,
+            user_token=self.user_token,
+            client_factory=_factory,
+        )
 
     def get_toolset(self) -> AgentToolset[Any] | None:
         try:
             client = self.client_factory(self.user_token)
             warehouse_id = resolve_warehouse_id(client, self.warehouse_id)
-            impl = DatabricksTools(client, warehouse_id)
+            impl = DatabricksTools(
+                client,
+                warehouse_id,
+                jobs_identity_resolver=self._resolve_jobs_identity,
+                user_token=self.user_token,
+                settings=self.settings,
+            )
             return FunctionToolset(impl.all_tools())
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -876,7 +1045,13 @@ class DatabricksCapability(AbstractCapability[Any]):
             try:
                 ambient = WorkspaceClient()
                 warehouse_id = resolve_warehouse_id(ambient, self.warehouse_id)
-                impl = DatabricksTools(ambient, warehouse_id)
+                impl = DatabricksTools(
+                    ambient,
+                    warehouse_id,
+                    jobs_identity_resolver=self._resolve_jobs_identity,
+                    user_token=self.user_token,
+                    settings=self.settings,
+                )
                 return FunctionToolset(impl.all_tools())
             except Exception as inner_exc:  # noqa: BLE001
                 logger.warning("DatabricksCapability ambient fallback also failed: %s", inner_exc)
