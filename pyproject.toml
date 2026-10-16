@@ -66,6 +66,9 @@ exclude = [
     "dist",
     # Vendored upstream skills: lint upstream, not here
     ".agents/skills/**",
+    ".claude/**",
+    ".cursor/**",
+    ".windsurf/**",
 ]
 
 [tool.ruff.format]

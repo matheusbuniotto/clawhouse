@@ -1,5 +1,5 @@
 /** Pure, side-effect-free transcript rendering: markdown and tool-activity rows. */
-import { el, rawJsonDisclosure } from "./dom.js";
+import { el, rawJsonDisclosure, svgEl } from "./dom.js";
 import { highlight } from "./highlight.js";
 import { renderJobView, tryParseJobView } from "./jobs.js";
 export function renderUserTurn(text) {
@@ -8,6 +8,44 @@ export function renderUserTurn(text) {
 export function renderAssistantTurn(source) {
     const node = el("article", "assistant");
     node.append(renderMarkdown(source));
+    const actions = el("div", "assistant-actions");
+    const copyBtn = el("button", "assistant-action-btn copy-btn");
+    copyBtn.type = "button";
+    copyBtn.title = "Copy markdown";
+    copyBtn.setAttribute("aria-label", "Copy markdown");
+    const copyIcon = svgEl("svg", {
+        width: "14",
+        height: "14",
+        viewBox: "0 0 24 24",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "2",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "aria-hidden": "true",
+    });
+    copyIcon.append(svgEl("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }), svgEl("path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }));
+    const copyLabel = el("span", "assistant-action-label", "");
+    copyBtn.append(copyIcon, copyLabel);
+    copyBtn.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(source);
+            copyLabel.textContent = "Copied!";
+            copyBtn.classList.add("copied");
+            setTimeout(() => {
+                copyLabel.textContent = "";
+                copyBtn.classList.remove("copied");
+            }, 2000);
+        }
+        catch {
+            copyLabel.textContent = "Failed to copy";
+            setTimeout(() => {
+                copyLabel.textContent = "";
+            }, 2000);
+        }
+    });
+    actions.append(copyBtn);
+    node.append(actions);
     return node;
 }
 /** Names who answers the turn below it, and on which model (switching agents can switch models). */

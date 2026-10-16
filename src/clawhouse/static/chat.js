@@ -1,6 +1,6 @@
 import { ASK_USER, REPORT_PROGRESS, parseProgress, upsertProgressCard, renderAnsweredQuestion, renderQuestionCard, } from "./cards.js";
 import { el, svgEl } from "./dom.js";
-import { agentSuggestions, mergeSuggestions, } from "./mentions.js";
+import { agentSuggestions, mergeSuggestions, slashSuggestions, } from "./mentions.js";
 import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderNotice, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
@@ -114,6 +114,75 @@ export function mount(root, ctx) {
         sessionStorage.setItem(SESSION_KEY, created);
         return created;
     }
+    const scrollBottomBtn = el("button", "scroll-bottom-btn");
+    scrollBottomBtn.id = "scroll-bottom";
+    scrollBottomBtn.type = "button";
+    scrollBottomBtn.title = "Scroll to bottom";
+    scrollBottomBtn.setAttribute("aria-label", "Scroll to bottom");
+    scrollBottomBtn.hidden = true;
+    const downArrow = svgEl("svg", {
+        width: "16",
+        height: "16",
+        viewBox: "0 0 24 24",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-width": "2",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "aria-hidden": "true",
+    });
+    downArrow.append(svgEl("line", { x1: "12", y1: "5", x2: "12", y2: "19" }), svgEl("polyline", { points: "19 12 12 19 5 12" }));
+    scrollBottomBtn.append(downArrow);
+    root.append(scrollBottomBtn);
+    let userScrolledUp = false;
+    function checkScrollPosition() {
+        const distanceFromBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
+        if (distanceFromBottom > 80) {
+            userScrolledUp = true;
+            scrollBottomBtn.hidden = false;
+        }
+        else if (distanceFromBottom <= 40) {
+            userScrolledUp = false;
+            scrollBottomBtn.hidden = true;
+        }
+    }
+    transcript.addEventListener("scroll", () => {
+        checkScrollPosition();
+    });
+    scrollBottomBtn.addEventListener("click", () => {
+        transcript.scrollTop = transcript.scrollHeight;
+        userScrolledUp = false;
+        scrollBottomBtn.hidden = true;
+    });
+    function scrollToBottom(force = false) {
+        if (force || !userScrolledUp) {
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+    }
+    const DRAFT_PREFIX = "clawhouse.draft.";
+    function draftKey(sId) {
+        return `${DRAFT_PREFIX}${sId}`;
+    }
+    function restoreDraft() {
+        const saved = sessionStorage.getItem(draftKey(sessionId()));
+        if (saved) {
+            input.value = saved;
+            grow();
+        }
+    }
+    function saveDraft() {
+        const val = input.value;
+        if (val.length > 0) {
+            sessionStorage.setItem(draftKey(sessionId()), val);
+        }
+        else {
+            sessionStorage.removeItem(draftKey(sessionId()));
+        }
+    }
+    function clearDraft() {
+        sessionStorage.removeItem(draftKey(sessionId()));
+    }
+    restoreDraft();
     function showEmpty() {
         transcript.replaceChildren(el("p", "empty", "This session is empty."));
     }
@@ -218,7 +287,7 @@ export function mount(root, ctx) {
             index += 1;
         }
         transcript.append(...live);
-        transcript.scrollTop = transcript.scrollHeight;
+        scrollToBottom(true);
     }
     function showThinking() {
         transcript.querySelector(".empty")?.remove();
@@ -233,7 +302,7 @@ export function mount(root, ctx) {
         label.append(dots);
         draft.append(label);
         transcript.append(draft);
-        transcript.scrollTop = transcript.scrollHeight;
+        scrollToBottom();
         draftText = "";
         return draft;
     }
@@ -290,6 +359,8 @@ export function mount(root, ctx) {
         if (!response.ok)
             return;
         const body = (await response.json());
+        if (!body || !Array.isArray(body.models))
+            return;
         const saved = sessionStorage.getItem(MODEL_KEY);
         modelPicker.replaceChildren();
         for (const option of body.models) {
@@ -409,7 +480,7 @@ export function mount(root, ctx) {
         if (draft?.classList.contains("thinking"))
             dropDraft();
         transcript.append(renderQuestionCard(question, onAnswered));
-        transcript.scrollTop = transcript.scrollHeight;
+        scrollToBottom();
     }
     function onAnswered(result) {
         if (result.reply)
@@ -417,7 +488,7 @@ export function mount(root, ctx) {
         for (const question of result.pending)
             showQuestion(question);
         setBlocked(result.pending.length > 0 ? WAITING_FOR_ANSWER : null);
-        transcript.scrollTop = transcript.scrollHeight;
+        scrollToBottom();
     }
     function parseFrame(raw) {
         let event = "message";
@@ -479,7 +550,7 @@ export function mount(root, ctx) {
         if (frame.event === "token" && payload.text) {
             draftText += payload.text;
             ensureDraft().textContent = draftText;
-            transcript.scrollTop = transcript.scrollHeight;
+            scrollToBottom();
             return;
         }
         if (frame.event === "tool_call") {
@@ -491,7 +562,7 @@ export function mount(root, ctx) {
                 name: payload.name ?? "tool",
                 arguments: payload.arguments ?? "",
             });
-            transcript.scrollTop = transcript.scrollHeight;
+            scrollToBottom();
             return;
         }
         if (frame.event === "approval_required") {
@@ -501,11 +572,11 @@ export function mount(root, ctx) {
             renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", (reply) => {
                 if (reply) {
                     transcript.append(renderAssistantTurn(reply));
-                    transcript.scrollTop = transcript.scrollHeight;
+                    scrollToBottom();
                 }
                 setBlocked(null);
             }, payload.arguments);
-            transcript.scrollTop = transcript.scrollHeight;
+            scrollToBottom();
             return;
         }
         if (frame.event === "tool_result") {
@@ -516,7 +587,7 @@ export function mount(root, ctx) {
             });
             if (!draft)
                 showThinking();
-            transcript.scrollTop = transcript.scrollHeight;
+            scrollToBottom();
             return;
         }
         if (frame.event === "usage") {
@@ -587,7 +658,7 @@ export function mount(root, ctx) {
         const bubble = renderUserTurn(text);
         transcript.append(bubble);
         showThinking();
-        transcript.scrollTop = transcript.scrollHeight;
+        scrollToBottom(true);
         try {
             const agent = ctx.url.searchParams.get("agent") || null;
             const response = await fetch(`/api/sessions/${sessionId()}/turns`, {
@@ -730,7 +801,9 @@ export function mount(root, ctx) {
             }
             const remote = data.suggestions ?? [];
             suggestions =
-                type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
+                type === "@" || type === "/"
+                    ? mergeSuggestions(localSuggestions, remote)
+                    : remote;
             if (selectedIndex < 0 || selectedIndex >= suggestions.length) {
                 selectedIndex = suggestions.length > 0 ? 0 : -1;
             }
@@ -765,9 +838,13 @@ export function mount(root, ctx) {
             popover.remove();
             popover = null;
         }
-        // Agents are already loaded: show them at once, the server fills in files and tables.
+        // Agents and default slash commands are local: show at once, server fills in extra items.
         localSuggestions =
-            type === "@" ? agentSuggestions(agentOptions, query) : [];
+            type === "@"
+                ? agentSuggestions(agentOptions, query)
+                : type === "/"
+                    ? slashSuggestions(query)
+                    : [];
         if (localSuggestions.length > 0) {
             suggestions = [...localSuggestions];
             selectedIndex = 0;
@@ -794,12 +871,14 @@ export function mount(root, ctx) {
         if (!text)
             return;
         input.value = "";
+        clearDraft();
         grow();
         void sendMessage(text);
     });
     input.addEventListener("input", () => {
         grow();
         inspectTrigger();
+        saveDraft();
     });
     input.addEventListener("keydown", (event) => {
         if (popover && suggestions.length > 0) {
@@ -832,6 +911,11 @@ export function mount(root, ctx) {
         if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             form.requestSubmit();
+        }
+    });
+    document.addEventListener("click", (event) => {
+        if (popover && !form.contains(event.target)) {
+            closePopover();
         }
     });
     modelPicker.addEventListener("change", () => {

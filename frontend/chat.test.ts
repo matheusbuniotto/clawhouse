@@ -352,3 +352,265 @@ test("immediately renders user turn and thinking indicator upon submit before re
   expect(log.querySelector(".assistant.thinking")).toBeNull();
   expect(log.querySelector(".assistant")?.textContent).toContain("Answered");
 });
+
+test("slash command triggers popover at start of input and after whitespace", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/composer/suggestions")) {
+      return jsonResponse({
+        suggestions: [
+          { label: "/compact", insert_text: "/compact", detail: "Compact history", kind: "command" },
+          { label: "/jobs", insert_text: "/jobs", detail: "View jobs", kind: "command" },
+        ],
+      });
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  // At start of input
+  message.value = "/";
+  message.selectionStart = 1;
+  message.selectionEnd = 1;
+  message.dispatchEvent(new Event("input"));
+
+  const popover = document.querySelector(".composer-popover");
+  expect(popover).not.toBeNull();
+  const items = document.querySelectorAll(".composer-popover-item");
+  expect(items.length).toBeGreaterThan(0);
+});
+
+test("slash command keyboard navigation moves active highlight", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "/";
+  message.selectionStart = 1;
+  message.selectionEnd = 1;
+  message.dispatchEvent(new Event("input"));
+
+  const items = document.querySelectorAll(".composer-popover-item");
+  expect(items[0]?.classList.contains("active")).toBe(true);
+
+  // ArrowDown moves down
+  message.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  expect(document.querySelectorAll(".composer-popover-item")[1]?.classList.contains("active")).toBe(true);
+
+  // ArrowUp moves back
+  message.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+  expect(document.querySelectorAll(".composer-popover-item")[0]?.classList.contains("active")).toBe(true);
+});
+
+test("slash command selection inserts command", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "/co";
+  message.selectionStart = 3;
+  message.selectionEnd = 3;
+  message.dispatchEvent(new Event("input"));
+
+  message.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  expect(message.value).toBe("/compact ");
+  expect(document.querySelector(".composer-popover")).toBeNull();
+});
+
+test("slash command popover dismiss closes popover", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "/";
+  message.selectionStart = 1;
+  message.selectionEnd = 1;
+  message.dispatchEvent(new Event("input"));
+
+  expect(document.querySelector(".composer-popover")).not.toBeNull();
+  message.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  expect(document.querySelector(".composer-popover")).toBeNull();
+});
+
+test("slash command network error handled gracefully", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/composer/suggestions")) {
+      return { ok: false, status: 500 } as Response;
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "/custom";
+  message.selectionStart = 7;
+  message.selectionEnd = 7;
+  message.dispatchEvent(new Event("input"));
+
+  // Input stays functional and not disabled
+  expect(message.disabled).toBe(false);
+});
+
+test("scrolling up pauses auto-scroll", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const log = document.querySelector("#log") as HTMLElement;
+
+  // Mock scroll properties
+  Object.defineProperty(log, "scrollHeight", { value: 1000, configurable: true });
+  Object.defineProperty(log, "clientHeight", { value: 400, configurable: true });
+  Object.defineProperty(log, "scrollTop", { value: 200, writable: true, configurable: true });
+
+  log.dispatchEvent(new Event("scroll"));
+
+  // Scrolled up past 80px from bottom (1000 - 400 - 200 = 400px > 80px)
+  const scrollBtn = document.querySelector("#scroll-bottom") as HTMLButtonElement;
+  expect(scrollBtn.hidden).toBe(false);
+});
+
+test("floating scroll button appears when scrolled up", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const log = document.querySelector("#log") as HTMLElement;
+  const scrollBtn = document.querySelector("#scroll-bottom") as HTMLButtonElement;
+
+  expect(scrollBtn).not.toBeNull();
+  expect(scrollBtn.hidden).toBe(true);
+
+  Object.defineProperty(log, "scrollHeight", { value: 800, configurable: true });
+  Object.defineProperty(log, "clientHeight", { value: 300, configurable: true });
+  Object.defineProperty(log, "scrollTop", { value: 100, writable: true, configurable: true });
+  log.dispatchEvent(new Event("scroll"));
+
+  expect(scrollBtn.hidden).toBe(false);
+});
+
+test("clicking scroll button returns to bottom", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const log = document.querySelector("#log") as HTMLElement;
+  const scrollBtn = document.querySelector("#scroll-bottom") as HTMLButtonElement;
+
+  Object.defineProperty(log, "scrollHeight", { value: 1000, configurable: true });
+  Object.defineProperty(log, "clientHeight", { value: 400, configurable: true });
+  Object.defineProperty(log, "scrollTop", { value: 200, writable: true, configurable: true });
+  log.dispatchEvent(new Event("scroll"));
+
+  expect(scrollBtn.hidden).toBe(false);
+
+  scrollBtn.click();
+  expect(log.scrollTop).toBe(1000);
+  expect(scrollBtn.hidden).toBe(true);
+});
+
+test("reaching bottom resumes auto-scroll", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const log = document.querySelector("#log") as HTMLElement;
+  const scrollBtn = document.querySelector("#scroll-bottom") as HTMLButtonElement;
+
+  Object.defineProperty(log, "scrollHeight", { value: 1000, configurable: true });
+  Object.defineProperty(log, "clientHeight", { value: 400, configurable: true });
+  Object.defineProperty(log, "scrollTop", { value: 200, writable: true, configurable: true });
+  log.dispatchEvent(new Event("scroll"));
+  expect(scrollBtn.hidden).toBe(false);
+
+  // Scroll back to within 40px of bottom
+  log.scrollTop = 580; // 1000 - 400 - 580 = 20px <= 40px
+  log.dispatchEvent(new Event("scroll"));
+  expect(scrollBtn.hidden).toBe(true);
+});
+
+test("composer saves draft to sessionStorage", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  message.value = "Unsent draft text";
+  message.dispatchEvent(new Event("input"));
+
+  expect(sessionStorage.getItem(`clawhouse.draft.${SESSION}`)).toBe("Unsent draft text");
+});
+
+test("chat restores draft on mount", async () => {
+  sessionStorage.setItem(`clawhouse.draft.${SESSION}`, "Previously saved draft");
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+
+  expect(message.value).toBe("Previously saved draft");
+});
+
+test("submitting form clears saved draft", async () => {
+  sessionStorage.setItem(`clawhouse.draft.${SESSION}`, "To be sent");
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") {
+      return streamResponse('event: done\ndata: {"status":"ok","reply":"ok"}\n\n');
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  const message = document.querySelector("#message") as HTMLTextAreaElement;
+  expect(message.value).toBe("To be sent");
+
+  document.querySelector("#composer")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  expect(sessionStorage.getItem(`clawhouse.draft.${SESSION}`)).toBeNull();
+});

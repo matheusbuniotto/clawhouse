@@ -21,7 +21,25 @@ export function agentSuggestions(agents, query) {
         kind: "agent",
     }));
 }
-/** Local agent hits stay on top; the server adds files and tables, never a second agent row. */
+export const DEFAULT_SLASH_COMMANDS = [
+    { label: "/compact", insert_text: "/compact", detail: "Compact conversation history", kind: "command" },
+    { label: "/schedule", insert_text: "/schedule", detail: "Schedule recurring turn: cron or every <N>m", kind: "command" },
+    { label: "/jobs", insert_text: "/jobs", detail: "View or run Lakeflow Jobs and schedules", kind: "command" },
+    { label: "/model", insert_text: "/model", detail: "Switch active LLM model", kind: "command" },
+    { label: "/reset", insert_text: "/reset", detail: "Start a fresh session", kind: "command" },
+];
+export function slashSuggestions(query, defaults = DEFAULT_SLASH_COMMANDS) {
+    const q = query.trim().toLowerCase();
+    return defaults.filter((cmd) => {
+        if (!q)
+            return true;
+        const id = cmd.insert_text.toLowerCase().replace(/^\//, "");
+        const detail = cmd.detail.toLowerCase();
+        return id.includes(q) || detail.includes(q);
+    });
+}
+/** Local hits stay on top; the server adds further items without duplicating insert_text. */
 export function mergeSuggestions(local, remote) {
-    return [...local, ...remote.filter((item) => item.kind !== "agent")];
+    const localInserts = new Set(local.map((s) => s.insert_text));
+    return [...local, ...remote.filter((item) => !localInserts.has(item.insert_text))];
 }

@@ -13,6 +13,7 @@ import { el, svgEl } from "./dom.js";
 import {
   agentSuggestions,
   mergeSuggestions,
+  slashSuggestions,
   type AgentOption,
   type Suggestion,
 } from "./mentions.js";
@@ -181,6 +182,89 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     return created;
   }
 
+  const scrollBottomBtn = el("button", "scroll-bottom-btn");
+  scrollBottomBtn.id = "scroll-bottom";
+  scrollBottomBtn.type = "button";
+  scrollBottomBtn.title = "Scroll to bottom";
+  scrollBottomBtn.setAttribute("aria-label", "Scroll to bottom");
+  scrollBottomBtn.hidden = true;
+  const downArrow = svgEl("svg", {
+    width: "16",
+    height: "16",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+  });
+  downArrow.append(
+    svgEl("line", { x1: "12", y1: "5", x2: "12", y2: "19" }),
+    svgEl("polyline", { points: "19 12 12 19 5 12" }),
+  );
+  scrollBottomBtn.append(downArrow);
+  root.append(scrollBottomBtn);
+
+  let userScrolledUp = false;
+
+  function checkScrollPosition(): void {
+    const distanceFromBottom =
+      transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
+    if (distanceFromBottom > 80) {
+      userScrolledUp = true;
+      scrollBottomBtn.hidden = false;
+    } else if (distanceFromBottom <= 40) {
+      userScrolledUp = false;
+      scrollBottomBtn.hidden = true;
+    }
+  }
+
+  transcript.addEventListener("scroll", () => {
+    checkScrollPosition();
+  });
+
+  scrollBottomBtn.addEventListener("click", () => {
+    transcript.scrollTop = transcript.scrollHeight;
+    userScrolledUp = false;
+    scrollBottomBtn.hidden = true;
+  });
+
+  function scrollToBottom(force = false): void {
+    if (force || !userScrolledUp) {
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+  }
+
+  const DRAFT_PREFIX = "clawhouse.draft.";
+
+  function draftKey(sId: string): string {
+    return `${DRAFT_PREFIX}${sId}`;
+  }
+
+  function restoreDraft(): void {
+    const saved = sessionStorage.getItem(draftKey(sessionId()));
+    if (saved) {
+      input.value = saved;
+      grow();
+    }
+  }
+
+  function saveDraft(): void {
+    const val = input.value;
+    if (val.length > 0) {
+      sessionStorage.setItem(draftKey(sessionId()), val);
+    } else {
+      sessionStorage.removeItem(draftKey(sessionId()));
+    }
+  }
+
+  function clearDraft(): void {
+    sessionStorage.removeItem(draftKey(sessionId()));
+  }
+
+  restoreDraft();
+
   function showEmpty(): void {
     transcript.replaceChildren(el("p", "empty", "This session is empty."));
   }
@@ -291,7 +375,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       index += 1;
     }
     transcript.append(...live);
-    transcript.scrollTop = transcript.scrollHeight;
+    scrollToBottom(true);
   }
 
   function showThinking(): HTMLElement {
@@ -308,7 +392,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     draft.append(label);
 
     transcript.append(draft);
-    transcript.scrollTop = transcript.scrollHeight;
+    scrollToBottom();
     draftText = "";
     return draft;
   }
@@ -371,7 +455,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   async function loadModels(): Promise<void> {
     const response = await fetch("/api/models");
     if (!response.ok) return;
-    const body = (await response.json()) as { models: ModelOption[] };
+    const body = (await response.json()) as { models?: ModelOption[] };
+    if (!body || !Array.isArray(body.models)) return;
     const saved = sessionStorage.getItem(MODEL_KEY);
     modelPicker.replaceChildren();
     for (const option of body.models) {
@@ -486,14 +571,14 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   function showQuestion(question: QuestionCard): void {
     if (draft?.classList.contains("thinking")) dropDraft();
     transcript.append(renderQuestionCard(question, onAnswered));
-    transcript.scrollTop = transcript.scrollHeight;
+    scrollToBottom();
   }
 
   function onAnswered(result: AnswerResult): void {
     if (result.reply) transcript.append(renderAssistantTurn(result.reply));
     for (const question of result.pending) showQuestion(question);
     setBlocked(result.pending.length > 0 ? WAITING_FOR_ANSWER : null);
-    transcript.scrollTop = transcript.scrollHeight;
+    scrollToBottom();
   }
 
   function parseFrame(raw: string): SseFrame | null {
@@ -578,7 +663,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (frame.event === "token" && payload.text) {
       draftText += payload.text;
       ensureDraft().textContent = draftText;
-      transcript.scrollTop = transcript.scrollHeight;
+      scrollToBottom();
       return;
     }
     if (frame.event === "tool_call") {
@@ -590,7 +675,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         name: payload.name ?? "tool",
         arguments: payload.arguments ?? "",
       });
-      transcript.scrollTop = transcript.scrollHeight;
+      scrollToBottom();
       return;
     }
     if (frame.event === "approval_required") {
@@ -604,13 +689,13 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         (reply) => {
           if (reply) {
             transcript.append(renderAssistantTurn(reply));
-            transcript.scrollTop = transcript.scrollHeight;
+            scrollToBottom();
           }
           setBlocked(null);
         },
         payload.arguments,
       );
-      transcript.scrollTop = transcript.scrollHeight;
+      scrollToBottom();
       return;
     }
     if (frame.event === "tool_result") {
@@ -620,7 +705,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         content: payload.content ?? "",
       });
       if (!draft) showThinking();
-      transcript.scrollTop = transcript.scrollHeight;
+      scrollToBottom();
       return;
     }
     if (frame.event === "usage") {
@@ -689,7 +774,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     const bubble = renderUserTurn(text);
     transcript.append(bubble);
     showThinking();
-    transcript.scrollTop = transcript.scrollHeight;
+    scrollToBottom(true);
 
     try {
       const agent = ctx.url.searchParams.get("agent") || null;
@@ -854,7 +939,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       }
       const remote = data.suggestions ?? [];
       suggestions =
-        type === "@" ? mergeSuggestions(localSuggestions, remote) : remote;
+        type === "@" || type === "/"
+          ? mergeSuggestions(localSuggestions, remote)
+          : remote;
       if (selectedIndex < 0 || selectedIndex >= suggestions.length) {
         selectedIndex = suggestions.length > 0 ? 0 : -1;
       }
@@ -892,9 +979,13 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       popover.remove();
       popover = null;
     }
-    // Agents are already loaded: show them at once, the server fills in files and tables.
+    // Agents and default slash commands are local: show at once, server fills in extra items.
     localSuggestions =
-      type === "@" ? agentSuggestions(agentOptions, query) : [];
+      type === "@"
+        ? agentSuggestions(agentOptions, query)
+        : type === "/"
+          ? slashSuggestions(query)
+          : [];
     if (localSuggestions.length > 0) {
       suggestions = [...localSuggestions];
       selectedIndex = 0;
@@ -924,6 +1015,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
+    clearDraft();
     grow();
     void sendMessage(text);
   });
@@ -931,6 +1023,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   input.addEventListener("input", () => {
     grow();
     inspectTrigger();
+    saveDraft();
   });
 
   input.addEventListener("keydown", (event) => {
@@ -965,6 +1058,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       form.requestSubmit();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (popover && !form.contains(event.target as Node)) {
+      closePopover();
     }
   });
 

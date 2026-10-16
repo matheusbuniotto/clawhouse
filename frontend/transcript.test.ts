@@ -430,3 +430,49 @@ test("a sheets result links only a docs.google.com spreadsheet url", () => {
   });
   expect(evil.querySelector(".approval-link")).toBeNull();
 });
+
+test("renders assistant copy action button", () => {
+  const node = renderAssistantTurn("# Header\n\nSome answer");
+  const copyBtn = node.querySelector(".assistant-action-btn.copy-btn");
+  expect(copyBtn).not.toBeNull();
+  expect(copyBtn?.getAttribute("aria-label")).toBe("Copy markdown");
+});
+
+test("clicking copy button writes to clipboard", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+  const text = "# Header\n\nSome answer";
+  const node = renderAssistantTurn(text);
+  const copyBtn = node.querySelector(".assistant-action-btn.copy-btn") as HTMLButtonElement;
+  copyBtn.click();
+
+  expect(writeText).toHaveBeenCalledWith(text);
+});
+
+test("displays copied confirmation text", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+  const node = renderAssistantTurn("test content");
+  const copyBtn = node.querySelector(".assistant-action-btn.copy-btn") as HTMLButtonElement;
+  copyBtn.click();
+
+  await vi.waitFor(() => {
+    expect(copyBtn.textContent).toContain("Copied!");
+    expect(copyBtn.classList.contains("copied")).toBe(true);
+  });
+});
+
+test("handles clipboard rejection gracefully", async () => {
+  const writeText = vi.fn().mockRejectedValue(new Error("Permission denied"));
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+  const node = renderAssistantTurn("test content");
+  const copyBtn = node.querySelector(".assistant-action-btn.copy-btn") as HTMLButtonElement;
+  copyBtn.click();
+
+  await vi.waitFor(() => {
+    expect(copyBtn.textContent).toContain("Failed to copy");
+  });
+});
