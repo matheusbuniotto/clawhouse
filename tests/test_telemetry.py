@@ -175,6 +175,42 @@ def test_setup_telemetry_otlp_endpoint() -> None:
         mock_instrument.assert_called_once_with(True)
 
 
+def test_settings_mlflow_env() -> None:
+    s_default = settings_from_env({})
+    assert s_default.mlflow_enabled is False
+    assert s_default.mlflow_experiment is None
+
+    s_env = settings_from_env(
+        {
+            "CLAWHOUSE_MLFLOW_TRACING": "true",
+            "MLFLOW_EXPERIMENT_NAME": "/Users/test/traces",
+        }
+    )
+    assert s_env.mlflow_enabled is True
+    assert s_env.mlflow_experiment == "/Users/test/traces"
+
+
+def test_setup_telemetry_mlflow() -> None:
+    settings = Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host=None,
+        telemetry_enabled=True,
+        mlflow_enabled=True,
+        mlflow_experiment="/Users/test/traces",
+    )
+    with (
+        patch("mlflow.set_experiment") as mock_set_exp,
+        patch("mlflow.pydantic_ai.autolog") as mock_autolog,
+        patch("clawhouse.telemetry.Agent.instrument_all") as mock_instrument,
+    ):
+        setup_telemetry(settings)
+        mock_set_exp.assert_called_once_with("/Users/test/traces")
+        mock_autolog.assert_called_once()
+        mock_instrument.assert_called_once_with(True)
+
+
 # ---------------------------------------------------------------------------
 # S2: Turn Span & Session Attributes (C6 - C10)
 # ---------------------------------------------------------------------------

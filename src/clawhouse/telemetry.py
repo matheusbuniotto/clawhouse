@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import logfire
+import mlflow
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
@@ -36,11 +37,28 @@ def parse_otlp_headers(raw: str | None) -> dict[str, str] | None:
     return headers or None
 
 
+def setup_mlflow_tracing(settings: Settings) -> None:
+    """Initialize MLflow Tracing with native Pydantic AI autologging."""
+    if not settings.mlflow_enabled:
+        return
+    try:
+        if settings.mlflow_experiment:
+            mlflow.set_experiment(settings.mlflow_experiment)
+        pydantic_ai_mod = getattr(mlflow, "pydantic_ai", None)
+        if pydantic_ai_mod is not None and hasattr(pydantic_ai_mod, "autolog"):
+            pydantic_ai_mod.autolog()
+            logger.info("MLflow Pydantic AI autologging enabled")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to initialize MLflow tracing: %s", exc)
+
+
 def setup_telemetry(settings: Settings) -> None:
     """Initialize OpenTelemetry runtime telemetry based on application settings."""
     if not settings.telemetry_enabled:
         logger.debug("telemetry disabled by configuration")
         return
+
+    setup_mlflow_tracing(settings)
 
     if settings.logfire_token:
         logfire.configure(
