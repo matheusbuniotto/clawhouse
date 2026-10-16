@@ -1,5 +1,36 @@
 /* screens.css — the per-screen rules for Sessions, New session, Approvals, and Status. Owner: #44/#45. */
 
+.sessions-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sessions-search {
+  flex: 1;
+  max-width: 360px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.sessions-search:focus {
+  outline: var(--focus-ring);
+  border-color: transparent;
+}
+
+.sessions-count {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
 .sessions {
   margin: 0;
   padding: 0;
@@ -29,7 +60,7 @@
 .session-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .when {
@@ -38,10 +69,11 @@
   white-space: nowrap;
 }
 
+.btn-rename-session,
+.btn-clear-session,
 .btn-delete-session {
   background: transparent;
   border: 1px solid var(--border-strong);
-  color: var(--danger);
   border-radius: var(--radius-sm);
   padding: 2px 8px;
   font-size: var(--font-size-xs);
@@ -50,6 +82,21 @@
     background var(--duration-fast) var(--ease),
     color var(--duration-fast) var(--ease),
     border-color var(--duration-fast) var(--ease);
+}
+
+.btn-rename-session,
+.btn-clear-session {
+  color: var(--text);
+}
+
+.btn-rename-session:hover,
+.btn-clear-session:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.btn-delete-session {
+  color: var(--danger);
 }
 
 .btn-delete-session:hover {

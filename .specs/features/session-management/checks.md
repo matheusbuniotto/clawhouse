@@ -77,10 +77,10 @@ Proof: `npm test frontend/shell.test.ts -t "updates rail session title on rename
 
 ### S4 - Enhanced Sessions Management Screen · 1 file · 2 KB · ~1k
 
-**C21** - Sessions page renders #sessions-search and #sessions-count, dynamically filtering list on input (AC 16, AC 17)
+**C21** - Sessions page renders #sessions-search and #sessions-count, dynamically filtering list on input (AC 16, AC 17) · done
 Proof: `npm test frontend/sessions.test.ts -t "filters sessions list and updates counter"`
 
-**C22** - Sessions page renders rename and clear buttons on each row, executing in-place updates (AC 18, AC 19, AC 20)
+**C22** - Sessions page renders rename and clear buttons on each row, executing in-place updates (AC 18, AC 19, AC 20) · done
 Proof: `npm test frontend/sessions.test.ts -t "executes inline rename and clear actions on sessions page"`
 
 ## Coverage
