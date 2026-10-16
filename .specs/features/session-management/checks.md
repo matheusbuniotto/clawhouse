@@ -69,10 +69,10 @@ Proof: `npm test frontend/chat.test.ts -t "clears transcript after confirmation"
 
 ### S3 - Sidebar Rail Inline Rename Action · 1 file · 11 KB · ~3k
 
-**C19** - Sidebar rail renders .rail-session-rename button on each row and saves title via PATCH on Enter (AC 13, AC 14)
+**C19** - Sidebar rail renders .rail-session-rename button on each row and saves title via PATCH on Enter (AC 13, AC 14) · done
 Proof: `npm test frontend/shell.test.ts -t "renames session in rail"`
 
-**C20** - Receiving clawhouse:session-renamed event updates matching .rail-session-title in-place (AC 15)
+**C20** - Receiving clawhouse:session-renamed event updates matching .rail-session-title in-place (AC 15) · done
 Proof: `npm test frontend/shell.test.ts -t "updates rail session title on renamed event"`
 
 ### S4 - Enhanced Sessions Management Screen · 1 file · 2 KB · ~1k

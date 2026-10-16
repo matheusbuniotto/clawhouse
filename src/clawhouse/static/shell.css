@@ -215,6 +215,7 @@ body {
   opacity: 1;
 }
 
+.rail-session-rename,
 .rail-session-delete {
   display: inline-flex;
   align-items: center;
@@ -232,6 +233,11 @@ body {
   transition:
     background var(--duration-fast) var(--ease),
     color var(--duration-fast) var(--ease);
+}
+
+.rail-session-rename:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
 }
 
 .rail-session-delete:hover {
