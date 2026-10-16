@@ -18,3 +18,7 @@ env:
     valueFrom: openrouter-api-key
   - name: CLAWHOUSE_MODELS
     value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
+  - name: CLAWHOUSE_MLFLOW_TRACING
+    value: "true"
+  - name: MLFLOW_EXPERIMENT_NAME
+    value: "/Users/matheus.buniotto@gmail.com/clawhouse-traces"

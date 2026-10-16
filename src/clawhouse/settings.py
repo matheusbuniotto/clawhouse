@@ -31,6 +31,30 @@ class Settings:
     agent_root: Path = field(default_factory=default_agent_root)
     sensitive_tools: tuple[str, ...] = ()
     log_tail_url: str | None = None
+    telemetry_enabled: bool = True
+    otel_endpoint: str | None = None
+    otel_headers: str | None = None
+    logfire_token: str | None = None
+    mlflow_enabled: bool = False
+    mlflow_experiment: str | None = None
+
+
+def telemetry_enabled_from_env(env: Mapping[str, str]) -> bool:
+    raw = env.get("CLAWHOUSE_TELEMETRY")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no"}
+
+
+def mlflow_enabled_from_env(env: Mapping[str, str]) -> bool:
+    raw = env.get("CLAWHOUSE_MLFLOW_TRACING")
+    if raw is not None:
+        return raw.strip().lower() not in {"0", "false", "no"}
+    return bool(
+        env.get("MLFLOW_TRACKING_URI")
+        or env.get("MLFLOW_EXPERIMENT_NAME")
+        or env.get("MLFLOW_EXPERIMENT_ID")
+    )
 
 
 def settings_from_env(env: Mapping[str, str]) -> Settings:
@@ -43,6 +67,12 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         mcp_servers=mcp_servers_from_env(env),
         sensitive_tools=sensitive_tools_from_env(env),
         log_tail_url=env.get("CLAWHOUSE_LOG_TAIL_URL") or env.get("LOG_TAIL_URL") or None,
+        telemetry_enabled=telemetry_enabled_from_env(env),
+        otel_endpoint=env.get("OTEL_EXPORTER_OTLP_ENDPOINT") or None,
+        otel_headers=env.get("OTEL_EXPORTER_OTLP_HEADERS") or None,
+        logfire_token=env.get("LOGFIRE_TOKEN") or None,
+        mlflow_enabled=mlflow_enabled_from_env(env),
+        mlflow_experiment=env.get("MLFLOW_EXPERIMENT_NAME") or env.get("MLFLOW_EXPERIMENT") or None,
     )
 
 

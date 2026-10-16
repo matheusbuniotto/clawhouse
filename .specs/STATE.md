@@ -13,13 +13,14 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 | ADR-0005 | Platform-controlled agent runtime with inline approvals | Ambient client fallback for platform permissions + gated mutation | active | 2026-10-10 |
 | ADR-0006 | Pluggable model providers with Databricks Foundation Models | Enterprise LLM routing via WorkspaceClient / Model Serving | active | 2026-10-10 |
 | ADR-0007 | First-hatch customization via user workspace | User-specific instructions without redeploying backend | active | 2026-10-10 |
+| ADR-0008 | OpenTelemetry runtime telemetry with Logfire / OTLP fallback | First-party Pydantic AI instrumentation + zero heavy extra dependencies | active | 2026-10-16 |
 
 ## Handoff
 
-**Feature**: openclaw-quickwins
-**Where**: Complete - Verified PASS (16/16 checks proven)
+**Feature**: runtime-telemetry
+**Where**: Complete - Verified PASS (14/14 checks proven)
 **In progress**: none
-**Next step**: Ready to commit and ship or choose the next feature slice
+**Next step**: Ready to commit verification report or select next feature
 **Blockers**: none
-**Uncommitted**: frontend changes, static build, .specs/
+**Uncommitted**: none
 **Branch**: main

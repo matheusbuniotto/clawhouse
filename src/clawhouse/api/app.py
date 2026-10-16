@@ -86,6 +86,7 @@ from clawhouse.store.store import (
     agent_activities,
     open_store,
 )
+from clawhouse.telemetry import setup_telemetry
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -261,6 +262,7 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        setup_telemetry(settings)
         if store is None:
             app.state.store = await open_store_fn()
         else:

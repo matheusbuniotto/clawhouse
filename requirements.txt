@@ -4,6 +4,8 @@ asyncpg==0.32.0
 croniter==6.2.4
 databricks-sdk==0.151.0
 fastapi==0.143.0
+mlflow-skinny==3.17.1
+opentelemetry-exporter-otlp-proto-http==1.44.0
 pydantic-ai==2.55.0
 pydantic-ai-harness[skills]==0.55.0
 pyyaml==6.0.2

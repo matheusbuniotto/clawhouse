@@ -85,6 +85,14 @@ resources:
             value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
           - name: DATABRICKS_WAREHOUSE_ID
             value: ${var.sql_warehouse_id}
+          - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
+            value: ${var.sql_warehouse_id}
+          - name: CLAWHOUSE_MLFLOW_TRACING
+            value: "true"
+          - name: MLFLOW_TRACKING_URI
+            value: "databricks"
+          - name: MLFLOW_EXPERIMENT_NAME
+            value: "/Users/matheus.buniotto@gmail.com/clawhouse-traces"
       resources:
         - name: serving-endpoint
           serving_endpoint:

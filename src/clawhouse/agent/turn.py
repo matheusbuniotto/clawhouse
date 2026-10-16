@@ -96,6 +96,12 @@ from clawhouse.store.store import (
     SessionForbidden,
     SessionStore,
 )
+from clawhouse.telemetry import (
+    flush_telemetry,
+    record_turn_agent,
+    record_turn_status,
+    turn_span,
+)
 
 logger = logging.getLogger("clawhouse.turn")
 
@@ -382,14 +388,19 @@ async def _claim_resume(
 
 
 async def _worker(claimed: _Claimed, queue: _Queue, holder: list[TurnResult]) -> None:
-    try:
-        holder.append(await _run_model(claimed, queue))
-    except Exception as exc:  # noqa: BLE001 — a failed turn is an empty reply, never a partial one
-        # Model failures can echo request headers. Log the type only.
-        logger.error("turn failed: %s", type(exc).__name__)  # noqa: TRY400
-        holder.append(await _error_result(claimed.session_id, claimed.ctx))
-    finally:
-        await queue.put(_END)
+    with turn_span(claimed.session_id, claimed.ctx.owner_id, claimed.run_id):
+        try:
+            res = await _run_model(claimed, queue)
+            record_turn_status(res.status)
+            holder.append(res)
+        except Exception as exc:  # noqa: BLE001 — a failed turn is an empty reply, never a partial one
+            # Model failures can echo request headers. Log the type only.
+            logger.error("turn failed: %s", type(exc).__name__)  # noqa: TRY400
+            record_turn_status("error", exc)
+            holder.append(await _error_result(claimed.session_id, claimed.ctx))
+        finally:
+            flush_telemetry()
+            await queue.put(_END)
 
 
 async def _worker_resume(
@@ -400,13 +411,18 @@ async def _worker_resume(
     queue: _Queue,
     holder: list[TurnResult],
 ) -> None:
-    try:
-        holder.append(await _run_model_resume(claimed, approval, decision, queue))
-    except Exception as exc:  # noqa: BLE001
-        logger.error("resume turn failed: %s", type(exc).__name__)  # noqa: TRY400
-        holder.append(await _error_result(claimed.session_id, claimed.ctx))
-    finally:
-        await queue.put(_END)
+    with turn_span(claimed.session_id, claimed.ctx.owner_id, claimed.run_id):
+        try:
+            res = await _run_model_resume(claimed, approval, decision, queue)
+            record_turn_status(res.status)
+            holder.append(res)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("resume turn failed: %s", type(exc).__name__)  # noqa: TRY400
+            record_turn_status("error", exc)
+            holder.append(await _error_result(claimed.session_id, claimed.ctx))
+        finally:
+            flush_telemetry()
+            await queue.put(_END)
 
 
 async def _drain(queue: _Queue) -> AsyncIterator[TurnNotice]:
@@ -672,6 +688,7 @@ def _usage_notice(event: ContextUsageEvent) -> UsageNotice:
 
 async def _start_agent(claimed: _Claimed, queue: _Queue, agent: ActiveAgent) -> _Claimed:
     """Bind the turn to its agent and announce it before any other frame."""
+    record_turn_agent(agent.agent_id)
     model_name = getattr(claimed.ctx.model, "model_name", "") or ""
     notice = AgentNotice(
         agent_id=agent.agent_id, name=agent.name, emoji=agent.emoji, model=str(model_name)
