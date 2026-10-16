@@ -4,17 +4,17 @@ import asyncio
 import json
 import os
 import shutil
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 from pydantic_ai.models import Model
 
 from clawhouse.agent.model import (
@@ -108,6 +108,10 @@ class SessionOut(BaseModel):
     title: str
     created_at: str
     run_state: RunState = "idle"
+
+
+class SessionTitleIn(BaseModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
 
 class HatchStatusOut(BaseModel):
@@ -485,6 +489,51 @@ def _session_routes(app: FastAPI) -> None:
         return _session_out(summary)
 
     _session_item_routes(app)
+    _session_meta_routes(app)
+
+
+def _session_meta_routes(app: FastAPI) -> None:
+    """Read, rename, and clear one session without touching its id or created_at."""
+
+    @app.get("/api/sessions/{session_id}")
+    async def get_session(
+        session_id: str,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> SessionOut:
+        store: SessionStore = request.app.state.store
+        with _session_errors():
+            summary = await store.get_session(canonical_session_id(session_id), caller.user_id)
+        return _session_out(summary)
+
+    @app.patch("/api/sessions/{session_id}")
+    async def rename_session(
+        session_id: str,
+        body: SessionTitleIn,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> SessionOut:
+        store: SessionStore = request.app.state.store
+        with _session_errors():
+            summary = await store.rename_session(
+                canonical_session_id(session_id), caller.user_id, body.title
+            )
+        return _session_out(summary)
+
+    @app.post("/api/sessions/{session_id}/clear")
+    async def clear_session(
+        session_id: str,
+        request: Request,
+        caller: Caller = _require_caller,
+    ) -> dict[str, bool]:
+        store: SessionStore = request.app.state.store
+        with _session_errors():
+            canonical = canonical_session_id(session_id)
+            summary = await store.get_session(canonical, caller.user_id)
+            if summary.run_state == "running":
+                raise HTTPException(status_code=409, detail="A turn is running in this session.")
+            await store.clear_transcript(canonical, caller.user_id)
+        return {"cleared": True}
 
 
 def _session_item_routes(app: FastAPI) -> None:
@@ -1050,6 +1099,19 @@ def _caller(request: Request) -> Caller:
 
 
 _require_caller = Depends(_caller)
+
+
+@contextmanager
+def _session_errors() -> Iterator[None]:
+    """Map store ownership errors on a single session to HTTP statuses."""
+    try:
+        yield
+    except InvalidSessionId as exc:
+        raise HTTPException(status_code=422, detail="Session id must be a UUID.") from exc
+    except SessionNotFound as exc:
+        raise HTTPException(status_code=404, detail="Session not found.") from exc
+    except SessionForbidden as exc:
+        raise HTTPException(status_code=403, detail="You do not own this session.") from exc
 
 
 async def _read_entries(

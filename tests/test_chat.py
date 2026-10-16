@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -724,3 +725,173 @@ async def test_hatch_state_query_and_update() -> None:
             "signature_emoji": "🤖",
             "user_directives": "Data Engineer, be concise",
         }
+
+
+FOREIGN_HEADERS = {
+    "x-forwarded-email": "grace@example.com",
+    "x-forwarded-access-token": "dapi-other",
+}
+MISSING_SESSION = "33333333-3333-4333-8333-333333333333"
+
+
+@asynccontextmanager
+async def _seeded_client(
+    store: MemorySessionStore, message: str = "hello"
+) -> AsyncIterator[AsyncClient]:
+    async with _client(_app(store, FunctionModel(stream_function=_reply("ok")))) as client:
+        await client.post(
+            f"/api/sessions/{SESSION}/turns", headers=HEADERS, json={"message": message}
+        )
+        yield client
+
+
+async def test_rename_session_success() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        renamed = await client.patch(
+            f"/api/sessions/{SESSION}", headers=HEADERS, json={"title": "  Project Alpha  "}
+        )
+        listed = await client.get("/api/sessions", headers=HEADERS)
+
+    assert renamed.status_code == 200
+    assert renamed.json()["id"] == SESSION
+    assert renamed.json()["title"] == "Project Alpha"
+    assert renamed.json()["run_state"] == "idle"
+    assert [s["title"] for s in listed.json()["sessions"]] == ["Project Alpha"]
+
+
+async def test_rename_session_blank_refused() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        empty = await client.patch(f"/api/sessions/{SESSION}", headers=HEADERS, json={"title": ""})
+        blank = await client.patch(
+            f"/api/sessions/{SESSION}", headers=HEADERS, json={"title": "   "}
+        )
+        listed = await client.get("/api/sessions", headers=HEADERS)
+
+    assert empty.status_code == 422
+    assert blank.status_code == 422
+    assert [s["title"] for s in listed.json()["sessions"]] == ["hello"]
+
+
+async def test_rename_session_forbidden() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        foreign = await client.patch(
+            f"/api/sessions/{SESSION}", headers=FOREIGN_HEADERS, json={"title": "Mine now"}
+        )
+        listed = await client.get("/api/sessions", headers=HEADERS)
+
+    assert foreign.status_code == 403
+    assert foreign.json()["detail"] == "You do not own this session."
+    assert [s["title"] for s in listed.json()["sessions"]] == ["hello"]
+
+
+async def test_rename_session_not_found() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        missing = await client.patch(
+            f"/api/sessions/{MISSING_SESSION}", headers=HEADERS, json={"title": "Ghost"}
+        )
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "Session not found."
+
+
+async def test_get_session_success() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        found = await client.get(f"/api/sessions/{SESSION}", headers=HEADERS)
+
+    assert found.status_code == 200
+    body = found.json()
+    assert body["id"] == SESSION
+    assert body["title"] == "hello"
+    assert body["run_state"] == "idle"
+    assert body["created_at"]
+
+
+async def test_get_session_forbidden() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        foreign = await client.get(f"/api/sessions/{SESSION}", headers=FOREIGN_HEADERS)
+
+    assert foreign.status_code == 403
+
+
+async def test_get_session_not_found() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        missing = await client.get(f"/api/sessions/{MISSING_SESSION}", headers=HEADERS)
+
+    assert missing.status_code == 404
+
+
+async def test_get_session_invalid_id() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        bad_id = await client.get("/api/sessions/not-a-uuid", headers=HEADERS)
+
+    assert bad_id.status_code == 422
+
+
+async def test_clear_session_transcript_success() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        await client.patch(f"/api/sessions/{SESSION}", headers=HEADERS, json={"title": "Keep me"})
+        before = await client.get(f"/api/sessions/{SESSION}", headers=HEADERS)
+        cleared = await client.post(f"/api/sessions/{SESSION}/clear", headers=HEADERS)
+        again = await client.post(f"/api/sessions/{SESSION}/clear", headers=HEADERS)
+        transcript = await client.get(f"/api/sessions/{SESSION}/transcript", headers=HEADERS)
+        after = await client.get(f"/api/sessions/{SESSION}", headers=HEADERS)
+
+    assert cleared.status_code == 200
+    assert cleared.json() == {"cleared": True}
+    assert again.json() == {"cleared": True}
+    assert transcript.json()["entries"] == []
+    assert after.json()["id"] == SESSION
+    assert after.json()["title"] == "Keep me"
+    assert after.json()["created_at"] == before.json()["created_at"]
+
+
+async def test_clear_session_transcript_forbidden() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        foreign = await client.post(f"/api/sessions/{SESSION}/clear", headers=FOREIGN_HEADERS)
+        transcript = await client.get(f"/api/sessions/{SESSION}/transcript", headers=HEADERS)
+
+    assert foreign.status_code == 403
+    assert len(transcript.json()["entries"]) == 2
+
+
+async def test_clear_session_transcript_not_found() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        missing = await client.post(f"/api/sessions/{MISSING_SESSION}/clear", headers=HEADERS)
+
+    assert missing.status_code == 404
+
+
+async def test_clear_session_transcript_invalid_id() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store) as client:
+        bad_id = await client.post("/api/sessions/not-a-uuid/clear", headers=HEADERS)
+
+    assert bad_id.status_code == 422
+
+
+async def test_session_title_fallback_order() -> None:
+    store = MemorySessionStore()
+    async with _seeded_client(store, message="first question") as client:
+        created = await client.post("/api/sessions", headers=HEADERS)
+        fallback = await client.get(f"/api/sessions/{SESSION}", headers=HEADERS)
+        empty = await client.get(f"/api/sessions/{created.json()['id']}", headers=HEADERS)
+        await client.patch(f"/api/sessions/{SESSION}", headers=HEADERS, json={"title": "Custom"})
+        await client.post(
+            f"/api/sessions/{SESSION}/turns", headers=HEADERS, json={"message": "second question"}
+        )
+        custom = await client.get(f"/api/sessions/{SESSION}", headers=HEADERS)
+
+    assert fallback.json()["title"] == "first question"
+    assert empty.json()["title"] == ""
+    assert custom.json()["title"] == "Custom"
