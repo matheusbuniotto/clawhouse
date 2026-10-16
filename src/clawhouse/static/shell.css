@@ -215,6 +215,7 @@ body {
   opacity: 1;
 }
 
+.rail-session-rename,
 .rail-session-delete {
   display: inline-flex;
   align-items: center;
@@ -232,6 +233,11 @@ body {
   transition:
     background var(--duration-fast) var(--ease),
     color var(--duration-fast) var(--ease);
+}
+
+.rail-session-rename:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
 }
 
 .rail-session-delete:hover {
@@ -413,6 +419,103 @@ body {
 .scroll-bottom-btn:hover {
   background: var(--bg-hover);
   transform: translateY(-2px);
+}
+
+/* Chat header — the session title, inline rename, and clear transcript. */
+.chat-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.chat-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+
+.chat-header-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.chat-action {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease),
+    color var(--duration-fast) var(--ease);
+}
+
+.chat-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+
+.chat-action-danger:hover {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.chat-action:focus-visible,
+.title-save:focus-visible {
+  outline: var(--focus-ring);
+}
+
+/* Inline title editor shared by the chat header, rail rows, and sessions page. */
+.title-editor {
+  display: inline-flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: var(--font-size-md);
+}
+
+.title-input:focus {
+  outline: var(--focus-ring);
+  border-color: transparent;
+}
+
+.title-save {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
 }
 
 /* Composer — one container with the model pill inline and abort only while busy. */

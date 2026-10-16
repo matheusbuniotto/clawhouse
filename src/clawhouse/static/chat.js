@@ -1,5 +1,5 @@
 import { ASK_USER, REPORT_PROGRESS, parseProgress, upsertProgressCard, renderAnsweredQuestion, renderQuestionCard, } from "./cards.js";
-import { el, svgEl } from "./dom.js";
+import { SESSION_RENAMED, UNTITLED, clearSession, editTitle, el, renameSession, svgEl, } from "./dom.js";
 import { agentSuggestions, mergeSuggestions, slashSuggestions, } from "./mentions.js";
 import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAssistantTurn, renderInlineApproval, renderNotice, renderUserTurn, } from "./transcript.js";
 const SESSION_KEY = "clawhouse.session";
@@ -9,6 +9,18 @@ const WAITING_FOR_APPROVAL = "Ação aguardando aprovação acima.";
 const STILL_RUNNING = "O agente ainda está trabalhando nesta sessão…";
 const POLL_MS = 1500;
 export function mount(root, ctx) {
+    const header = el("header", "chat-header");
+    header.id = "chat-header";
+    const titleLabel = el("h1", "chat-title", UNTITLED);
+    const renameButton = el("button", "chat-action", "Rename");
+    renameButton.id = "chat-rename";
+    renameButton.type = "button";
+    const clearButton = el("button", "chat-action chat-action-danger", "Clear transcript");
+    clearButton.id = "chat-clear";
+    clearButton.type = "button";
+    const headerActions = el("div", "chat-header-actions");
+    headerActions.append(renameButton, clearButton);
+    header.append(titleLabel, headerActions);
     const transcript = el("section", "log");
     transcript.id = "log";
     transcript.setAttribute("aria-live", "polite");
@@ -58,7 +70,7 @@ export function mount(root, ctx) {
     statusLine.id = "status";
     statusLine.setAttribute("role", "status");
     form.append(input, toolbar, statusLine);
-    root.append(transcript, form);
+    root.append(header, transcript, form);
     let draft = null;
     let blocked = null;
     let running = false;
@@ -183,6 +195,51 @@ export function mount(root, ctx) {
         sessionStorage.removeItem(draftKey(sessionId()));
     }
     restoreDraft();
+    let sessionTitle = "";
+    function showTitle(title) {
+        sessionTitle = title;
+        titleLabel.textContent = title || UNTITLED;
+    }
+    async function loadTitle() {
+        try {
+            const response = await fetch(`/api/sessions/${sessionId()}`);
+            if (!response.ok)
+                return;
+            const body = (await response.json());
+            showTitle(body.title ?? "");
+        }
+        catch {
+            // The header keeps its last title.
+        }
+    }
+    function startRename() {
+        if (titleLabel.hidden)
+            return;
+        editTitle(titleLabel, sessionTitle, async (title) => {
+            const saved = await renameSession(sessionId(), title);
+            if (saved !== null)
+                sessionTitle = saved;
+            return saved;
+        }, "chat-title-input");
+    }
+    async function clearTranscript() {
+        if (!confirm("Clear this session's transcript? The session stays."))
+            return;
+        if (!(await clearSession(sessionId()))) {
+            setStatus("The transcript could not be cleared.");
+            return;
+        }
+        transcript.replaceChildren(renderNotice("Transcript cleared."));
+        void loadTitle();
+    }
+    renameButton.addEventListener("click", startRename);
+    titleLabel.addEventListener("click", startRename);
+    clearButton.addEventListener("click", () => void clearTranscript());
+    window.addEventListener(SESSION_RENAMED, (event) => {
+        const detail = event.detail;
+        if (header.isConnected && detail.id === sessionId())
+            showTitle(detail.title);
+    });
     function showEmpty() {
         transcript.replaceChildren(el("p", "empty", "This session is empty."));
     }
@@ -703,6 +760,8 @@ export function mount(root, ctx) {
             controller = null;
             liveTurn = null;
             setBusy(false);
+            if (!sessionTitle)
+                void loadTitle();
             if (blocked !== null)
                 setStatus(blocked);
             else
@@ -945,6 +1004,7 @@ export function mount(root, ctx) {
         }
     }
     void loadModels();
+    void loadTitle();
     void loadAgents().then(loadTranscript);
     void checkHatchDraft();
 }

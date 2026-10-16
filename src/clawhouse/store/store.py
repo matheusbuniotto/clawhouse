@@ -46,7 +46,8 @@ CREATE SCHEMA IF NOT EXISTS clawhouse;
 CREATE TABLE IF NOT EXISTS clawhouse.sessions (
     id uuid PRIMARY KEY,
     owner_id text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    title text
 );
 
 CREATE TABLE IF NOT EXISTS clawhouse.runs (
@@ -157,6 +158,27 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 _RUNNING_INDEX = "runs_one_running_per_session"
 _STALE_RUN_MINUTES = 10
 
+# A custom title wins; a blank or missing one falls back to the first user turn.
+_SESSION_SUMMARY = """
+SELECT s.id, s.created_at,
+    COALESCE(
+        NULLIF(btrim(s.title), ''),
+        (
+            SELECT t.content FROM clawhouse.transcript_entries AS t
+            WHERE t.session_id = s.id AND t.role = 'user'
+            ORDER BY t.position
+            LIMIT 1
+        )
+    ) AS title,
+    (
+        SELECT r.status FROM clawhouse.runs AS r
+        WHERE r.session_id = s.id
+        ORDER BY (r.status = 'running') DESC, r.started_at DESC
+        LIMIT 1
+    ) AS latest_run_status
+FROM clawhouse.sessions AS s
+"""
+
 
 class SessionStore(Protocol):
     async def open_session(self, session_id: str, owner_id: str) -> None: ...
@@ -166,6 +188,12 @@ class SessionStore(Protocol):
     async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]: ...
 
     async def delete_session(self, session_id: str, owner_id: str) -> bool: ...
+
+    async def get_session(self, session_id: str, owner_id: str) -> SessionSummary: ...
+
+    async def rename_session(
+        self, session_id: str, owner_id: str, title: str
+    ) -> SessionSummary: ...
 
     async def clear_transcript(self, session_id: str, owner_id: str) -> None: ...
 
@@ -259,6 +287,7 @@ class _MemorySession:
     entries: list[TranscriptEntry] = field(default_factory=list)
     running: str | None = None
     last_status: TurnStatus | None = None
+    title: str | None = None
 
 
 class MemorySessionStore:
@@ -312,6 +341,24 @@ class MemorySessionStore:
                 k: v for k, v in self._approvals.items() if v.session_id != session_id
             }
             return True
+
+    async def get_session(self, session_id: str, owner_id: str) -> SessionSummary:
+        async with self._lock:
+            return _memory_summary(session_id, self._owned(session_id, owner_id))
+
+    async def rename_session(self, session_id: str, owner_id: str, title: str) -> SessionSummary:
+        async with self._lock:
+            session = self._owned(session_id, owner_id)
+            session.title = title
+            return _memory_summary(session_id, session)
+
+    def _owned(self, session_id: str, owner_id: str) -> _MemorySession:
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise SessionNotFound(session_id)
+        if session.owner_id != owner_id:
+            raise SessionForbidden(session_id)
+        return session
 
     async def claim_run(self, session_id: str) -> str:
         async with self._lock:
@@ -549,6 +596,10 @@ class LakebaseSessionStore:
             await self._pool.execute(
                 "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS model text"
             )
+        with suppress(asyncpg.InsufficientPrivilegeError):
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS title text"
+            )
         # Without the privilege to add it, keep writing the old shape instead of failing turns.
         present = await self._pool.fetchval(
             """
@@ -583,38 +634,22 @@ class LakebaseSessionStore:
 
     async def list_sessions(self, owner_id: str) -> tuple[SessionSummary, ...]:
         rows = await self._pool.fetch(
-            """
-            SELECT s.id, s.created_at,
-                (
-                    SELECT t.content FROM clawhouse.transcript_entries AS t
-                    WHERE t.session_id = s.id AND t.role = 'user'
-                    ORDER BY t.position
-                    LIMIT 1
-                ) AS title,
-                (
-                    SELECT r.status FROM clawhouse.runs AS r
-                    WHERE r.session_id = s.id
-                    ORDER BY (r.status = 'running') DESC, r.started_at DESC
-                    LIMIT 1
-                ) AS latest_run_status
-            FROM clawhouse.sessions AS s
-            WHERE s.owner_id = $1
-            ORDER BY s.created_at DESC
-            """,
+            f"{_SESSION_SUMMARY} WHERE s.owner_id = $1 ORDER BY s.created_at DESC",
             owner_id,
         )
-        return tuple(
-            SessionSummary(
-                id=str(row["id"]),
-                title=row["title"] or "",
-                created_at=row["created_at"],
-                run_state=run_state_for(
-                    is_running=False,
-                    status=row["latest_run_status"],
-                ),
-            )
-            for row in rows
+        return tuple(_summary_from_row(row) for row in rows)
+
+    async def get_session(self, session_id: str, owner_id: str) -> SessionSummary:
+        await self._require_owner(session_id, owner_id)
+        row = await self._pool.fetchrow(f"{_SESSION_SUMMARY} WHERE s.id = $1", _uuid(session_id))
+        return _summary_from_row(row)
+
+    async def rename_session(self, session_id: str, owner_id: str, title: str) -> SessionSummary:
+        await self._require_owner(session_id, owner_id)
+        await self._pool.execute(
+            "UPDATE clawhouse.sessions SET title = $2 WHERE id = $1", _uuid(session_id), title
         )
+        return await self.get_session(session_id, owner_id)
 
     async def claim_run(self, session_id: str) -> str:
         if await self.has_pending_approval(session_id):
@@ -1161,8 +1196,18 @@ def run_state_for(*, is_running: bool, status: str | None) -> RunState:
     return "idle"
 
 
+def _summary_from_row(row: asyncpg.Record) -> SessionSummary:
+    return SessionSummary(
+        id=str(row["id"]),
+        title=row["title"] or "",
+        created_at=row["created_at"],
+        run_state=run_state_for(is_running=False, status=row["latest_run_status"]),
+    )
+
+
 def _memory_summary(session_id: str, session: _MemorySession) -> SessionSummary:
-    title = next((entry.content for entry in session.entries if entry.role == "user"), "")
+    first = next((entry.content for entry in session.entries if entry.role == "user"), "")
+    title = session.title if session.title and session.title.strip() else first
     return SessionSummary(
         id=session_id,
         title=title,

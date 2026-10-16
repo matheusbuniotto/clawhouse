@@ -9,7 +9,16 @@ import {
   type ProgressStep,
   type QuestionCard,
 } from "./cards.js";
-import { el, svgEl } from "./dom.js";
+import {
+  SESSION_RENAMED,
+  UNTITLED,
+  clearSession,
+  editTitle,
+  el,
+  renameSession,
+  svgEl,
+  type SessionRenamed,
+} from "./dom.js";
 import {
   agentSuggestions,
   mergeSuggestions,
@@ -61,6 +70,19 @@ interface SseFrame {
 }
 
 export function mount(root: HTMLElement, ctx: ScreenContext): void {
+  const header = el("header", "chat-header");
+  header.id = "chat-header";
+  const titleLabel = el("h1", "chat-title", UNTITLED);
+  const renameButton = el("button", "chat-action", "Rename");
+  renameButton.id = "chat-rename";
+  renameButton.type = "button";
+  const clearButton = el("button", "chat-action chat-action-danger", "Clear transcript");
+  clearButton.id = "chat-clear";
+  clearButton.type = "button";
+  const headerActions = el("div", "chat-header-actions");
+  headerActions.append(renameButton, clearButton);
+  header.append(titleLabel, headerActions);
+
   const transcript = el("section", "log");
   transcript.id = "log";
   transcript.setAttribute("aria-live", "polite");
@@ -120,7 +142,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   statusLine.setAttribute("role", "status");
 
   form.append(input, toolbar, statusLine);
-  root.append(transcript, form);
+  root.append(header, transcript, form);
 
   let draft: HTMLElement | null = null;
   let blocked: string | null = null;
@@ -264,6 +286,56 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   restoreDraft();
+
+  let sessionTitle = "";
+
+  function showTitle(title: string): void {
+    sessionTitle = title;
+    titleLabel.textContent = title || UNTITLED;
+  }
+
+  async function loadTitle(): Promise<void> {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId()}`);
+      if (!response.ok) return;
+      const body = (await response.json()) as { title?: string };
+      showTitle(body.title ?? "");
+    } catch {
+      // The header keeps its last title.
+    }
+  }
+
+  function startRename(): void {
+    if (titleLabel.hidden) return;
+    editTitle(
+      titleLabel,
+      sessionTitle,
+      async (title) => {
+        const saved = await renameSession(sessionId(), title);
+        if (saved !== null) sessionTitle = saved;
+        return saved;
+      },
+      "chat-title-input",
+    );
+  }
+
+  async function clearTranscript(): Promise<void> {
+    if (!confirm("Clear this session's transcript? The session stays.")) return;
+    if (!(await clearSession(sessionId()))) {
+      setStatus("The transcript could not be cleared.");
+      return;
+    }
+    transcript.replaceChildren(renderNotice("Transcript cleared."));
+    void loadTitle();
+  }
+
+  renameButton.addEventListener("click", startRename);
+  titleLabel.addEventListener("click", startRename);
+  clearButton.addEventListener("click", () => void clearTranscript());
+  window.addEventListener(SESSION_RENAMED, (event) => {
+    const detail = (event as CustomEvent<SessionRenamed>).detail;
+    if (header.isConnected && detail.id === sessionId()) showTitle(detail.title);
+  });
 
   function showEmpty(): void {
     transcript.replaceChildren(el("p", "empty", "This session is empty."));
@@ -816,6 +888,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       controller = null;
       liveTurn = null;
       setBusy(false);
+      if (!sessionTitle) void loadTitle();
       if (blocked !== null) setStatus(blocked);
       else input.focus();
     }
@@ -1096,6 +1169,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   void loadModels();
+  void loadTitle();
   void loadAgents().then(loadTranscript);
   void checkHatchDraft();
 }

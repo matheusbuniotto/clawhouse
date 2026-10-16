@@ -1,4 +1,4 @@
-import { el, isRunning, relativeTime } from "./dom.js";
+import { SESSION_RENAMED, UNTITLED, editTitle, el, isRunning, relativeTime, renameSession, } from "./dom.js";
 const THEME_KEY = "clawhouse.theme-mode";
 const RAIL_WIDTH_KEY = "clawhouse.rail-width";
 const MIN_RAIL_WIDTH = 180;
@@ -123,21 +123,41 @@ export function mountShell(root = document) {
         void loadSessions();
     }
     function sessionRow(item) {
+        let currentTitle = item.title;
         const link = el("a", "rail-session");
         link.setAttribute("data-nav", "");
         link.dataset.id = item.id;
-        link.dataset.title = item.title.toLowerCase();
+        link.dataset.title = currentTitle.toLowerCase();
         link.href = `/chat?session=${item.id}`;
-        link.append(el("span", "rail-session-title", item.title || "Untitled session"));
+        const titleSpan = el("span", "rail-session-title", currentTitle || UNTITLED);
+        link.append(titleSpan);
         const actions = el("span", "rail-session-actions");
+        const renameBtn = el("button", "rail-session-rename", "✎");
+        renameBtn.type = "button";
+        renameBtn.setAttribute("aria-label", `Rename session ${currentTitle || item.id}`);
+        renameBtn.title = "Rename session";
+        renameBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (titleSpan.hidden)
+                return;
+            editTitle(titleSpan, currentTitle, async (newTitle) => {
+                const saved = await renameSession(item.id, newTitle);
+                if (saved !== null) {
+                    currentTitle = saved;
+                    link.dataset.title = saved.toLowerCase();
+                }
+                return saved;
+            });
+        });
         const delBtn = el("button", "rail-session-delete", "×");
         delBtn.type = "button";
-        delBtn.setAttribute("aria-label", `Delete session ${item.title || item.id}`);
+        delBtn.setAttribute("aria-label", `Delete session ${currentTitle || item.id}`);
         delBtn.title = "Delete session";
         delBtn.addEventListener("click", async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!confirm(`Delete "${item.title || "Untitled session"}"?`))
+            if (!confirm(`Delete "${currentTitle || UNTITLED}"?`))
                 return;
             try {
                 const res = await fetch(`/api/sessions/${item.id}`, {
@@ -155,7 +175,7 @@ export function mountShell(root = document) {
                 // ignore network error
             }
         });
-        actions.append(delBtn);
+        actions.append(renameBtn, delBtn);
         link.append(actions);
         link.append(el("span", "rail-session-time", relativeTime(item.created_at)));
         if (isRunning(item.run_state)) {
@@ -276,6 +296,19 @@ export function mountShell(root = document) {
     window.addEventListener("popstate", onPopState);
     window.addEventListener("clawhouse:session-deleted", () => {
         void loadSessions();
+    });
+    window.addEventListener(SESSION_RENAMED, (event) => {
+        const detail = event.detail;
+        if (!detail)
+            return;
+        for (const row of sessionList.querySelectorAll(".rail-session")) {
+            if (row.dataset.id === detail.id) {
+                row.dataset.title = detail.title.toLowerCase();
+                const titleEl = row.querySelector(".rail-session-title");
+                if (titleEl)
+                    titleEl.textContent = detail.title || UNTITLED;
+            }
+        }
     });
     const storedWidth = Number(localStorage.getItem(RAIL_WIDTH_KEY));
     if (Number.isFinite(storedWidth) && storedWidth > 0)

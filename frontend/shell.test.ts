@@ -259,3 +259,65 @@ test("a stored rail width is restored on mount", async () => {
   await mount();
   expect(document.documentElement.style.getPropertyValue("--rail-width")).toBe("320px");
 });
+
+test("renames session in rail", async () => {
+  const calls: { url: string; method: string; body?: string }[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push({ url, method, body: init?.body as string | undefined });
+    if (url === "/api/sessions" && method === "GET") return jsonResponse({ sessions: SESSIONS });
+    if (url === "/api/sessions/s2" && method === "PATCH") {
+      return jsonResponse({ id: "s2", title: "Agent Evaluation", created_at: "", run_state: "idle" });
+    }
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    return jsonResponse({});
+  });
+  window.history.replaceState(null, "", "/chat");
+  await mount();
+  await vi.waitFor(() => expect(document.querySelectorAll(".rail-session")).toHaveLength(2));
+  const row = document.querySelector('.rail-session[data-id="s2"]') as HTMLAnchorElement;
+  const actions = row.querySelector(".rail-session-actions") as HTMLElement;
+  const rename = row.querySelector(".rail-session-rename") as HTMLButtonElement;
+
+  expect([...actions.children].map((node) => node.className)).toEqual([
+    "rail-session-rename",
+    "rail-session-delete",
+  ]);
+  for (const other of document.querySelectorAll(".rail-session")) {
+    expect(other.querySelector(".rail-session-rename")).not.toBeNull();
+  }
+
+  rename.click();
+  expect(window.location.pathname).toBe("/chat");
+  expect(window.location.search).toBe("");
+  const input = row.querySelector("input.title-input") as HTMLInputElement;
+  expect(input.value).toBe("Second");
+  input.value = "Agent Evaluation";
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  await vi.waitFor(() =>
+    expect(row.querySelector(".rail-session-title")?.textContent).toBe("Agent Evaluation"),
+  );
+  const patch = calls.find((call) => call.method === "PATCH");
+  expect(patch?.url).toBe("/api/sessions/s2");
+  expect(JSON.parse(String(patch?.body))).toEqual({ title: "Agent Evaluation" });
+  expect(window.location.search).toBe("");
+  expect(row.querySelector("input.title-input")).toBeNull();
+});
+
+test("updates rail session title on renamed event", async () => {
+  await mount();
+  await vi.waitFor(() => expect(document.querySelectorAll(".rail-session")).toHaveLength(2));
+
+  window.dispatchEvent(
+    new CustomEvent("clawhouse:session-renamed", { detail: { id: "s1", title: "Renamed Elsewhere" } }),
+  );
+
+  const row = document.querySelector('.rail-session[data-id="s1"]') as HTMLElement;
+  expect(row.querySelector(".rail-session-title")?.textContent).toBe("Renamed Elsewhere");
+  expect(row.dataset.title).toBe("renamed elsewhere");
+  const untouched = document.querySelector('.rail-session[data-id="s2"]') as HTMLElement;
+  expect(untouched.querySelector(".rail-session-title")?.textContent).toBe("Second");
+});
