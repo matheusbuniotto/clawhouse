@@ -27,4 +27,4 @@
 
 ## Gate
 
-`uv run pytest tests/test_telemetry.py` - 17 passed, 0 failed
+`uv run pytest tests/test_telemetry.py` - 21 passed, 0 failed
