@@ -58,3 +58,5 @@ logs/
 .cursor/
 .windsurf/
 .claude/
+.gemini/
+.agent/
