@@ -55,6 +55,11 @@ def setup_mlflow_tracing(settings: Settings) -> None:
             mlflow.set_tracking_uri(tracking_uri)
 
         if settings.mlflow_experiment:
+            warehouse_id = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID") or os.environ.get(
+                "DATABRICKS_WAREHOUSE_ID"
+            )
+            if warehouse_id:
+                os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
             mlflow.set_experiment(settings.mlflow_experiment)
         pydantic_ai_mod = getattr(mlflow, "pydantic_ai", None)
         if pydantic_ai_mod is not None and hasattr(pydantic_ai_mod, "autolog"):
