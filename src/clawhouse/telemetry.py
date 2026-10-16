@@ -88,22 +88,23 @@ def setup_telemetry(settings: Settings) -> None:
         logger.debug("telemetry disabled by configuration")
         return
 
-    setup_mlflow_tracing(settings)
-
     if settings.logfire_token:
         logfire.configure(
             send_to_logfire="if-token-present",
             token=settings.logfire_token,
             service_name="clawhouse",
         )
-    elif settings.otel_endpoint:
-        headers = parse_otlp_headers(settings.otel_headers)
-        exporter = OTLPSpanExporter(endpoint=settings.otel_endpoint, headers=headers)
+    else:
         provider = trace.get_tracer_provider()
         if not isinstance(provider, TracerProvider):
             provider = TracerProvider()
             trace.set_tracer_provider(provider)
-        provider.add_span_processor(BatchSpanProcessor(exporter))
+        if settings.otel_endpoint:
+            headers = parse_otlp_headers(settings.otel_headers)
+            exporter = OTLPSpanExporter(endpoint=settings.otel_endpoint, headers=headers)
+            provider.add_span_processor(BatchSpanProcessor(exporter))
+
+    setup_mlflow_tracing(settings)
 
     Agent.instrument_all(True)
 
