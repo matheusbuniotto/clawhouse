@@ -1,5 +1,7 @@
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -12,10 +14,11 @@ from clawhouse.capabilities.schedules import (
     calculate_next_run,
     parse_schedule_command,
     run_scheduled_turn,
+    schedule_worker,
 )
 from clawhouse.settings import Settings
 from clawhouse.store.shapes import ScheduleEntry, TurnResult
-from clawhouse.store.store import MemorySessionStore
+from clawhouse.store.store import LakebaseSessionStore, MemorySessionStore
 
 
 def test_parse_cron_syntax() -> None:
@@ -252,3 +255,220 @@ async def test_schedule_api_endpoints_and_chat_turn(tmp_path) -> None:
             json={"cron_expression": "*/5 * * * *", "prompt": "Check"},
         )
         assert bad_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_claim_due_schedules_uses_skip_locked() -> None:
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+    mock_pool = AsyncMock()
+    mock_pool.fetch = AsyncMock(
+        return_value=[
+            {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "session_id": "22222222-2222-4222-8222-222222222222",
+                "owner_id": "ada@example.com",
+                "cron_expression": "*/5 * * * *",
+                "prompt": "Check jobs",
+                "status": "active",
+                "next_run_at": now,
+                "created_at": now,
+                "last_run_at": None,
+                "last_status": None,
+                "last_error": None,
+            }
+        ]
+    )
+
+    store = LakebaseSessionStore(mock_pool)
+    result = await store.claim_due_schedules(now)
+
+    assert len(result) == 1
+    assert result[0].id == "11111111-1111-4111-8111-111111111111"
+    assert result[0].status == "active"
+
+    assert mock_pool.fetch.await_count == 1
+    sql = mock_pool.fetch.call_args[0][0]
+    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "ORDER BY next_run_at ASC" in sql
+    assert "WHERE status = 'active' AND next_run_at <= $1" in sql
+    assert mock_pool.fetch.call_args[0][1] == now
+
+
+@pytest.mark.asyncio
+async def test_run_scheduled_turn_success_advances_and_records_status() -> None:
+    store = MemorySessionStore()
+    session = await store.create_session("ada@example.com")
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+
+    schedule = ScheduleEntry(
+        id="sch-success",
+        session_id=session.id,
+        owner_id="ada@example.com",
+        cron_expression="*/15 * * * *",
+        prompt="Run health check",
+        status="active",
+        next_run_at=now,
+        created_at=now,
+    )
+    await store.create_schedule(schedule)
+
+    async def fake_run_turn(sess_id: str, prompt: str, ctx: TurnContext) -> TurnResult:
+        del sess_id, prompt, ctx
+        return TurnResult(
+            session_id=session.id,
+            status="ok",
+            reply="Healthy",
+            error=None,
+            transcript=(),
+        )
+
+    def fake_make_ctx(sch: ScheduleEntry) -> TurnContext:
+        return TurnContext(
+            owner_id=sch.owner_id,
+            store=store,
+            model=None,  # type: ignore[arg-type]
+            now=lambda: now,
+        )
+
+    result = await run_scheduled_turn(
+        schedule,
+        store=store,
+        run_turn_fn=fake_run_turn,
+        make_turn_ctx=fake_make_ctx,
+        now_fn=lambda: now,
+    )
+
+    assert result is not None
+    assert result.status == "ok"
+    assert result.reply == "Healthy"
+
+    schedules = await store.list_schedules("ada@example.com")
+    updated = schedules[0]
+    assert updated.last_run_at == now
+    assert updated.next_run_at == datetime(2026, 10, 12, 12, 15, tzinfo=UTC)
+    assert updated.last_status == "ok"
+    assert updated.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_run_scheduled_turn_error_advances_and_records_error() -> None:
+    store = MemorySessionStore()
+    session = await store.create_session("ada@example.com")
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+
+    schedule = ScheduleEntry(
+        id="sch-error",
+        session_id=session.id,
+        owner_id="ada@example.com",
+        cron_expression="*/20 * * * *",
+        prompt="Failing check",
+        status="active",
+        next_run_at=now,
+        created_at=now,
+    )
+    await store.create_schedule(schedule)
+
+    async def fake_run_turn(_sess_id: str, _prompt: str, _ctx: TurnContext) -> TurnResult:
+        raise RuntimeError("SQL Warehouse unavailable")
+
+    def fake_make_ctx(sch: ScheduleEntry) -> TurnContext:
+        return TurnContext(
+            owner_id=sch.owner_id,
+            store=store,
+            model=None,  # type: ignore[arg-type]
+            now=lambda: now,
+        )
+
+    with pytest.raises(RuntimeError, match="SQL Warehouse unavailable"):
+        await run_scheduled_turn(
+            schedule,
+            store=store,
+            run_turn_fn=fake_run_turn,
+            make_turn_ctx=fake_make_ctx,
+            now_fn=lambda: now,
+        )
+
+    schedules = await store.list_schedules("ada@example.com")
+    updated = schedules[0]
+    assert updated.last_run_at == now
+    assert updated.next_run_at == datetime(2026, 10, 12, 12, 20, tzinfo=UTC)
+    assert updated.last_status == "error"
+    assert updated.last_error == "SQL Warehouse unavailable"
+
+
+@pytest.mark.asyncio
+async def test_schedule_worker_continues_on_item_error() -> None:
+    store = MemorySessionStore()
+    session = await store.create_session("ada@example.com")
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+
+    sch1 = ScheduleEntry(
+        id="sch-failing",
+        session_id=session.id,
+        owner_id="ada@example.com",
+        cron_expression="*/10 * * * *",
+        prompt="Fail please",
+        status="active",
+        next_run_at=now,
+        created_at=now,
+    )
+    sch2 = ScheduleEntry(
+        id="sch-healthy",
+        session_id=session.id,
+        owner_id="ada@example.com",
+        cron_expression="*/30 * * * *",
+        prompt="Succeed please",
+        status="active",
+        next_run_at=now,
+        created_at=now,
+    )
+    await store.create_schedule(sch1)
+    await store.create_schedule(sch2)
+
+    executed: list[str] = []
+    stop_event = asyncio.Event()
+
+    async def fake_run_turn(sess_id: str, prompt: str, ctx: TurnContext) -> TurnResult:
+        del sess_id, ctx
+        executed.append(prompt)
+        if prompt == "Succeed please":
+            stop_event.set()
+        if prompt == "Fail please":
+            raise RuntimeError("something blew up")
+        return TurnResult(
+            session_id=session.id,
+            status="ok",
+            reply="Success",
+            error=None,
+            transcript=(),
+        )
+
+    def fake_make_ctx(sch: ScheduleEntry) -> TurnContext:
+        return TurnContext(
+            owner_id=sch.owner_id,
+            store=store,
+            model=None,  # type: ignore[arg-type]
+            now=lambda: now,
+        )
+
+    await asyncio.wait_for(
+        schedule_worker(
+            store,
+            fake_run_turn,
+            fake_make_ctx,
+            poll_interval_seconds=0.01,
+            stop_event=stop_event,
+        ),
+        timeout=2.0,
+    )
+
+    assert executed == ["Fail please", "Succeed please"]
+
+    schedules = {s.id: s for s in await store.list_schedules("ada@example.com")}
+    assert schedules["sch-failing"].last_status == "error"
+    assert schedules["sch-failing"].last_error == "something blew up"
+    assert schedules["sch-failing"].next_run_at > now
+
+    assert schedules["sch-healthy"].last_status == "ok"
+    assert schedules["sch-healthy"].last_error is None
+    assert schedules["sch-healthy"].next_run_at > now

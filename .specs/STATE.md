@@ -17,10 +17,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: runtime-telemetry
-**Where**: Complete - Verified PASS (14/14 checks proven)
-**In progress**: none
-**Next step**: Ready to commit verification report or select next feature
+**Feature**: scheduled-turns
+**Where**: Slices 1 and 2 built; all 10 checks (C1-C10) passing locally
+**In progress**: Verifier subagent dispatch
+**Next step**: Run independent verification and record verification.md
 **Blockers**: none
 **Uncommitted**: none
 **Branch**: main
