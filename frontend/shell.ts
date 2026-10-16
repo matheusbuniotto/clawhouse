@@ -35,6 +35,7 @@ const TITLES: Record<string, string> = {
   "/": "Clawhouse",
   "/chat": "Clawhouse",
   "/sessions": "Clawhouse · Sessions",
+  "/agents": "Clawhouse · Agents",
   "/new": "Clawhouse · New session",
   "/approvals": "Clawhouse · Approvals",
   "/status": "Clawhouse · Status",
@@ -45,6 +46,7 @@ const ROUTES: Record<string, () => Promise<ScreenModule>> = {
   "/": () => import("./chat.js"),
   "/chat": () => import("./chat.js"),
   "/sessions": () => import("./sessions.js"),
+  "/agents": () => import("./agents.js"),
   "/new": () => import("./new.js"),
   "/approvals": () => import("./approvals.js"),
   "/status": () => import("./status.js"),
@@ -92,8 +94,95 @@ export function mountShell(root: ParentNode = document): void {
   const expand = requireElement<HTMLButtonElement>(root, "#rail-expand");
   const newButton = requireElement<HTMLButtonElement>(root, "#rail-new");
   const handle = requireElement<HTMLElement>(root, "#rail-handle");
+  const agentMenuBtn = shell.querySelector<HTMLButtonElement>("#rail-agent-menu");
+
+  function closeAgentPopover(): void {
+    shell.querySelector("#rail-agent-popover")?.remove();
+    agentMenuBtn?.setAttribute("aria-expanded", "false");
+  }
+
+  async function toggleAgentPopover(): Promise<void> {
+    if (!agentMenuBtn) return;
+    const existing = shell.querySelector("#rail-agent-popover");
+    if (existing) {
+      closeAgentPopover();
+      return;
+    }
+    agentMenuBtn.setAttribute("aria-expanded", "true");
+    const popover = el("div", "rail-agent-popover");
+    popover.id = "rail-agent-popover";
+    popover.setAttribute("role", "menu");
+
+    const overviewItem = el("button", "rail-agent-popover-item", "Agents overview");
+    overviewItem.type = "button";
+    overviewItem.dataset.action = "overview";
+    overviewItem.addEventListener("click", () => {
+      closeAgentPopover();
+      navigate("/agents");
+    });
+
+    const newAgentItem = el("button", "rail-agent-popover-item", "+ New agent");
+    newAgentItem.type = "button";
+    newAgentItem.dataset.action = "new-agent";
+    newAgentItem.addEventListener("click", () => {
+      closeAgentPopover();
+      navigate("/agents?new=1");
+    });
+
+    popover.append(overviewItem, newAgentItem);
+    const head = shell.querySelector(".rail-head") ?? shell;
+    head.append(popover);
+
+    try {
+      const res = await fetch("/api/agents");
+      if (!res.ok) return;
+      const agents = (await res.json()) as {
+        name: string;
+        signature_emoji?: string;
+        is_platform?: boolean;
+      }[];
+      if (! popover.isConnected || agents.length === 0) return;
+      const divider = el("div", "rail-agent-popover-divider");
+      popover.append(divider);
+      for (const ag of agents) {
+        const emoji = ag.signature_emoji || (ag.is_platform ? "🦀" : "🤖");
+        const item = el("button", "rail-agent-popover-item", `${emoji} ${ag.name}`);
+        item.type = "button";
+        item.dataset.agent = ag.name;
+        item.addEventListener("click", async () => {
+          const label = agentMenuBtn.querySelector(".rail-agent-trigger-label");
+          if (label) label.textContent = `${emoji} ${ag.name}`;
+          closeAgentPopover();
+          try {
+            const sRes = await fetch("/api/sessions", { method: "POST" });
+            if (sRes.ok) {
+              const sBody = (await sRes.json()) as { id: string };
+              const target =
+                ag.name === "main"
+                  ? `/chat?session=${sBody.id}`
+                  : `/chat?session=${sBody.id}&agent=${encodeURIComponent(ag.name)}`;
+              navigate(target);
+              return;
+            }
+          } catch {
+            // fallback to /agents
+          }
+          navigate("/agents");
+        });
+        popover.append(item);
+      }
+    } catch {
+      // keep overview & new agent items available
+    }
+  }
+
+  agentMenuBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void toggleAgentPopover();
+  });
 
   function navigate(href: string, options: { replace?: boolean } = {}): void {
+    closeAgentPopover();
     const url = new URL(href, location.href);
     const target = `${url.pathname}${url.search}`;
     if (options.replace) history.replaceState(null, "", target);
@@ -118,6 +207,13 @@ export function mountShell(root: ParentNode = document): void {
   }
 
   function updateActive(path: string, url: URL): void {
+    const activeAgent = url.searchParams.get("agent");
+    const badgeLabel = agentMenuBtn?.querySelector(".rail-agent-trigger-label");
+    if (badgeLabel && activeAgent) {
+      badgeLabel.textContent = `🤖 ${activeAgent}`;
+    } else if (badgeLabel && !activeAgent) {
+      badgeLabel.textContent = "🦀 main";
+    }
     for (const link of shell.querySelectorAll<HTMLAnchorElement>(
       ".rail-nav a[data-nav]",
     )) {

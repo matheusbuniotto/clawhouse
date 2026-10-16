@@ -685,3 +685,286 @@
   background: var(--bg-hover);
   border-color: var(--border-hover);
 }
+
+/* Agents (/agents) — overview grid, agent cards, and create/manage modals. */
+.agents-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.agents-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.agents-heading {
+  margin: 0 0 4px;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.agents-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.agents-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-open-chat,
+.btn-retry-agents {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-primary {
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-secondary,
+.btn-open-chat,
+.btn-retry-agents {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-strong);
+}
+
+.btn-secondary:hover,
+.btn-open-chat:hover,
+.btn-retry-agents:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.agent-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-card-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-size: var(--font-size-lg);
+}
+
+.agent-card-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-card-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.agent-card-model {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.agent-card-status {
+  margin: 4px 0 0;
+  color: var(--ok);
+  font-size: var(--font-size-xs);
+}
+
+.agent-card-activity {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.agent-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.agents-loading,
+.agents-error {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg-accent);
+  z-index: 50;
+}
+
+.modal-dialog {
+  width: 100%;
+  max-width: 480px;
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--text-strong);
+}
+
+.modal-close {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-role-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-presets-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.role-presets-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn-role-preset {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.btn-role-preset:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text-strong);
+}
+
+.modal-status {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-size-sm);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.manage-agents-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.manage-agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.manage-agent-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-protected-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.manage-agents-link {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+}

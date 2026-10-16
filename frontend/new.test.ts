@@ -15,7 +15,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-test("renders custom agents list and deletes agent by ID", async () => {
+test("links to /agents instead of rendering inline agent creation or deletion forms", async () => {
   const agents = [
     {
       id: "platform-main",
@@ -23,6 +23,7 @@ test("renders custom agents list and deletes agent by ID", async () => {
       description: "Platform agent",
       system_prompt: "",
       is_platform: true,
+      signature_emoji: "🦀",
     },
     {
       id: "agent-123",
@@ -30,85 +31,21 @@ test("renders custom agents list and deletes agent by ID", async () => {
       description: "Data Analyst",
       system_prompt: "Analyst prompt",
       is_platform: false,
+      signature_emoji: "📊",
     },
   ];
 
-  const fetchCalls: { url: string; method?: string }[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    fetchCalls.push({ url, method: init?.method ?? "GET" });
-    if (url === "/api/agents" && (!init || init.method === "GET")) {
-      return jsonResponse(agents);
-    }
-    if (url === "/api/agents/agent-123" && init?.method === "DELETE") {
-      return { ok: true, status: 204 } as Response;
-    }
-    return jsonResponse({});
-  });
+  vi.stubGlobal("fetch", async () => jsonResponse(agents));
 
   await import("./new").then((module) => module.mount(document.body, context()));
-  await vi.waitFor(() => expect(document.querySelector(".agent-name")).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelectorAll(".agent-card").length).toBe(2));
 
-  expect(document.querySelector(".agent-name")?.textContent).toBe("@analyst");
-  expect(document.querySelector(".agent-desc")?.textContent).toBe("Data Analyst");
+  expect(document.querySelector("#start")).not.toBeNull();
+  expect(document.querySelector(".create-agent-form")).toBeNull();
+  expect(document.querySelector(".custom-agents-list")).toBeNull();
 
-  // Click delete button
-  const delBtn = document.querySelector(".btn-delete-agent") as HTMLButtonElement;
-  delBtn.click();
-
-  await vi.waitFor(() => {
-    const deleteCall = fetchCalls.find(
-      (c) => c.url === "/api/agents/agent-123" && c.method === "DELETE"
-    );
-    expect(deleteCall).toBeDefined();
-  });
-});
-
-test("creates a new custom agent and refreshes list", async () => {
-  let created = false;
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url === "/api/agents" && (!init || init.method === "GET")) {
-      if (created) {
-        return jsonResponse([
-          {
-            id: "agent-created",
-            name: "writer",
-            description: "Writer agent",
-            system_prompt: "Write docs",
-            is_platform: false,
-          },
-        ]);
-      }
-      return jsonResponse([]);
-    }
-    if (url === "/api/agents" && init?.method === "POST") {
-      created = true;
-      return jsonResponse({
-        id: "agent-created",
-        name: "writer",
-        description: "Writer agent",
-        system_prompt: "Write docs",
-        is_platform: false,
-      });
-    }
-    return jsonResponse({});
-  });
-
-  await import("./new").then((module) => module.mount(document.body, context()));
-  await vi.waitFor(() => expect(document.querySelector(".empty-agents")).not.toBeNull());
-
-  const form = document.querySelector(".create-agent-form") as HTMLFormElement;
-  const inputs = form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
-  // inputs: [nameInput, emojiInput, descInput, promptArea, soulArea, contextArea]
-  inputs[0].value = "writer";
-  inputs[1].value = "✍️";
-  inputs[2].value = "Writer agent";
-  inputs[3].value = "Write docs";
-
-  form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
-
-  await vi.waitFor(() => expect(document.querySelector(".agent-name")?.textContent).toBe("@writer"));
+  const manageLink = document.querySelector('a[href="/agents"][data-nav]') as HTMLAnchorElement;
+  expect(manageLink).not.toBeNull();
 });
 
 test("renders agent picker cards and selects agent", async () => {

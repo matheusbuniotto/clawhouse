@@ -7,6 +7,7 @@ const TITLES = {
     "/": "Clawhouse",
     "/chat": "Clawhouse",
     "/sessions": "Clawhouse · Sessions",
+    "/agents": "Clawhouse · Agents",
     "/new": "Clawhouse · New session",
     "/approvals": "Clawhouse · Approvals",
     "/status": "Clawhouse · Status",
@@ -16,6 +17,7 @@ const ROUTES = {
     "/": () => import("./chat.js"),
     "/chat": () => import("./chat.js"),
     "/sessions": () => import("./sessions.js"),
+    "/agents": () => import("./agents.js"),
     "/new": () => import("./new.js"),
     "/approvals": () => import("./approvals.js"),
     "/status": () => import("./status.js"),
@@ -59,7 +61,88 @@ export function mountShell(root = document) {
     const expand = requireElement(root, "#rail-expand");
     const newButton = requireElement(root, "#rail-new");
     const handle = requireElement(root, "#rail-handle");
+    const agentMenuBtn = shell.querySelector("#rail-agent-menu");
+    function closeAgentPopover() {
+        shell.querySelector("#rail-agent-popover")?.remove();
+        agentMenuBtn?.setAttribute("aria-expanded", "false");
+    }
+    async function toggleAgentPopover() {
+        if (!agentMenuBtn)
+            return;
+        const existing = shell.querySelector("#rail-agent-popover");
+        if (existing) {
+            closeAgentPopover();
+            return;
+        }
+        agentMenuBtn.setAttribute("aria-expanded", "true");
+        const popover = el("div", "rail-agent-popover");
+        popover.id = "rail-agent-popover";
+        popover.setAttribute("role", "menu");
+        const overviewItem = el("button", "rail-agent-popover-item", "Agents overview");
+        overviewItem.type = "button";
+        overviewItem.dataset.action = "overview";
+        overviewItem.addEventListener("click", () => {
+            closeAgentPopover();
+            navigate("/agents");
+        });
+        const newAgentItem = el("button", "rail-agent-popover-item", "+ New agent");
+        newAgentItem.type = "button";
+        newAgentItem.dataset.action = "new-agent";
+        newAgentItem.addEventListener("click", () => {
+            closeAgentPopover();
+            navigate("/agents?new=1");
+        });
+        popover.append(overviewItem, newAgentItem);
+        const head = shell.querySelector(".rail-head") ?? shell;
+        head.append(popover);
+        try {
+            const res = await fetch("/api/agents");
+            if (!res.ok)
+                return;
+            const agents = (await res.json());
+            if (!popover.isConnected || agents.length === 0)
+                return;
+            const divider = el("div", "rail-agent-popover-divider");
+            popover.append(divider);
+            for (const ag of agents) {
+                const emoji = ag.signature_emoji || (ag.is_platform ? "🦀" : "🤖");
+                const item = el("button", "rail-agent-popover-item", `${emoji} ${ag.name}`);
+                item.type = "button";
+                item.dataset.agent = ag.name;
+                item.addEventListener("click", async () => {
+                    const label = agentMenuBtn.querySelector(".rail-agent-trigger-label");
+                    if (label)
+                        label.textContent = `${emoji} ${ag.name}`;
+                    closeAgentPopover();
+                    try {
+                        const sRes = await fetch("/api/sessions", { method: "POST" });
+                        if (sRes.ok) {
+                            const sBody = (await sRes.json());
+                            const target = ag.name === "main"
+                                ? `/chat?session=${sBody.id}`
+                                : `/chat?session=${sBody.id}&agent=${encodeURIComponent(ag.name)}`;
+                            navigate(target);
+                            return;
+                        }
+                    }
+                    catch {
+                        // fallback to /agents
+                    }
+                    navigate("/agents");
+                });
+                popover.append(item);
+            }
+        }
+        catch {
+            // keep overview & new agent items available
+        }
+    }
+    agentMenuBtn?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void toggleAgentPopover();
+    });
     function navigate(href, options = {}) {
+        closeAgentPopover();
         const url = new URL(href, location.href);
         const target = `${url.pathname}${url.search}`;
         if (options.replace)
@@ -84,6 +167,14 @@ export function mountShell(root = document) {
         updateActive(path, url);
     }
     function updateActive(path, url) {
+        const activeAgent = url.searchParams.get("agent");
+        const badgeLabel = agentMenuBtn?.querySelector(".rail-agent-trigger-label");
+        if (badgeLabel && activeAgent) {
+            badgeLabel.textContent = `🤖 ${activeAgent}`;
+        }
+        else if (badgeLabel && !activeAgent) {
+            badgeLabel.textContent = "🦀 main";
+        }
         for (const link of shell.querySelectorAll(".rail-nav a[data-nav]")) {
             const href = link.getAttribute("href")?.split("?")[0];
             if (href === path || (path === "/" && href === "/chat")) {

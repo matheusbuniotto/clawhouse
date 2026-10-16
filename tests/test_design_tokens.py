@@ -19,7 +19,7 @@ HEADERS = {
     "x-forwarded-access-token": "tok_" + "ada",
 }
 
-PAGES = ("/chat", "/sessions", "/new", "/approvals", "/status", "/jobs")
+PAGES = ("/chat", "/sessions", "/agents", "/new", "/approvals", "/status", "/jobs")
 SHEETS = ("/tokens.css", "/shell.css", "/transcript.css", "/screens.css")
 COMPONENT_SHEETS = ("/shell.css", "/transcript.css", "/screens.css")
 

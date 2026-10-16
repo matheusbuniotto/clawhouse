@@ -15,7 +15,7 @@ from clawhouse.store.store import MemorySessionStore
 
 OWNER = "ada@example.com"
 HEADERS = {"x-forwarded-email": OWNER, "x-forwarded-access-token": "tok_" + "ada"}
-PAGES = ("/chat", "/sessions", "/new", "/approvals", "/status", "/jobs")
+PAGES = ("/chat", "/sessions", "/agents", "/new", "/approvals", "/status", "/jobs")
 
 
 def _reply(text: str):
@@ -58,6 +58,8 @@ async def test_every_route_serves_the_same_shell_document() -> None:
         documents = [await _page(client, path) for path in PAGES]
 
     assert len(set(documents)) == 1
+    assert '<a class="rail-link" id="nav-agents" data-nav href="/agents">Agents</a>' in documents[0]
+    assert 'id="rail-agent-menu"' in documents[0]
 
 
 async def test_assets_ask_the_browser_to_revalidate() -> None:

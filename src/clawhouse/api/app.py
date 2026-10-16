@@ -59,6 +59,7 @@ from clawhouse.capabilities.schedules import (
     schedule_worker,
 )
 from clawhouse.capabilities.workspace import (
+    UnsafeAgentName,
     provision_agent_workspace,
     resolve_agent_workspace,
 )
@@ -82,6 +83,7 @@ from clawhouse.store.store import (
     SessionForbidden,
     SessionNotFound,
     SessionStore,
+    agent_activities,
     open_store,
 )
 
@@ -146,6 +148,9 @@ class CustomAgentOut(BaseModel):
     system_prompt: str
     signature_emoji: str
     is_platform: bool = False
+    model: str = "databricks"
+    last_active_at: str | None = None
+    last_activity: str = ""
 
 
 class ScheduleIn(BaseModel):
@@ -356,6 +361,7 @@ def _page_routes(app: FastAPI) -> None:
     @app.get("/")
     @app.get("/chat")
     @app.get("/sessions")
+    @app.get("/agents")
     @app.get("/new")
     @app.get("/approvals")
     @app.get("/status")
@@ -428,6 +434,10 @@ def _core_script_routes(app: FastAPI) -> None:
 
 
 def _screen_script_routes(app: FastAPI) -> None:
+    @app.get("/agents.js")
+    async def agents_page_script() -> FileResponse:
+        return FileResponse(STATIC / "agents.js", media_type="text/javascript")
+
     @app.get("/jobspage.js")
     async def jobs_page_script() -> FileResponse:
         return FileResponse(STATIC / "jobspage.js", media_type="text/javascript")
@@ -785,85 +795,147 @@ def _status_routes(app: FastAPI) -> None:
         )
 
 
+def _default_model_label(settings: Settings) -> str:
+    for entry in settings.models:
+        if entry.is_default:
+            return entry.model or entry.id
+    if settings.models:
+        return settings.models[0].model or settings.models[0].id
+    return settings.serving_endpoint or "databricks"
+
+
+def _truncate_activity(text: str, limit: int = 120) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
+
+
+def _agent_out_item(
+    *,
+    agent: CustomAgent,
+    is_platform: bool,
+    model_name: str,
+    activity: tuple[datetime, str] | None,
+    fallback_activity: str,
+) -> CustomAgentOut:
+    last_active_at = activity[0].isoformat() if activity else None
+    last_activity = _truncate_activity(activity[1]) if activity else fallback_activity
+    return CustomAgentOut(
+        id=agent.id,
+        owner_id=agent.owner_id,
+        name=agent.name,
+        description=agent.description,
+        system_prompt=agent.system_prompt,
+        signature_emoji=agent.signature_emoji,
+        is_platform=is_platform,
+        model=model_name,
+        last_active_at=last_active_at,
+        last_activity=last_activity,
+    )
+
+
+async def _list_agents(app: FastAPI, caller: Caller) -> list[CustomAgentOut]:
+    settings: Settings = app.state.settings
+    store: SessionStore = app.state.store
+    model_name = _default_model_label(settings)
+    activities = await agent_activities(store, caller.user_id)
+    main_agent = CustomAgent(
+        id="platform-main",
+        owner_id="platform",
+        name="main",
+        description="Clawhouse platform agent",
+        system_prompt="",
+        signature_emoji="🦀",
+    )
+    agents: list[CustomAgentOut] = [
+        _agent_out_item(
+            agent=main_agent,
+            is_platform=True,
+            model_name=model_name,
+            activity=activities.get("main"),
+            fallback_activity="Heartbeat & platform operations",
+        )
+    ]
+    custom = await store.list_custom_agents(caller.user_id)
+    for c in custom:
+        agents.append(
+            _agent_out_item(
+                agent=c,
+                is_platform=False,
+                model_name=model_name,
+                activity=activities.get(c.name),
+                fallback_activity=c.description,
+            )
+        )
+    return agents
+
+
+async def _create_agent(app: FastAPI, payload: CustomAgentIn, caller: Caller) -> CustomAgentOut:
+    settings: Settings = app.state.settings
+    name = payload.name.strip()
+    if name == AGENT_NAME:
+        raise HTTPException(status_code=422, detail="Agent name 'main' is reserved.")
+    try:
+        resolve_agent_workspace(settings.agent_root, name)
+    except UnsafeAgentName as exc:
+        raise HTTPException(status_code=422, detail="Invalid agent name.") from exc
+    custom = CustomAgent(
+        id=str(uuid4()),
+        owner_id=caller.user_id,
+        name=name,
+        description=payload.description,
+        system_prompt=payload.system_prompt,
+        signature_emoji=payload.signature_emoji,
+    )
+    saved = await app.state.store.create_custom_agent(custom)
+    provision_agent_workspace(
+        root=settings.agent_root,
+        agent_name=saved.name,
+        agents_text=saved.system_prompt,
+        identity_name=saved.name,
+        signature_emoji=saved.signature_emoji,
+        soul_text=payload.soul,
+        context_text=payload.context,
+    )
+    return _agent_out_item(
+        agent=saved,
+        is_platform=False,
+        model_name=_default_model_label(settings),
+        activity=None,
+        fallback_activity=saved.description,
+    )
+
+
+async def _delete_agent(app: FastAPI, agent_id: str, caller: Caller) -> Response:
+    agents = await app.state.store.list_custom_agents(caller.user_id)
+    matching = next((a for a in agents if a.id == agent_id), None)
+    deleted = await app.state.store.delete_custom_agent(agent_id, caller.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if matching:
+        settings: Settings = app.state.settings
+        with suppress(OSError):
+            paths = resolve_agent_workspace(settings.agent_root, matching.name)
+            if paths.directory.exists():
+                shutil.rmtree(paths.directory)
+    return Response(status_code=204)
+
+
 def _agent_routes(app: FastAPI) -> None:
     @app.get("/api/agents", response_model=list[CustomAgentOut])
     async def list_agents(caller: Caller = _require_caller) -> list[CustomAgentOut]:
-        agents: list[CustomAgentOut] = [
-            CustomAgentOut(
-                id="platform-main",
-                owner_id="platform",
-                name="main",
-                description="Clawhouse platform agent",
-                system_prompt="",
-                signature_emoji="🦀",
-                is_platform=True,
-            )
-        ]
-        custom = await app.state.store.list_custom_agents(caller.user_id)
-        for c in custom:
-            agents.append(
-                CustomAgentOut(
-                    id=c.id,
-                    owner_id=c.owner_id,
-                    name=c.name,
-                    description=c.description,
-                    system_prompt=c.system_prompt,
-                    signature_emoji=c.signature_emoji,
-                    is_platform=False,
-                )
-            )
-        return agents
+        return await _list_agents(app, caller)
 
     @app.post("/api/agents", status_code=201, response_model=CustomAgentOut)
     async def create_agent(
         payload: CustomAgentIn, caller: Caller = _require_caller
     ) -> CustomAgentOut:
-        agent_id = str(uuid4())
-        custom = CustomAgent(
-            id=agent_id,
-            owner_id=caller.user_id,
-            name=payload.name,
-            description=payload.description,
-            system_prompt=payload.system_prompt,
-            signature_emoji=payload.signature_emoji,
-        )
-        saved = await app.state.store.create_custom_agent(custom)
-        settings: Settings = app.state.settings
-        provision_agent_workspace(
-            root=settings.agent_root,
-            agent_name=saved.name,
-            agents_text=saved.system_prompt,
-            identity_name=saved.name,
-            signature_emoji=saved.signature_emoji,
-            soul_text=payload.soul,
-            context_text=payload.context,
-        )
-        return CustomAgentOut(
-            id=saved.id,
-            owner_id=saved.owner_id,
-            name=saved.name,
-            description=saved.description,
-            system_prompt=saved.system_prompt,
-            signature_emoji=saved.signature_emoji,
-            is_platform=False,
-        )
+        return await _create_agent(app, payload, caller)
 
     @app.delete("/api/agents/{agent_id}", status_code=204)
     async def delete_agent(agent_id: str, caller: Caller = _require_caller) -> Response:
-        agents = await app.state.store.list_custom_agents(caller.user_id)
-        matching = next((a for a in agents if a.id == agent_id), None)
-        deleted = await app.state.store.delete_custom_agent(agent_id, caller.user_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        if matching:
-            settings: Settings = app.state.settings
-            try:
-                paths = resolve_agent_workspace(settings.agent_root, matching.name)
-                if paths.directory.exists():
-                    shutil.rmtree(paths.directory)
-            except OSError:
-                pass
-        return Response(status_code=204)
+        return await _delete_agent(app, agent_id, caller)
 
 
 def _schedule_routes(app: FastAPI) -> None:
