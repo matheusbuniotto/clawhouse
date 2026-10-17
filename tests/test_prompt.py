@@ -2,14 +2,16 @@
 
 from pathlib import Path
 
-import pytest
-
 from clawhouse.agent.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
 from clawhouse.capabilities.bootstrap import BootstrapContext, BootstrapFile
 from clawhouse.capabilities.workspace import resolve_agent_workspace
 
 SESSION_A = "11111111-1111-4111-8111-111111111111"
 SESSION_B = "22222222-2222-4222-8222-222222222222"
+
+EXPECTED_PREFIX_NO_TOOLS = """\
+# Identity
+You are Clawhouse, the platform agent main."""
 
 EXPECTED_PREFIX = """\
 # Identity
@@ -20,19 +22,34 @@ You are Clawhouse, the platform agent main.
 
 
 def test_prefix_ignores_the_session_and_suffix_names_it() -> None:
-    first = build_system_prompt(tools=(CLOCK,), runtime=RuntimeMeta(session_id=SESSION_A))
-    second = build_system_prompt(tools=(CLOCK,), runtime=RuntimeMeta(session_id=SESSION_B))
+    first = build_system_prompt(runtime=RuntimeMeta(session_id=SESSION_A))
+    second = build_system_prompt(runtime=RuntimeMeta(session_id=SESSION_B))
 
-    assert first.prefix == EXPECTED_PREFIX
-    assert second.prefix == EXPECTED_PREFIX
+    assert first.prefix == EXPECTED_PREFIX_NO_TOOLS
+    assert second.prefix == EXPECTED_PREFIX_NO_TOOLS
     assert first.suffix == f"# Runtime\nsession_id: {SESSION_A}"
     assert second.suffix == f"# Runtime\nsession_id: {SESSION_B}"
-    assert first.text == f"{EXPECTED_PREFIX}\n\n{first.suffix}"
+    assert first.text == f"{EXPECTED_PREFIX_NO_TOOLS}\n\n{first.suffix}"
 
 
-def test_agent_without_a_tool_is_rejected() -> None:
-    with pytest.raises(ValueError, match="at least one tool"):
-        build_system_prompt(tools=(), runtime=RuntimeMeta(session_id=SESSION_A))
+def test_build_system_prompt_omits_tools_when_none_provided() -> None:
+    prompt_default = build_system_prompt(runtime=RuntimeMeta(session_id=SESSION_A))
+    assert prompt_default.prefix == EXPECTED_PREFIX_NO_TOOLS
+    assert "# Tools" not in prompt_default.text
+
+    prompt_empty = build_system_prompt(tools=(), runtime=RuntimeMeta(session_id=SESSION_A))
+    assert prompt_empty.prefix == EXPECTED_PREFIX_NO_TOOLS
+    assert "# Tools" not in prompt_empty.text
+
+
+def test_manual_tool_card_constants_are_removed() -> None:
+    import clawhouse.agent.turn as turn_mod
+    import clawhouse.capabilities.sheets as sheets_mod
+
+    assert not hasattr(turn_mod, "DATABRICKS_TOOL_CARDS")
+    assert not hasattr(turn_mod, "SAVE_PROFILE_TOOL_CARD")
+    assert not hasattr(turn_mod, "CREATE_AGENT_TOOL_CARD")
+    assert not hasattr(sheets_mod, "GOOGLE_SHEETS_TOOL_CARDS")
 
 
 def test_sections_follow_fixed_order_and_the_prefix_ignores_the_session(

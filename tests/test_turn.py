@@ -33,6 +33,7 @@ from clawhouse.agent.turn import (
     UsageNotice,
     _capabilities_for_turn,  # pyright: ignore[reportPrivateUsage]
     _Claimed,  # pyright: ignore[reportPrivateUsage]
+    _prompt_for,  # pyright: ignore[reportPrivateUsage]
     run_turn,
 )
 from clawhouse.capabilities.databricks import DatabricksCapability
@@ -665,11 +666,11 @@ class _StubServerToolset(AbstractToolset[object]):
 
 
 async def test_turn_includes_mcp_tools_in_prompt_ordered_deterministically() -> None:
-    seen_instructions: list[str] = []
+    seen_tools: list[list[str]] = []
 
     async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
         del messages
-        seen_instructions.append(info.instructions or "")
+        seen_tools.append([t.name for t in info.function_tools])
         yield "ok"
 
     servers = (
@@ -696,23 +697,18 @@ async def test_turn_includes_mcp_tools_in_prompt_ordered_deterministically() -> 
 
     result = await run_turn(SESSION, "hello", ctx=ctx)
     assert result.status == "ok"
-    assert len(seen_instructions) == 1
-    prompt = seen_instructions[0]
-
-    billing_pos = prompt.find("- billing__get_balance: Get billing balance")
-    uc_pos = prompt.find("- system_ai__describe_table: Describe columns of a Unity Catalog table")
-    assert billing_pos != -1
-    assert uc_pos != -1
-    # billing alphabetically precedes system_ai
-    assert billing_pos < uc_pos
+    assert len(seen_tools) == 1
+    tools = seen_tools[0]
+    assert "billing__get_balance" in tools
+    assert "system_ai__describe_table" in tools
 
 
 async def test_turn_survives_when_mcp_server_tools_list_fails() -> None:
-    seen_instructions: list[str] = []
+    seen_tool_names: list[list[str]] = []
 
     async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
         del messages
-        seen_instructions.append(info.instructions or "")
+        seen_tool_names.append([t.name for t in info.function_tools])
         yield "survived"
 
     servers = (
@@ -738,9 +734,10 @@ async def test_turn_survives_when_mcp_server_tools_list_fails() -> None:
     result = await run_turn(SESSION, "hello", ctx=ctx)
     assert result.status == "ok"
     assert result.reply == "survived"
-    prompt = seen_instructions[0]
-    assert "- system_ai__describe_table:" in prompt
-    assert "fail__" not in prompt
+    assert len(seen_tool_names) == 1
+    tools = seen_tool_names[0]
+    assert "system_ai__describe_table" in tools
+    assert not any(t.startswith("fail__") for t in tools)
 
 
 async def test_turn_demo_agent_answers_unity_catalog_question_through_mcp_tool() -> None:
@@ -852,11 +849,11 @@ async def test_error_path_scrubs_token_from_transcript_and_notices() -> None:
 
 
 async def test_turn_colliding_mcp_tool_names_produce_same_suffixed_names_across_turns() -> None:
-    seen_prompts: list[str] = []
+    seen_tools: list[list[str]] = []
 
     async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
         del messages
-        seen_prompts.append(info.instructions or "")
+        seen_tools.append([f"{t.name}: {t.description}" for t in info.function_tools])
         yield "ok"
 
     servers = (
@@ -880,17 +877,17 @@ async def test_turn_colliding_mcp_tool_names_produce_same_suffixed_names_across_
 
     res1 = await run_turn(SESSION, "turn 1", ctx=ctx)
     assert res1.status == "ok"
-    assert len(seen_prompts) == 1
-    prompt1 = seen_prompts[0]
-    assert "- system_ai__query: First query" in prompt1
-    assert "- system_ai__query_1: Second query" in prompt1
+    assert len(seen_tools) == 1
+    tools1 = seen_tools[0]
+    assert "system_ai__query: First query" in tools1
+    assert "system_ai__query_1: Second query" in tools1
 
     res2 = await run_turn(SESSION, "turn 2", ctx=ctx)
     assert res2.status == "ok"
-    assert len(seen_prompts) == 2
-    prompt2 = seen_prompts[1]
-    assert "- system_ai__query: First query" in prompt2
-    assert "- system_ai__query_1: Second query" in prompt2
+    assert len(seen_tools) == 2
+    tools2 = seen_tools[1]
+    assert "system_ai__query: First query" in tools2
+    assert "system_ai__query_1: Second query" in tools2
 
 
 async def test_turn_fails_when_duplicate_mcp_server_names_configured() -> None:
@@ -1278,3 +1275,17 @@ async def test_concurrent_turns_use_distinct_user_tokens() -> None:
     assert shared_cap.user_token == ""
     assert clients_seen["user_a"] == ["token-a"]
     assert clients_seen["user_b"] == ["token-b"]
+
+
+def test_prompt_for_omits_tool_cards() -> None:
+    store = MemorySessionStore()
+    ctx = _ctx(store, FunctionModel(stream_function=_reply("ok")))
+    ctx = replace(ctx, databricks_capability=DatabricksCapability(user_token=""))
+    claimed = _Claimed(session_id=SESSION, user_message="hello", run_id="r1", ctx=ctx)
+    prompt = _prompt_for(claimed, None)
+
+    assert "# Tools" not in prompt.prefix
+    assert "dbsql_query" not in prompt.prefix
+    assert "clock" not in prompt.prefix
+    assert "create_google_sheet" not in prompt.prefix
+    assert "create_agent" not in prompt.prefix
