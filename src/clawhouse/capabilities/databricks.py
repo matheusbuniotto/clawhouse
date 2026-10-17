@@ -30,11 +30,8 @@ from databricks.sdk.service.jobs import (
 )
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 from databricks.sdk.service.workspace import ImportFormat
-from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.tools import ToolDefinition
-from pydantic_ai.toolsets import AbstractToolset, AgentToolset, FunctionToolset
-from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
+from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 if TYPE_CHECKING:
     from clawhouse.settings import Settings
@@ -114,19 +111,8 @@ _MUTATING_KEYWORDS = {
     "vacuum",
 }
 _READONLY_KEYWORDS = {"select", "show", "describe", "desc", "explain"}
-# Lakeflow tools that change workspace state; each one waits for human approval.
 _JOBS_PAGE_MAX = 100  # the Jobs API rejects a page limit above 100
 _TASK_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
-_APPROVAL_REQUIRED_TOOLS = frozenset(
-    {
-        "jobs_run_now",
-        "jobs_cancel_run",
-        "jobs_create",
-        "jobs_edit",
-        "jobs_delete",
-        "delivery_send_webhook",
-    }
-)
 
 
 def strip_sql_comments(sql: str) -> str:
@@ -1056,16 +1042,3 @@ class DatabricksCapability(AbstractCapability[Any]):
             except Exception as inner_exc:  # noqa: BLE001
                 logger.warning("DatabricksCapability ambient fallback also failed: %s", inner_exc)
                 return None
-
-    def get_wrapper_toolset(self, toolset: AbstractToolset[Any]) -> AbstractToolset[Any]:
-        def approval_required(
-            _ctx: RunContext[Any],
-            tool_def: ToolDefinition,
-            args: dict[str, Any],
-        ) -> bool:
-            if tool_def.name == "dbsql_query":
-                sql = str(args.get("query", ""))
-                return not is_readonly_query(sql)
-            return tool_def.name in _APPROVAL_REQUIRED_TOOLS
-
-        return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)

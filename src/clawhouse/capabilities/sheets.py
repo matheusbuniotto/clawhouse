@@ -18,11 +18,8 @@ import anyio
 import requests
 from databricks.sdk import WorkspaceClient
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.tools import ToolDefinition
-from pydantic_ai.toolsets import AbstractToolset, FunctionToolset
-from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
+from pydantic_ai.toolsets import FunctionToolset
 
 logger = logging.getLogger("clawhouse.sheets")
 
@@ -460,13 +457,3 @@ class GoogleSheetsCapability(AbstractCapability[Any]):
 
     def get_toolset(self) -> FunctionToolset[Any]:
         return sheets_toolset(self.user_token, host=self.host)
-
-    def get_wrapper_toolset(self, toolset: AbstractToolset[Any]) -> AbstractToolset[Any]:
-        def approval_required(
-            _ctx: RunContext[Any],
-            tool_def: ToolDefinition,
-            _args: dict[str, Any],
-        ) -> bool:
-            return tool_def.name in WRITE_TOOLS
-
-        return ApprovalRequiredToolset(toolset, approval_required_func=approval_required)

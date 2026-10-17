@@ -2,6 +2,7 @@ import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,13 +11,23 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
+from pydantic_ai_harness.guardrails import GuardrailResult, ToolCallInfo
 from pydantic_core import SchemaValidator, core_schema
 
 from clawhouse.agent.model import MissingAccessToken
-from clawhouse.agent.turn import ApprovalNotice, TurnContext, resume_turn, run_turn
+from clawhouse.agent.turn import (
+    DEFAULT_APPROVAL_REQUIRED_TOOLS,
+    ApprovalNotice,
+    TurnContext,
+    resume_turn,
+    run_turn,
+    sensitive_tool_guard,
+)
 from clawhouse.api.app import create_app
 from clawhouse.api.identity import Caller
+from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.mcp import MCPServerConfig
+from clawhouse.capabilities.sheets import GoogleSheetsCapability
 from clawhouse.capabilities.workspace import resolve_agent_workspace
 from clawhouse.settings import Settings, sensitive_tools_from_env
 from clawhouse.store.shapes import TranscriptEntry
@@ -630,3 +641,131 @@ async def test_sensitive_skill_load_pauses_through_the_shared_hook(tmp_path: Pat
     pending = await store.list_approvals(OWNER)
     assert [(row.tool_name, row.status) for row in pending] == [("load_capability", "pending")]
     assert [entry.role for entry in result.transcript] == ["user", "tool_call"]
+
+
+def test_default_approval_required_tools_contents() -> None:
+    expected = {
+        "jobs_run_now",
+        "jobs_cancel_run",
+        "jobs_create",
+        "jobs_edit",
+        "jobs_delete",
+        "delivery_send_webhook",
+        "create_google_sheet",
+        "update_google_sheet",
+    }
+    assert expected == DEFAULT_APPROVAL_REQUIRED_TOOLS
+
+
+def test_capabilities_do_not_have_wrapper_toolset() -> None:
+    assert "get_wrapper_toolset" not in DatabricksCapability.__dict__
+    assert "get_wrapper_toolset" not in GoogleSheetsCapability.__dict__
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "jobs_run_now",
+        "jobs_cancel_run",
+        "jobs_create",
+        "jobs_edit",
+        "jobs_delete",
+        "delivery_send_webhook",
+        "create_google_sheet",
+        "update_google_sheet",
+        "dynamic_custom_tool",
+    ],
+)
+def test_sensitive_tool_guard_returns_approve_for_all_sensitive_tools(tool_name: str) -> None:
+    guardrail = sensitive_tool_guard(frozenset({"dynamic_custom_tool"}))
+    guard = guardrail.guard
+    assert guard is not None
+    call = ToolCallInfo(name=tool_name, args={}, tool_call_id="call-1")
+    assert guard(call) == GuardrailResult.approve()  # pyright: ignore[reportCallIssue]
+
+    safe_call = ToolCallInfo(name="clock", args={}, tool_call_id="call-2")
+    assert guard(safe_call) == GuardrailResult.allow()  # pyright: ignore[reportCallIssue]
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected_approve"),
+    [
+        ("SELECT * FROM table", False),
+        ("show tables in default", False),
+        ("DESCRIBE SCHEMA raw", False),
+        ("EXPLAIN SELECT 1", False),
+        ("DROP TABLE production.users", True),
+        ("DELETE FROM production.users WHERE id = 1", True),
+        ("UPDATE config SET value = 'x'", True),
+        ("INSERT INTO logs VALUES (1)", True),
+        ("CREATE TABLE test (id INT)", True),
+        ("TRUNCATE TABLE temp_data", True),
+    ],
+)
+def test_sensitive_tool_guard_dbsql_query_sql_safety(sql: str, expected_approve: bool) -> None:
+    guardrail = sensitive_tool_guard()
+    guard = guardrail.guard
+    assert guard is not None
+    call = ToolCallInfo(name="dbsql_query", args={"query": sql}, tool_call_id="call-sql")
+    expected = GuardrailResult.approve() if expected_approve else GuardrailResult.allow()
+    assert guard(call) == expected  # pyright: ignore[reportCallIssue]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "json_args"),
+    [
+        ("jobs_run_now", '{"job_id": 123}'),
+        ("jobs_cancel_run", '{"run_id": 456}'),
+        ("jobs_create", '{"name": "test-job"}'),
+        ("jobs_edit", '{"job_id": 123}'),
+        ("jobs_delete", '{"job_id": 123}'),
+        ("delivery_send_webhook", '{"url": "https://example.com/webhook", "payload": {}}'),
+        ("create_google_sheet", '{"sheet": {"title": "Test", "rows": [["col1"]]}}'),
+        (
+            "update_google_sheet",
+            (
+                '{"update": {"spreadsheet_id": "1234567890123456789012345", '
+                '"tab": "Sheet1", "first_column": "A", "first_row": 1, "rows": [["val"]]}}'
+            ),
+        ),
+        ("dbsql_query", '{"query": "DROP TABLE production.t"}'),
+    ],
+)
+async def test_each_sensitive_tool_pauses_turn_and_generates_pending_approval(
+    tool_name: str, json_args: str
+) -> None:
+    store = MemorySessionStore()
+    session = await store.create_session(OWNER)
+
+    async def call_tool(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del messages, info
+        yield {0: DeltaToolCall(name=tool_name, json_args=json_args, tool_call_id="c1")}
+
+    mock_client = MagicMock()
+    d_cap = DatabricksCapability(
+        client_factory=lambda _token: mock_client,
+        warehouse_id="warehouse-1",
+        user_token="test-token",
+    )
+
+    ctx = TurnContext(
+        owner_id=OWNER,
+        store=store,
+        model=FunctionModel(stream_function=call_tool),
+        now=lambda: NOW,
+        user_token="test-token",
+        databricks_capability=d_cap,
+    )
+
+    result = await run_turn(session.id, f"run {tool_name}", ctx=ctx)
+    assert result.status == "pending_approval"
+    assert result.approval_id is not None
+    assert result.reply == ""
+    assert result.error is None
+
+    approval = await store.get_approval(result.approval_id)
+    assert approval.status == "pending"
+    assert approval.tool_name == tool_name
+    assert await store.has_pending_approval(session.id) is True

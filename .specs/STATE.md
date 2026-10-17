@@ -17,10 +17,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: remove-tool-cards
+**Feature**: unify-approvals
 **Where**: S1 planned and checks validated
-**In progress**: Building S1 (Sub-issue 4 of Epic #77, #81)
-**Next step**: Implement prompt.py, turn.py, sheets.py changes and tests
+**In progress**: Building S1 (Sub-issue 5 of Epic #77, #82)
+**Next step**: Implement turn.py, databricks.py, sheets.py changes and tests
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: feat/remove-tool-cards
+**Branch**: feat/unify-approvals

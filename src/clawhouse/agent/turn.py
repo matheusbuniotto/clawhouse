@@ -10,6 +10,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Coroutine,
+    Mapping,
 )
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -60,7 +61,7 @@ from clawhouse.capabilities.bootstrap import (
     load_bootstrap,
     load_bootstrap_directives,
 )
-from clawhouse.capabilities.databricks import DatabricksCapability
+from clawhouse.capabilities.databricks import DatabricksCapability, is_readonly_query
 from clawhouse.capabilities.interaction import (
     ASK_USER,
     REPORT_PROGRESS,
@@ -469,15 +470,38 @@ def _status(holder: list[TurnResult]) -> TurnStatus:
     return holder[0].status
 
 
-def _sensitive_tool_guard(names: frozenset[str]) -> ToolGuardrail[TurnDeps]:
-    """Defer every listed tool through the harness-native approval flow."""
+DEFAULT_APPROVAL_REQUIRED_TOOLS = frozenset(
+    {
+        "jobs_run_now",
+        "jobs_cancel_run",
+        "jobs_create",
+        "jobs_edit",
+        "jobs_delete",
+        "delivery_send_webhook",
+        "create_google_sheet",
+        "update_google_sheet",
+    }
+)
+
+
+def sensitive_tool_guard(names: frozenset[str] = frozenset()) -> ToolGuardrail[TurnDeps]:
+    """Defer every sensitive or mutating tool through the harness-native approval flow."""
+    sensitive = DEFAULT_APPROVAL_REQUIRED_TOOLS | names
 
     def guard(call: ToolCallInfo) -> GuardrailResult:
-        if call.name in names:
+        if call.name in sensitive:
             return GuardrailResult.approve()
+        if call.name == "dbsql_query":
+            args = call.args if isinstance(call.args, Mapping) else {}
+            sql = str(args.get("query", ""))
+            if not is_readonly_query(sql):
+                return GuardrailResult.approve()
         return GuardrailResult.allow()
 
     return ToolGuardrail(guard=guard)
+
+
+_sensitive_tool_guard = sensitive_tool_guard
 
 
 def is_wake_up_message(text: str) -> bool:
@@ -561,8 +585,7 @@ def _capabilities_for_turn(
     skills = skills_capability(workspace.skills if workspace else None)
     if skills is not None:
         capabilities.append(skills)
-    if claimed.ctx.sensitive_tools:
-        capabilities.append(_sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)))
+    capabilities.append(_sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)))
     # The history is shared between agents: drop tool parts this agent's toolset lacks.
     capabilities.append(ProcessHistory(foreign_tool_filter))
     # Compact the in-run history when it approaches the window, then report what was sent.
