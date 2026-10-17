@@ -128,10 +128,29 @@ async def run_scheduled_turn(
     """Run one due schedule and advance its next_run_at timestamp."""
     now = now_fn() if now_fn else datetime.now(UTC)
     ctx = make_turn_ctx(schedule)
-    result = await run_turn_fn(schedule.session_id, schedule.prompt, ctx)
     next_run = calculate_next_run(schedule.cron_expression, from_time=now)
-    await store.update_schedule_run(schedule.id, last_run_at=now, next_run_at=next_run)
-    return result
+    try:
+        result = await run_turn_fn(schedule.session_id, schedule.prompt, ctx)
+    except Exception as exc:
+        await store.update_schedule_run(
+            schedule.id,
+            last_run_at=now,
+            next_run_at=next_run,
+            last_status="error",
+            last_error=str(exc),
+        )
+        raise
+    else:
+        status = "error" if result and result.status == "error" else "ok"
+        error_msg = result.error if (result and result.status == "error") else None
+        await store.update_schedule_run(
+            schedule.id,
+            last_run_at=now,
+            next_run_at=next_run,
+            last_status=status,
+            last_error=error_msg,
+        )
+        return result
 
 
 async def schedule_worker(
