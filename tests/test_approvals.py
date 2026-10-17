@@ -653,6 +653,7 @@ def test_default_approval_required_tools_contents() -> None:
         "delivery_send_webhook",
         "create_google_sheet",
         "update_google_sheet",
+        "run_python_analysis",
     }
     assert expected == DEFAULT_APPROVAL_REQUIRED_TOOLS
 

@@ -82,6 +82,24 @@ ScheduleStatus = Literal["active", "paused", "cancelled"]
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryEntry:
+    id: str
+    owner_id: str
+    text: str
+    created_at: datetime
+    source_session_id: str | None = None
+    table_fqn: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    session_id: str
+    role: str
+    excerpt: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduleEntry:
     id: str
     session_id: str

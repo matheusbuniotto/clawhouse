@@ -15,8 +15,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from uuid import uuid4
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import PermissionDenied
+from databricks.sdk.service.compute import ClusterSpec
 from databricks.sdk.service.jobs import (
     CronSchedule,
     JobSettings,
@@ -26,9 +29,11 @@ from databricks.sdk.service.jobs import (
     SparkPythonTask,
     SqlTask,
     SqlTaskFile,
+    SubmitTask,
     Task,
 )
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
+from databricks.sdk.service.sql import StatementParameterListItem
 from databricks.sdk.service.workspace import ImportFormat
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
@@ -213,10 +218,199 @@ def build_agentic_query(
     )
 
 
+def _run_failure_payload(run: Any) -> dict[str, object]:
+    state = run.state
+    life_cycle = _enum_value(state.life_cycle_state if state else None)
+    result_state = _enum_value(state.result_state if state else None)
+    if life_cycle == "RUNNING" and result_state == "FAILED":
+        result_state = None
+    duration = run.end_time - run.start_time if run.start_time and run.end_time else None
+    return {
+        "run_id": run.run_id,
+        "life_cycle_state": life_cycle,
+        "result_state": result_state,
+        "state_message": state.state_message if state else None,
+        "duration_ms": duration,
+        "run_page_url": run.run_page_url,
+        "failed_tasks": _failed_tasks(run.tasks or []),
+    }
+
+
+def _failed_tasks(tasks: list[Any]) -> list[dict[str, object]]:
+    failed = []
+    for task in tasks:
+        task_state = task.state
+        task_result = _enum_value(task_state.result_state if task_state else None)
+        if task_result != "FAILED":
+            continue
+        failed.append(
+            {
+                "task_key": task.task_key,
+                "result_state": task_result,
+                "state_message": task_state.state_message if task_state else None,
+            }
+        )
+    return failed
+
+
+def _output_fields(out: object | None) -> dict[str, object]:
+    if out is None:
+        return {"logs": None, "error": None}
+    return {
+        "logs": getattr(out, "logs", None),
+        "error": getattr(out, "error", None) or getattr(out, "error_trace", None),
+    }
+
+
+def _task_outputs(client: WorkspaceClient, tasks: list[object]) -> dict[str, object]:
+    logs: list[str] = []
+    errors: list[str] = []
+    for task in tasks:
+        task_run_id = getattr(task, "run_id", None)
+        if task_run_id is None:
+            continue
+        try:
+            task_out = client.jobs.get_run_output(run_id=task_run_id)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc))
+            continue
+        if getattr(task_out, "logs", None):
+            logs.append(str(task_out.logs))
+        if getattr(task_out, "error", None):
+            errors.append(str(task_out.error))
+    return {"logs": "\n".join(logs) or None, "error": "\n".join(errors) or None}
+
+
+def _hidden_or_error(exc: Exception, fallback: str) -> dict[str, object]:
+    if isinstance(exc, PermissionDenied) or "permission" in str(exc).lower():
+        return {"error": "not visible to you"}
+    return {"error": fallback}
+
+
 def _enum_value(value: Any) -> str | None:
     if value is None:
         return None
     return str(getattr(value, "value", value))
+
+
+_LOG_CAP = 20_000
+_LINEAGE_CAP = 50
+
+
+def _execution_timeout_seconds() -> int:
+    raw = os.environ.get("CLAWHOUSE_EXECUTION_TIMEOUT_SECONDS", "120")
+    try:
+        return int(raw)
+    except ValueError:
+        return 120
+
+
+def _single_node_cluster() -> ClusterSpec:
+    return ClusterSpec(
+        spark_version=os.environ.get("CLAWHOUSE_EXECUTION_SPARK_VERSION", "15.4.x-scala2.12"),
+        node_type_id=os.environ.get("CLAWHOUSE_EXECUTION_NODE_TYPE", "i3.xlarge"),
+        num_workers=0,
+        spark_conf={
+            "spark.databricks.cluster.profile": "singleNode",
+            "spark.master": "local[*]",
+        },
+        custom_tags={"ResourceClass": "SingleNode"},
+    )
+
+
+def _submitted_run(value: object) -> Any:
+    if isinstance(getattr(value, "run_id", None), int):
+        return value
+    response = getattr(value, "response", None)
+    if isinstance(getattr(response, "run_id", None), int):
+        return response
+    return value
+
+
+def _lineage_statement(
+    full_name: str, column: str | None
+) -> tuple[str, list[StatementParameterListItem]]:
+    params = [StatementParameterListItem(name="fqn", type="STRING", value=full_name)]
+    if column is None:
+        statement = (
+            "SELECT source_table_full_name, target_table_full_name, event_time "
+            "FROM system.access.table_lineage "
+            "WHERE source_table_full_name = :fqn OR target_table_full_name = :fqn"
+        )
+        return statement, params
+    params.append(StatementParameterListItem(name="column", type="STRING", value=column))
+    statement = (
+        "SELECT source_table_full_name, source_column_name, "
+        "target_table_full_name, target_column_name, event_time "
+        "FROM system.access.column_lineage "
+        "WHERE (source_table_full_name = :fqn AND source_column_name = :column) "
+        "OR (target_table_full_name = :fqn AND target_column_name = :column)"
+    )
+    return statement, params
+
+
+def _statement_rows(resp: object) -> list[dict[str, str]]:
+    manifest = getattr(resp, "manifest", None)
+    schema = getattr(manifest, "schema", None)
+    columns = [c.name for c in (getattr(schema, "columns", None) or []) if getattr(c, "name", None)]
+    data = getattr(getattr(resp, "result", None), "data_array", None) or []
+    rows: list[dict[str, str]] = []
+    for raw in data:
+        values = list(raw)
+        rows.append({columns[i]: str(values[i]) for i in range(min(len(columns), len(values)))})
+    return rows
+
+
+def _lineage_payload(
+    full_name: str, rows: list[dict[str, str]], *, column: str | None
+) -> dict[str, object]:
+    if not rows:
+        return {"table": full_name, "upstream": [], "downstream": [], "note": "no lineage found"}
+    upstream: dict[str, str] = {}
+    downstream: dict[str, str] = {}
+    for row in rows:
+        seen = row.get("event_time", "")
+        if column is None:
+            _keep_newer(upstream, row.get("source_table_full_name"), seen, full_name)
+            _keep_newer(downstream, row.get("target_table_full_name"), seen, full_name)
+            continue
+        _keep_column(upstream, row, ("source_table_full_name", "source_column_name", full_name))
+        _keep_column(downstream, row, ("target_table_full_name", "target_column_name", full_name))
+    return {
+        "table": full_name,
+        "upstream": _cap_direction(upstream, column=column),
+        "downstream": _cap_direction(downstream, column=column),
+    }
+
+
+def _keep_newer(bucket: dict[str, str], table: str | None, seen: str, self_name: str) -> None:
+    if not table or table == self_name:
+        return
+    if table not in bucket or seen > bucket[table]:
+        bucket[table] = seen
+
+
+def _keep_column(bucket: dict[str, str], row: dict[str, str], keys: tuple[str, str, str]) -> None:
+    table_key, column_key, self_name = keys
+    seen = row.get("event_time", "")
+    table = row.get(table_key)
+    column = row.get(column_key)
+    if not table or not column or table == self_name:
+        return
+    key = f"{table}\t{column}"
+    if key not in bucket or seen > bucket[key]:
+        bucket[key] = seen
+
+
+def _cap_direction(bucket: dict[str, str], *, column: str | None) -> list[dict[str, str]]:
+    ranked = sorted(bucket.items(), key=lambda item: item[1], reverse=True)[:_LINEAGE_CAP]
+    if column is None:
+        return [{"table": table, "last_seen": seen} for table, seen in ranked]
+    out = []
+    for key, seen in ranked:
+        table, col = key.split("\t", 1)
+        out.append({"table": table, "column": col, "last_seen": seen})
+    return out
 
 
 def _find_running_or_first(warehouses: list[Any]) -> str | None:
@@ -948,12 +1142,191 @@ class DatabricksTools:
         except Exception as exc:  # noqa: BLE001
             return {"delivered": False, "error": f"Webhook delivery failed: {exc}"}
 
+    def _estate_closed(self) -> dict[str, object] | None:
+        if not self.user_token.strip():
+            return {"error": "not visible to you"}
+        return None
+
+    async def uc_list_grants(self, full_name: str) -> dict[str, object]:
+        """Effective table grants for the caller. Never uses the ambient client."""
+        closed = self._estate_closed()
+        if closed is not None:
+            return closed
+        if len(full_name.split(".")) != 3 or any(part == "" for part in full_name.split(".")):
+            return {"error": "full_name must be catalog.schema.table"}
+        try:
+            listed = self.client.grants.get_effective(securable_type="table", full_name=full_name)
+        except Exception as exc:  # noqa: BLE001
+            return _hidden_or_error(exc, f"Failed to read grants for {full_name}: {exc}")
+        grants = []
+        for assignment in listed.privilege_assignments or []:
+            for privilege in assignment.privileges or []:
+                name = getattr(privilege.privilege, "value", privilege.privilege)
+                grants.append(
+                    {
+                        "principal": assignment.principal,
+                        "privilege": name,
+                        "inherited": bool(
+                            privilege.inherited_from_name or privilege.inherited_from_type
+                        ),
+                    }
+                )
+        return {"full_name": full_name, "grants": grants}
+
+    async def uc_table_lineage(self, full_name: str) -> dict[str, object]:
+        """Upstream and downstream tables from system.access.table_lineage."""
+        return await self._lineage(full_name, column=None)
+
+    async def uc_column_lineage(self, full_name: str, column: str) -> dict[str, object]:
+        """Upstream and downstream columns from system.access.column_lineage."""
+        return await self._lineage(full_name, column=column)
+
+    async def _lineage(self, full_name: str, *, column: str | None) -> dict[str, object]:
+        closed = self._estate_closed()
+        if closed is not None:
+            return closed
+        if not self.warehouse_id:
+            return {"error": "No Databricks SQL Warehouse available to execute queries."}
+        statement, parameters = _lineage_statement(full_name, column)
+        try:
+            resp = self.client.statement_execution.execute_statement(
+                statement=statement,
+                warehouse_id=self.warehouse_id,
+                parameters=parameters,
+                wait_timeout="30s",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _hidden_or_error(exc, f"Lineage query failed: {exc}")
+        return _lineage_payload(full_name, _statement_rows(resp), column=column)
+
+    async def job_run_failure(self, run_id: int) -> dict[str, object]:
+        """Why a run failed, using only the forwarded client."""
+        closed = self._estate_closed()
+        if closed is not None:
+            return closed
+        try:
+            run = self.client.jobs.get_run(run_id=run_id)
+        except PermissionDenied:
+            return {"error": "not visible to you"}
+        except Exception as exc:  # noqa: BLE001
+            return _hidden_or_error(exc, f"Failed to get run {run_id}: {exc}")
+        return _run_failure_payload(run)
+
+    async def run_python_analysis(
+        self,
+        code: str,
+        execution_id: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, object]:
+        """Run ad-hoc Python on a one-off Lakeflow submit as the caller."""
+        if not self.user_token.strip():
+            return {"error": "user token required"}
+        execution_id = execution_id or str(uuid4())
+        timeout = timeout_seconds if timeout_seconds is not None else _execution_timeout_seconds()
+        path = f"/Workspace/Shared/clawhouse/executions/{execution_id}.py"
+        self._upload_user_python(path, code)
+        submitted = self.client.jobs.submit(
+            run_name=f"clawhouse-exec-{execution_id}",
+            tasks=[
+                SubmitTask(
+                    task_key="analysis",
+                    spark_python_task=SparkPythonTask(python_file=path, source=Source.WORKSPACE),
+                    new_cluster=_single_node_cluster(),
+                )
+            ],
+            timeout_seconds=timeout,
+        )
+        run = _submitted_run(submitted)
+        run_id = int(run.run_id)
+        page = getattr(run, "run_page_url", None)
+        waited = await self._wait_user_run(run_id, timeout, page)
+        waited["execution_id"] = execution_id
+        return waited
+
+    def _upload_user_python(self, path: str, code: str) -> None:
+        parent = str(Path(path).parent)
+        self.client.workspace.mkdirs(parent)
+        self.client.workspace.upload(
+            path,
+            io.BytesIO(code.encode("utf-8")),
+            overwrite=True,
+            format=ImportFormat.AUTO,
+        )
+
+    async def _wait_user_run(
+        self, run_id: int, timeout_seconds: int, page: str | None
+    ) -> dict[str, object]:
+        deadline = time.monotonic() + max(1, timeout_seconds)
+        interval = 5
+        last: dict[str, object] = {"run_id": run_id, "run_page_url": page}
+        while time.monotonic() < deadline:
+            last = self._user_run_view(run_id, page)
+            if last.get("life_cycle_state") in ("TERMINATED", "SKIPPED", "INTERNAL_ERROR"):
+                return self._terminal_analysis(run_id, last)
+            await asyncio.sleep(interval)
+        return {
+            "run_id": run_id,
+            "life_cycle_state": last.get("life_cycle_state"),
+            "status": "TIMED_OUT_WAITING",
+            "run_page_url": last.get("run_page_url") or page,
+        }
+
+    def _user_run_view(self, run_id: int, page: str | None) -> dict[str, object]:
+        run = self.client.jobs.get_run(run_id=run_id)
+        state = run.state
+        duration = run.end_time - run.start_time if run.start_time and run.end_time else None
+        return {
+            "run_id": run.run_id,
+            "life_cycle_state": _enum_value(state.life_cycle_state if state else None),
+            "result_state": _enum_value(state.result_state if state else None),
+            "state_message": state.state_message if state else None,
+            "duration_ms": duration,
+            "run_page_url": run.run_page_url or page,
+            "tasks": list(run.tasks or []),
+        }
+
+    def _terminal_analysis(self, run_id: int, view: dict[str, object]) -> dict[str, object]:
+        tasks = view.get("tasks")
+        output = self._user_run_output(run_id, tasks if isinstance(tasks, list) else [])
+        logs = output.get("logs")
+        if isinstance(logs, str) and len(logs) > 20_000:
+            logs = logs[-20_000:]
+        result_state = view.get("result_state")
+        payload: dict[str, object] = {
+            "run_id": view.get("run_id"),
+            "life_cycle_state": view.get("life_cycle_state"),
+            "result_state": result_state,
+            "duration_ms": view.get("duration_ms"),
+            "run_page_url": view.get("run_page_url"),
+            "logs": logs,
+        }
+        if result_state == "FAILED":
+            payload["error"] = output.get("error")
+        return payload
+
+    def _user_run_output(self, run_id: int, tasks: list[object]) -> dict[str, object]:
+        direct = _output_fields(self._safe_run_output(run_id))
+        if direct["logs"] or direct["error"]:
+            return direct
+        return _task_outputs(self.client, tasks)
+
+    def _safe_run_output(self, run_id: int) -> object | None:
+        try:
+            return self.client.jobs.get_run_output(run_id=run_id)
+        except Exception:  # noqa: BLE001
+            return None
+
     def all_tools(self) -> list[Callable[..., Any]]:
         return [
             self.uc_list_catalogs,
             self.uc_list_schemas,
             self.uc_list_tables,
             self.uc_describe_table,
+            self.uc_list_grants,
+            self.uc_table_lineage,
+            self.uc_column_lineage,
+            self.job_run_failure,
+            self.run_python_analysis,
             self.dbsql_query,
             self.system_ai_query,
             self.system_ai_format_delivery,

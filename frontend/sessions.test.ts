@@ -33,7 +33,7 @@ test("filters sessions list and updates counter", async () => {
   expect(count).not.toBeNull();
   expect(count.textContent).toContain("2");
 
-  search.value = "lakeflow";
+  search.value = "k";
   search.dispatchEvent(new Event("input", { bubbles: true }));
 
   const visible = [...document.querySelectorAll<HTMLElement>(".session")].filter(
@@ -100,4 +100,57 @@ test("executes inline rename and clear actions on sessions page", async () => {
   ).toBe(true);
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(document.querySelectorAll(".session")).toHaveLength(2);
+});
+
+test("search of 2 characters replaces the session list", async () => {
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    if (url === "/api/sessions") return jsonResponse({ sessions: SESSIONS });
+    if (url.startsWith("/api/search?q=")) {
+      return jsonResponse({
+        results: [
+          {
+            session_id: "s2",
+            role: "user",
+            excerpt: "nightly partition",
+            created_at: "2026-10-14T10:00:00Z",
+          },
+        ],
+      });
+    }
+    return jsonResponse({});
+  });
+  const { mount } = await import("./sessions");
+  mount(document.body);
+  await vi.waitFor(() => expect(document.querySelectorAll(".session")).toHaveLength(2));
+  const search = document.querySelector("#sessions-search") as HTMLInputElement;
+  search.value = "ni";
+  search.dispatchEvent(new Event("input", { bubbles: true }));
+  await vi.waitFor(() => expect(calls.some((url) => url.startsWith("/api/search?q=ni"))).toBe(true));
+  await vi.waitFor(() =>
+    expect(document.querySelector(".session-link")?.textContent).toBe("nightly partition"),
+  );
+  expect(document.querySelectorAll(".session")).toHaveLength(1);
+});
+
+test("search failure keeps the previous list", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/sessions") return jsonResponse({ sessions: SESSIONS });
+    return { ok: false, status: 500, json: async () => ({}) } as unknown as Response;
+  });
+  const { mount } = await import("./sessions");
+  mount(document.body);
+  await vi.waitFor(() => expect(document.querySelectorAll(".session")).toHaveLength(2));
+  const search = document.querySelector("#sessions-search") as HTMLInputElement;
+  search.value = "ni";
+  search.dispatchEvent(new Event("input", { bubbles: true }));
+  await vi.waitFor(() => {
+    const error = document.querySelector(".sessions-error") as HTMLElement;
+    expect(error.hidden).toBe(false);
+  });
+  expect(document.querySelectorAll(".session")).toHaveLength(2);
+  expect(document.querySelector(".session-link")?.textContent).toBe("Alpha Analytics");
 });

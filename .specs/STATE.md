@@ -14,6 +14,7 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 | ADR-0006 | Pluggable model providers with Databricks Foundation Models | Enterprise LLM routing via WorkspaceClient / Model Serving | active | 2026-10-10 |
 | ADR-0007 | First-hatch customization via user workspace | User-specific instructions without redeploying backend | active | 2026-10-10 |
 | ADR-0008 | OpenTelemetry runtime telemetry with Logfire / OTLP fallback | First-party Pydantic AI instrumentation + zero heavy extra dependencies | active | 2026-10-16 |
+| ADR-0009 | User-code execution and estate reads use only the forwarded user token, fail closed | Ambient SP fallback is limited to platform-resource management | active | 2026-10-17 |
 
 ## Handoff
 

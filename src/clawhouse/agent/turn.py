@@ -76,7 +76,12 @@ from clawhouse.capabilities.interaction import (
     parse_progress,
 )
 from clawhouse.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
-from clawhouse.capabilities.mentions import resolve_mention_bundles, tiered_compaction
+from clawhouse.capabilities.mentions import (
+    MemoryCapability,
+    format_memory_block,
+    resolve_mention_bundles,
+    tiered_compaction,
+)
 from clawhouse.capabilities.sheets import GoogleSheetsCapability
 from clawhouse.capabilities.skills import loaded_skill_text, skills_capability
 from clawhouse.capabilities.workspace import (
@@ -485,6 +490,7 @@ DEFAULT_APPROVAL_REQUIRED_TOOLS = frozenset(
         "delivery_send_webhook",
         "create_google_sheet",
         "update_google_sheet",
+        "run_python_analysis",
     }
 )
 
@@ -590,6 +596,7 @@ def _capabilities_for_turn(
     skills = skills_capability(workspace.skills if workspace else None)
     if skills is not None:
         capabilities.append(skills)
+    capabilities.append(MemoryCapability(claimed.ctx.store, claimed.ctx.owner_id))
     capabilities.append(_sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)))
     # The history is shared between agents: drop tool parts this agent's toolset lacks.
     capabilities.append(ProcessHistory(foreign_tool_filter))
@@ -679,6 +686,10 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     user_prompt = claimed.user_message
     if bundle.injected_context:
         user_prompt = f"{claimed.user_message}\n\n[Injected Context]\n{bundle.injected_context}"
+    memories = await claimed.ctx.store.rank_memories(claimed.ctx.owner_id, claimed.user_message)
+    memory_block = format_memory_block(memories)
+    if memory_block:
+        user_prompt = f"{user_prompt}\n\n[Memory]\n{memory_block}"
     return await _invoke_agent(
         claimed,
         queue,

@@ -476,3 +476,50 @@ test("handles clipboard rejection gracefully", async () => {
     expect(copyBtn.textContent).toContain("Failed to copy");
   });
 });
+
+test("run_python_analysis renders result_state duration_ms and logs", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, {
+    event: "tool_result",
+    name: "run_python_analysis",
+    content: JSON.stringify({
+      result_state: "SUCCESS",
+      duration_ms: 2000,
+      logs: "revenue by region",
+    }),
+  });
+  expect(host.textContent).toContain("SUCCESS");
+  expect(host.textContent).toContain("2000");
+  expect(host.textContent).toContain("revenue by region");
+});
+
+test("run_python_analysis failure renders error and run_page_url", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, {
+    event: "tool_result",
+    name: "run_python_analysis",
+    content: JSON.stringify({
+      result_state: "FAILED",
+      error: "boom",
+      run_page_url: "https://example.cloud.databricks.com/run/9",
+    }),
+  });
+  expect(host.querySelector(".analysis-error")?.textContent).toBe("boom");
+  expect(host.querySelector("a")?.getAttribute("href")).toBe(
+    "https://example.cloud.databricks.com/run/9",
+  );
+
+  const timed = document.createElement("div");
+  appendToolActivity(timed, {
+    event: "tool_result",
+    name: "run_python_analysis",
+    content: JSON.stringify({
+      status: "TIMED_OUT_WAITING",
+      run_page_url: "https://example.cloud.databricks.com/run/11",
+    }),
+  });
+  expect(timed.textContent).toContain("TIMED_OUT_WAITING");
+  expect(timed.querySelector("a")?.getAttribute("href")).toBe(
+    "https://example.cloud.databricks.com/run/11",
+  );
+});
