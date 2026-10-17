@@ -617,8 +617,8 @@ def _capabilities_for_turn(
     capabilities.append(InteractionCapability(headless=claimed.ctx.headless))
     if claimed.ctx.databricks_capability is not None:
         cap = claimed.ctx.databricks_capability
-        if not cap.user_token and claimed.ctx.user_token:
-            cap.user_token = claimed.ctx.user_token
+        if claimed.ctx.user_token:
+            cap = replace(cap, user_token=claimed.ctx.user_token)
         capabilities.append(cap)
     if mcp is not None:
         capabilities.append(mcp)
@@ -828,7 +828,7 @@ async def _invoke_agent(  # noqa: PLR0913
         deferred_tool_results=deferred_results,
         model=ctx.model,
         instructions=prompt.text,
-        deps=TurnDeps(now=ctx.now),
+        deps=TurnDeps(now=ctx.now, user_token=ctx.user_token),
         event_stream_handler=_persist_and_emit(
             claimed, queue, skip_tool_call_id=skip_tool_call_id, usage=usage
         ),

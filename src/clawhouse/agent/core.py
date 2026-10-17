@@ -13,6 +13,7 @@ from clawhouse.agent.prompt import CLOCK_DESCRIPTION
 @dataclass(frozen=True, slots=True)
 class TurnDeps:
     now: Callable[[], datetime]
+    user_token: str = ""
 
 
 def format_utc(moment: datetime) -> str:

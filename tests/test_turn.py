@@ -6,7 +6,9 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pydantic_ai
 import pytest
 from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage
@@ -16,6 +18,7 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
+from clawhouse.agent.core import TurnDeps
 from clawhouse.agent.prompt import CLOCK_DESCRIPTION
 from clawhouse.agent.turn import (
     FAILED_TURN,
@@ -28,8 +31,11 @@ from clawhouse.agent.turn import (
     TurnContext,
     TurnNotice,
     UsageNotice,
+    _capabilities_for_turn,  # pyright: ignore[reportPrivateUsage]
+    _Claimed,  # pyright: ignore[reportPrivateUsage]
     run_turn,
 )
+from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.mcp import InsecureMCPEndpoint, MCPServerConfig
 from clawhouse.capabilities.skills import loaded_skill_text
 from clawhouse.capabilities.workspace import WorkspacePaths, resolve_agent_workspace
@@ -1152,3 +1158,123 @@ async def test_turn_create_agent_duplicate_name_returns_error(tmp_path: Path) ->
     assert result.status == "ok"
     assert len(seen_return) == 1
     assert "already exists" in str(seen_return[0])
+
+
+def test_turn_deps_user_token_field() -> None:
+    deps = TurnDeps(now=lambda: FROZEN, user_token="tok-123")
+    assert deps.user_token == "tok-123"
+    with pytest.raises((AttributeError, TypeError)):
+        deps.user_token = "tok-456"  # type: ignore[misc]
+
+    default_deps = TurnDeps(now=lambda: FROZEN)
+    assert default_deps.user_token == ""
+
+
+@pytest.mark.asyncio
+async def test_run_turn_populates_turn_deps_user_token() -> None:
+    store = MemorySessionStore()
+    captured_deps: list[TurnDeps] = []
+
+    async def model_fn(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages, info
+        yield "Hello"
+
+    orig_iter = pydantic_ai.Agent.iter
+
+    def capture_iter(self: object, *args: object, **kwargs: object) -> object:
+        if "deps" in kwargs and isinstance(kwargs["deps"], TurnDeps):
+            captured_deps.append(kwargs["deps"])
+        return orig_iter(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    with patch.object(pydantic_ai.Agent, "iter", side_effect=capture_iter, autospec=True):
+        ctx = _ctx(store, FunctionModel(stream_function=model_fn), user_token="usr-tok-777")
+        result = await run_turn(SESSION, "hi", ctx=ctx)
+
+    assert result.status == "ok"
+    assert len(captured_deps) == 1
+    assert captured_deps[0].user_token == "usr-tok-777"
+
+
+def test_capabilities_for_turn_does_not_mutate_original_capability() -> None:
+    store = MemorySessionStore()
+    cap = DatabricksCapability(user_token="")
+
+    async def dummy_stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        del messages, info
+        yield "ok"
+
+    ctx = _ctx(store, FunctionModel(stream_function=dummy_stream), user_token="user-tok-999")
+    ctx = replace(ctx, databricks_capability=cap)
+
+    claimed = _Claimed(session_id=SESSION, user_message="hello", run_id="r1", ctx=ctx)
+    turn_caps = _capabilities_for_turn(claimed, None)
+
+    assert cap.user_token == ""
+    turn_db_cap = next(c for c in (turn_caps or []) if isinstance(c, DatabricksCapability))
+    assert turn_db_cap.user_token == "user-tok-999"
+    assert turn_db_cap is not cap
+
+
+@pytest.mark.asyncio
+async def test_concurrent_turns_use_distinct_user_tokens() -> None:
+    store = MemorySessionStore()
+    clients_seen: dict[str, list[str]] = {"user_a": [], "user_b": []}
+
+    def client_factory_tracker(token: str) -> MagicMock:
+        mock_client = MagicMock()
+        mock_client.catalogs.list.return_value = []
+        if token == "token-a":
+            clients_seen["user_a"].append(token)
+        elif token == "token-b":
+            clients_seen["user_b"].append(token)
+        return mock_client
+
+    shared_cap = DatabricksCapability(
+        client_factory=client_factory_tracker,
+        warehouse_id="wh-1",
+        user_token="",
+    )
+
+    async def model_fn_a(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        has_return = any(
+            getattr(p, "part_kind", "") == "tool-return" for m in messages for p in m.parts
+        )
+        if not has_return:
+            yield {0: DeltaToolCall(name="uc_list_catalogs", json_args="{}", tool_call_id="call-a")}
+            return
+        yield "Done a."
+
+    async def model_fn_b(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del info
+        has_return = any(
+            getattr(p, "part_kind", "") == "tool-return" for m in messages for p in m.parts
+        )
+        if not has_return:
+            yield {0: DeltaToolCall(name="uc_list_catalogs", json_args="{}", tool_call_id="call-b")}
+            return
+        yield "Done b."
+
+    session_a = "22222222-2222-4222-8222-222222222222"
+    session_b = "33333333-3333-4333-8333-333333333333"
+
+    ctx_a = _ctx(store, FunctionModel(stream_function=model_fn_a), user_token="token-a")
+    ctx_a = replace(ctx_a, databricks_capability=shared_cap)
+
+    ctx_b = _ctx(store, FunctionModel(stream_function=model_fn_b), user_token="token-b")
+    ctx_b = replace(ctx_b, databricks_capability=shared_cap)
+
+    res_a, res_b = await asyncio.gather(
+        run_turn(session_a, "list a", ctx=ctx_a),
+        run_turn(session_b, "list b", ctx=ctx_b),
+    )
+
+    assert res_a.status == "ok"
+    assert res_b.status == "ok"
+    assert shared_cap.user_token == ""
+    assert clients_seen["user_a"] == ["token-a"]
+    assert clients_seen["user_b"] == ["token-b"]
