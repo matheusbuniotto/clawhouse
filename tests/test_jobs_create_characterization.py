@@ -18,7 +18,13 @@ from databricks.sdk.service.jobs import CronSchedule, PauseStatus
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from clawhouse.agent.turn import TurnContext, TurnResult, resume_turn, run_turn
+from clawhouse.agent.turn import (
+    DEFAULT_APPROVAL_REQUIRED_TOOLS,
+    TurnContext,
+    TurnResult,
+    resume_turn,
+    run_turn,
+)
 from clawhouse.capabilities import databricks as databricks_module
 from clawhouse.capabilities.databricks import (
     DatabricksCapability,
@@ -243,12 +249,12 @@ async def test_denied_schedule_never_creates_the_job() -> None:
     "tool", ["jobs_create", "jobs_edit", "jobs_delete", "jobs_run_now", "jobs_cancel_run"]
 )
 def test_mutating_jobs_tools_are_in_the_approval_set(tool: str) -> None:
-    assert tool in databricks_module._APPROVAL_REQUIRED_TOOLS  # pyright: ignore[reportPrivateUsage]
+    assert tool in DEFAULT_APPROVAL_REQUIRED_TOOLS
 
 
 @pytest.mark.parametrize("tool", ["jobs_list", "jobs_get_run", "jobs_get_run_output"])
 def test_read_only_jobs_tools_are_not_in_the_approval_set(tool: str) -> None:
-    assert tool not in databricks_module._APPROVAL_REQUIRED_TOOLS  # pyright: ignore[reportPrivateUsage]
+    assert tool not in DEFAULT_APPROVAL_REQUIRED_TOOLS
 
 
 # --- current credential behavior: user token first, then ambient (app SP) ---------------
