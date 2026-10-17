@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+from clawhouse.agent import turn as turn_mod
 from clawhouse.agent.prompt import CLOCK, RuntimeMeta, ToolCard, build_system_prompt
+from clawhouse.capabilities import sheets as sheets_mod
 from clawhouse.capabilities.bootstrap import BootstrapContext, BootstrapFile
 from clawhouse.capabilities.workspace import resolve_agent_workspace
 
@@ -43,9 +45,6 @@ def test_build_system_prompt_omits_tools_when_none_provided() -> None:
 
 
 def test_manual_tool_card_constants_are_removed() -> None:
-    import clawhouse.agent.turn as turn_mod
-    import clawhouse.capabilities.sheets as sheets_mod
-
     assert not hasattr(turn_mod, "DATABRICKS_TOOL_CARDS")
     assert not hasattr(turn_mod, "SAVE_PROFILE_TOOL_CARD")
     assert not hasattr(turn_mod, "CREATE_AGENT_TOOL_CARD")
