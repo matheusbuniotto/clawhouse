@@ -17,10 +17,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: turn-deps-user-token
-**Where**: Slice 1 built; independent verification complete (4/4 PASS)
-**In progress**: Feature completed
-**Next step**: Ready for PR / merge
+**Feature**: native-pydantic-ai-epic
+**Where**: Sub-issues 1 (#78, scheduled-turns) and 3 (#80, turn-deps-user-token) merged to main and deployed to Databricks Apps.
+**In progress**: Ready for user testing and Sub-issue 4 (#81: Remover catálogo manual de ToolCards do prompt)
+**Next step**: Start Sub-issue 4 (#81)
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: feat/turn-deps-user-token
+**Branch**: main
