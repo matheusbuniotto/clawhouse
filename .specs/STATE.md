@@ -17,10 +17,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: runtime-telemetry
-**Where**: Complete - Verified PASS (14/14 checks proven)
-**In progress**: none
-**Next step**: Ready to commit verification report or select next feature
+**Feature**: turn-deps-user-token
+**Where**: Checks derived - validate_checks PASS (strict: 0 errors, 0 warnings)
+**In progress**: Ready to begin Build phase (implement C1-C4)
+**Next step**: Implement frozen TurnDeps.user_token and immutable capability copying
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: main
+**Branch**: feat/turn-deps-user-token
