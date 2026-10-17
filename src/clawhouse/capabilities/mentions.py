@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.messages import (
     ModelMessage,
+    ModelMessagesTypeAdapter,
     ModelRequest,
-    ModelResponse,
     SystemPromptPart,
     TextPart,
     ToolCallPart,
@@ -25,6 +25,7 @@ from pydantic_ai_harness.compaction import (
     compact_now,
 )
 
+from clawhouse.agent.history import to_model_messages
 from clawhouse.store.shapes import TranscriptEntry
 
 if TYPE_CHECKING:
@@ -161,16 +162,6 @@ def _read_skill_instructions(skill_name: str, workspace: WorkspacePaths | None) 
     return None
 
 
-def _transcript_to_messages(transcript: Sequence[TranscriptEntry]) -> list[ModelMessage]:
-    messages: list[ModelMessage] = []
-    for entry in transcript:
-        if entry.role == "user":
-            messages.append(ModelRequest(parts=[UserPromptPart(content=entry.content)]))
-        elif entry.role == "assistant":
-            messages.append(ModelResponse(parts=[TextPart(content=entry.content)]))
-    return messages
-
-
 @dataclass(frozen=True, slots=True)
 class CompactionResult:
     """A compacted transcript: the summary checkpoint plus the retained tail."""
@@ -268,16 +259,28 @@ async def execute_compaction(
     owner_id: str,
     model: Model,
 ) -> CompactionResult:
-    transcript = await store.transcript(session_id, owner_id)
-    if not transcript:
+    raw = await store.messages(session_id)
+    if raw:
+        try:
+            messages = ModelMessagesTypeAdapter.validate_json(raw)
+        except Exception:  # noqa: BLE001
+            transcript = await store.transcript(session_id, owner_id)
+            messages = to_model_messages(transcript)
+    else:
+        transcript = await store.transcript(session_id, owner_id)
+        if not transcript:
+            return CompactionResult(summary="No session history to compact.", entries=())
+        messages = to_model_messages(transcript)
+
+    if not messages:
         return CompactionResult(summary="No session history to compact.", entries=())
 
-    messages = _transcript_to_messages(transcript)
     # keep_messages=1 + target_tokens=1 force the tiered policy to the summarization tier.
     strategy = tiered_compaction(
         target_tokens=1, keep_messages=1, preserve_first_user_message=False
     )
     compacted = await compact_now(strategy, messages, model=model)
+    await store.save_messages(session_id, ModelMessagesTypeAdapter.dump_json(compacted))
     return CompactionResult(
         summary=_find_summary_text(compacted),
         entries=_compacted_entries(compacted),

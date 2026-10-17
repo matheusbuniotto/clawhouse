@@ -17,10 +17,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: unify-approvals
+**Feature**: native-model-messages
 **Where**: S1 planned and checks validated
-**In progress**: Building S1 (Sub-issue 5 of Epic #77, #82)
-**Next step**: Implement turn.py, databricks.py, sheets.py changes and tests
+**In progress**: Building S1 (Sub-issue 2 of Epic #77, #79)
+**Next step**: Implement store.py, turn.py, mentions.py changes and tests
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: feat/unify-approvals
+**Branch**: feat/native-model-messages
