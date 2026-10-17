@@ -378,11 +378,11 @@ async def test_jobs_edit_waits_for_approval_then_updates_the_settings() -> None:
 
 
 async def test_system_prompt_lists_every_jobs_tool() -> None:
-    seen: list[str] = []
+    seen: list[list[str]] = []
 
     async def capture(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
         del messages
-        seen.append(info.instructions or "")
+        seen.append([tool.name for tool in info.function_tools])
         yield "done"
 
     ctx = _ctx(MagicMock(), MemorySessionStore(), model=FunctionModel(stream_function=capture))

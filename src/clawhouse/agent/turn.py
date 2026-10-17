@@ -42,10 +42,8 @@ from clawhouse.agent.commands import Command, CommandContext, dispatch_command, 
 from clawhouse.agent.core import TurnDeps, clawhouse_agent, format_utc
 from clawhouse.agent.history import foreign_tool_filter, to_model_messages
 from clawhouse.agent.prompt import (
-    BUILTIN_TOOLS,
     RuntimeMeta,
     SystemPrompt,
-    ToolCard,
     build_system_prompt,
 )
 from clawhouse.agent.roster import (
@@ -65,9 +63,7 @@ from clawhouse.capabilities.bootstrap import (
 from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.interaction import (
     ASK_USER,
-    ASK_USER_DESCRIPTION,
     REPORT_PROGRESS,
-    REPORT_PROGRESS_DESCRIPTION,
     InteractionCapability,
     Question,
     answer_text,
@@ -75,7 +71,7 @@ from clawhouse.capabilities.interaction import (
 )
 from clawhouse.capabilities.mcp import MCPCapability, MCPServerConfig, mcp_capability, scrub_token
 from clawhouse.capabilities.mentions import resolve_mention_bundles, tiered_compaction
-from clawhouse.capabilities.sheets import GOOGLE_SHEETS_TOOL_CARDS, GoogleSheetsCapability
+from clawhouse.capabilities.sheets import GoogleSheetsCapability
 from clawhouse.capabilities.skills import loaded_skill_text, skills_capability
 from clawhouse.capabilities.workspace import (
     UnsafeAgentName,
@@ -484,20 +480,6 @@ def _sensitive_tool_guard(names: frozenset[str]) -> ToolGuardrail[TurnDeps]:
     return ToolGuardrail(guard=guard)
 
 
-SAVE_PROFILE_NAME = "save_profile"
-SAVE_PROFILE_DESCRIPTION = (
-    "Save the assistant's name, signature emoji, and user directives to the user profile "
-    "upon completing the birth ritual."
-)
-SAVE_PROFILE_TOOL_CARD = ToolCard(name=SAVE_PROFILE_NAME, description=SAVE_PROFILE_DESCRIPTION)
-
-CREATE_AGENT_NAME = "create_agent"
-CREATE_AGENT_DESCRIPTION = (
-    "Create a new specialized custom agent with its OpenClaw-compatible workspace folder."
-)
-CREATE_AGENT_TOOL_CARD = ToolCard(name=CREATE_AGENT_NAME, description=CREATE_AGENT_DESCRIPTION)
-
-
 def is_wake_up_message(text: str) -> bool:
     cleaned = text.strip().lower()
     if cleaned in ("wake up, my friend!", "wake up, my friend", "wake up my friend", "wake up"):
@@ -521,6 +503,7 @@ class HatchCapability(AbstractCapability[TurnDeps]):
             signature_emoji: str,
             user_directives: str,
         ) -> str:
+            """Save the assistant's name, signature emoji, and directives to the profile."""
             profile = UserProfile(
                 user_id=owner_id,
                 assistant_name=assistant_name,
@@ -547,54 +530,6 @@ def _birth_ritual_active(
     if is_wake_up_message(claimed.user_message):
         return True
     return any(entry.role == "user" and is_wake_up_message(entry.content) for entry in prior)
-
-
-DATABRICKS_TOOL_CARDS = (
-    ToolCard(name="dbsql_query", description="Execute a SQL query on a Databricks SQL Warehouse."),
-    ToolCard(name="system_ai_query", description="Invoke Databricks AI functions or models."),
-    ToolCard(name="uc_describe_table", description="Describe schema of a Unity Catalog table."),
-    ToolCard(name="uc_list_catalogs", description="List available Unity Catalog catalogs."),
-    ToolCard(name="uc_list_schemas", description="List schemas within a Unity Catalog catalog."),
-    ToolCard(name="uc_list_tables", description="List tables within a Unity Catalog schema."),
-    ToolCard(name="jobs_list", description="List Lakeflow jobs in the workspace."),
-    ToolCard(name="jobs_get_run", description="Get the state of a Lakeflow job run."),
-    ToolCard(
-        name="jobs_get_run_output",
-        description="Get execution output and logs of a Lakeflow job run.",
-    ),
-    ToolCard(
-        name="jobs_run_now",
-        description="Trigger a Lakeflow job run (needs approval); optional parameter overrides.",
-    ),
-    ToolCard(
-        name="jobs_create",
-        description="Create a Lakeflow job (SQL/Python/Agentic) with schedule (needs approval).",
-    ),
-    ToolCard(
-        name="jobs_edit",
-        description="Update Lakeflow job settings, schedule, or query (needs approval).",
-    ),
-    ToolCard(
-        name="jobs_delete",
-        description="Delete a Lakeflow job from the workspace (needs approval).",
-    ),
-    ToolCard(
-        name="jobs_cancel_run",
-        description="Cancel an active Lakeflow job run (needs approval).",
-    ),
-    ToolCard(
-        name="jobs_wait_run",
-        description="Wait/poll for a job run to finish and return final status and output.",
-    ),
-    ToolCard(
-        name="system_ai_format_delivery",
-        description="Format analytical reports for Slack or Sheets using Databricks AI.",
-    ),
-    ToolCard(
-        name="delivery_send_webhook",
-        description="Send formatted report to external webhook (needs approval).",
-    ),
-)
 
 
 def _capabilities_for_turn(
@@ -638,23 +573,13 @@ def _capabilities_for_turn(
 
 def _prompt_for(
     claimed: _Claimed,
-    mcp: MCPCapability | None,
+    mcp: MCPCapability | None = None,
     *,
     profile: UserProfile | None = None,
     birth_ritual: bool = False,
 ) -> SystemPrompt:
+    del mcp
     ctx = claimed.ctx
-    tools_list = mcp.tools if mcp is not None else ()
-    mcp_cards = tuple(ToolCard(name=t.safe_name, description=t.description) for t in tools_list)
-    db_cards = DATABRICKS_TOOL_CARDS if ctx.databricks_capability is not None else ()
-    base_tools = (
-        *BUILTIN_TOOLS,
-        CREATE_AGENT_TOOL_CARD,
-        ToolCard(name=ASK_USER, description=ASK_USER_DESCRIPTION),
-        ToolCard(name=REPORT_PROGRESS, description=REPORT_PROGRESS_DESCRIPTION),
-        *GOOGLE_SHEETS_TOOL_CARDS,
-    )
-    builtin = (*base_tools, SAVE_PROFILE_TOOL_CARD) if birth_ritual else base_tools
     user_directives = profile.user_directives if profile else None
     workspace = _agent_workspace(claimed)
     custom = claimed.agent.custom
@@ -666,7 +591,6 @@ def _prompt_for(
         emoji = profile.signature_emoji if profile else None
         persona = None
     return build_system_prompt(
-        tools=(*builtin, *db_cards, *mcp_cards),
         runtime=RuntimeMeta(session_id=claimed.session_id, time=format_utc(ctx.now())),
         bootstrap=_bootstrap(workspace, user_directives=user_directives),
         workspace=workspace,

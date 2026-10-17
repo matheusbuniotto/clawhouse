@@ -46,8 +46,8 @@ class SystemPrompt:
 
 def build_system_prompt(  # noqa: PLR0913
     *,
-    tools: Sequence[ToolCard],
     runtime: RuntimeMeta,
+    tools: Sequence[ToolCard] | None = None,
     bootstrap: BootstrapContext | None = None,
     workspace: WorkspacePaths | None = None,
     assistant_name: str | None = None,
@@ -56,14 +56,12 @@ def build_system_prompt(  # noqa: PLR0913
     agent_id: str = AGENT_NAME,
     persona: str | None = None,
 ) -> SystemPrompt:
-    """Compose the platform agent's prompt. An agent with no tools is refused.
+    """Compose the platform agent's prompt.
 
-    The prefix depends only on tools, bootstrap context, and workspace.
+    The prefix depends on bootstrap context, workspace, and optional tools.
     The suffix carries the session and, when given, the turn time.
     Skill names are not repeated here; the harness catalog is the only list.
     """
-    if not tools:
-        raise ValueError("an agent must expose at least one tool")
     sections = (
         _identity(
             bootstrap,
@@ -72,7 +70,7 @@ def build_system_prompt(  # noqa: PLR0913
             agent_id=agent_id,
         ),
         f"# Agent Instructions\n{persona}" if persona else None,
-        _tools(tools),
+        _tools(tools) if tools else None,
         _birth_ritual() if birth_ritual else None,
         _project(bootstrap),
         _workspace(workspace),

@@ -24,8 +24,6 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, FunctionToolset
 from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
 
-from clawhouse.agent.prompt import ToolCard
-
 logger = logging.getLogger("clawhouse.sheets")
 
 SERVICE = "system.ai.google_drive"
@@ -429,23 +427,6 @@ async def write_sheet_update(
     resolved_host = host or (databricks_host() if token else "")
     return await _guarded(token, lambda: _write_update(token, resolved_host, update))
 
-
-GOOGLE_SHEETS_TOOL_CARDS = (
-    ToolCard(
-        name="create_google_sheet",
-        description=(
-            "Create a Google Sheet in the user's own Drive from rows already retrieved. "
-            "Needs approval. The first tab name comes back in the result."
-        ),
-    ),
-    ToolCard(
-        name="update_google_sheet",
-        description=(
-            "Overwrite one rectangle of a Google Sheet this app created. "
-            "Needs approval. Pass the tab name the create result returned."
-        ),
-    ),
-)
 
 WRITE_TOOLS = frozenset({"create_google_sheet", "update_google_sheet"})
 
