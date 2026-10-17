@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS clawhouse.schedules (
     last_run_at timestamptz,
     next_run_at timestamptz NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
+    last_status text,
+    last_error text,
     CONSTRAINT schedules_status_known CHECK (status IN ('active', 'paused', 'cancelled'))
 );
 
@@ -256,7 +258,13 @@ class SessionStore(Protocol):
     async def claim_due_schedules(self, now: datetime) -> tuple[ScheduleEntry, ...]: ...
 
     async def update_schedule_run(
-        self, schedule_id: str, last_run_at: datetime, next_run_at: datetime
+        self,
+        schedule_id: str,
+        last_run_at: datetime,
+        next_run_at: datetime,
+        *,
+        last_status: str | None = None,
+        last_error: str | None = None,
     ) -> ScheduleEntry | None: ...
 
     async def close(self) -> None: ...
@@ -556,13 +564,25 @@ class MemorySessionStore:
             return tuple(due)
 
     async def update_schedule_run(
-        self, schedule_id: str, last_run_at: datetime, next_run_at: datetime
+        self,
+        schedule_id: str,
+        last_run_at: datetime,
+        next_run_at: datetime,
+        *,
+        last_status: str | None = None,
+        last_error: str | None = None,
     ) -> ScheduleEntry | None:
         async with self._lock:
             schedule = self._schedules.get(schedule_id)
             if schedule is None:
                 return None
-            updated = replace(schedule, last_run_at=last_run_at, next_run_at=next_run_at)
+            updated = replace(
+                schedule,
+                last_run_at=last_run_at,
+                next_run_at=next_run_at,
+                last_status=last_status,
+                last_error=last_error,
+            )
             self._schedules[schedule_id] = updated
             return updated
 
@@ -609,6 +629,13 @@ class LakebaseSessionStore:
         with suppress(asyncpg.InsufficientPrivilegeError):
             await self._pool.execute(
                 "ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS title text"
+            )
+        with suppress(asyncpg.InsufficientPrivilegeError):
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_status text"
+            )
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_error text"
             )
         # Without the privilege to add it, keep writing the old shape instead of failing turns.
         present = await self._pool.fetchval(
@@ -1045,7 +1072,8 @@ class LakebaseSessionStore:
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING
                 id, session_id, owner_id, cron_expression, prompt,
-                status, next_run_at, created_at, last_run_at
+                status, next_run_at, created_at, last_run_at,
+                last_status, last_error
             """,
             _uuid(schedule.id),
             _uuid(schedule.session_id),
@@ -1067,7 +1095,8 @@ class LakebaseSessionStore:
         query = """
             SELECT
                 id, session_id, owner_id, cron_expression, prompt,
-                status, next_run_at, created_at, last_run_at
+                status, next_run_at, created_at, last_run_at,
+                last_status, last_error
             FROM clawhouse.schedules
             WHERE owner_id = $1 AND ($2::uuid IS NULL OR session_id = $2::uuid)
             ORDER BY created_at DESC
@@ -1092,30 +1121,41 @@ class LakebaseSessionStore:
             """
             SELECT
                 id, session_id, owner_id, cron_expression, prompt,
-                status, next_run_at, created_at, last_run_at
+                status, next_run_at, created_at, last_run_at,
+                last_status, last_error
             FROM clawhouse.schedules
             WHERE status = 'active' AND next_run_at <= $1
             ORDER BY next_run_at ASC
+            FOR UPDATE SKIP LOCKED
             """,
             now,
         )
         return tuple(_schedule_from_row(r) for r in rows)
 
     async def update_schedule_run(
-        self, schedule_id: str, last_run_at: datetime, next_run_at: datetime
+        self,
+        schedule_id: str,
+        last_run_at: datetime,
+        next_run_at: datetime,
+        *,
+        last_status: str | None = None,
+        last_error: str | None = None,
     ) -> ScheduleEntry | None:
         row = await self._pool.fetchrow(
             """
             UPDATE clawhouse.schedules
-            SET last_run_at = $2, next_run_at = $3
+            SET last_run_at = $2, next_run_at = $3, last_status = $4, last_error = $5
             WHERE id = $1
             RETURNING
                 id, session_id, owner_id, cron_expression, prompt,
-                status, next_run_at, created_at, last_run_at
+                status, next_run_at, created_at, last_run_at,
+                last_status, last_error
             """,
             _uuid(schedule_id),
             last_run_at,
             next_run_at,
+            last_status,
+            last_error,
         )
         if row is None:
             return None
@@ -1172,6 +1212,8 @@ def _schedule_from_row(row: asyncpg.Record) -> ScheduleEntry:
         next_run_at=row["next_run_at"],
         created_at=row["created_at"],
         last_run_at=row["last_run_at"],
+        last_status=row.get("last_status"),
+        last_error=row.get("last_error"),
     )
 
 

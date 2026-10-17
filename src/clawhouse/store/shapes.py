@@ -92,3 +92,5 @@ class ScheduleEntry:
     next_run_at: datetime
     created_at: datetime
     last_run_at: datetime | None = None
+    last_status: str | None = None
+    last_error: str | None = None

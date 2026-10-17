@@ -204,7 +204,11 @@ async def test_jobs_run_now_waits_for_approval_then_triggers_the_run() -> None:
     resumed = await _approve(client, store, paused.approval_id)
 
     assert resumed.status == "ok"
-    assert _tool_result(resumed) == {"run_id": 901, "job_id": 5}
+    assert _tool_result(resumed) == {
+        "run_id": 901,
+        "job_id": 5,
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     client.jobs.run_now.assert_called_once_with(job_id=5, job_parameters={"env": "prod"})
 
 
@@ -221,7 +225,11 @@ async def test_jobs_cancel_run_waits_for_approval_then_cancels() -> None:
     resumed = await _approve(client, store, paused.approval_id)
 
     assert resumed.status == "ok"
-    assert _tool_result(resumed) == {"run_id": 77, "cancel_requested": True}
+    assert _tool_result(resumed) == {
+        "run_id": 77,
+        "cancel_requested": True,
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     client.jobs.cancel_run.assert_called_once_with(run_id=77)
 
 
@@ -245,7 +253,11 @@ async def test_jobs_create_python_task_waits_for_approval_then_creates_the_job()
     resumed = await _approve(client, store, paused.approval_id)
 
     assert resumed.status == "ok"
-    assert _tool_result(resumed) == {"job_id": 42, "name": "etl"}
+    assert _tool_result(resumed) == {
+        "job_id": 42,
+        "name": "etl",
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     client.jobs.create.assert_called_once_with(
         name="etl",
         tasks=[
@@ -274,7 +286,11 @@ async def test_jobs_create_sql_task_uses_the_session_warehouse() -> None:
     assert paused.approval_id is not None
     resumed = await _approve(client, store, paused.approval_id)
 
-    assert _tool_result(resumed) == {"job_id": 43, "name": "report"}
+    assert _tool_result(resumed) == {
+        "job_id": 43,
+        "name": "report",
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     client.jobs.create.assert_called_once_with(
         name="report",
         tasks=[
@@ -305,7 +321,11 @@ async def test_jobs_create_sql_task_with_inline_query_imports_file_to_workspace(
     assert paused.approval_id is not None
     resumed = await _approve(client, store, paused.approval_id)
 
-    assert _tool_result(resumed) == {"job_id": 44, "name": "ny_taxi_outliers"}
+    assert _tool_result(resumed) == {
+        "job_id": 44,
+        "name": "ny_taxi_outliers",
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     expected_path = "/Workspace/Shared/clawhouse/ny_taxi_outliers.sql"
     assert client.workspace.upload.call_args.kwargs["path"] == expected_path
     client.workspace.mkdirs.assert_called_once_with("/Workspace/Shared/clawhouse")
@@ -346,7 +366,11 @@ async def test_jobs_edit_waits_for_approval_then_updates_the_settings() -> None:
     resumed = await _approve(client, store, paused.approval_id)
 
     assert resumed.status == "ok"
-    assert _tool_result(resumed) == {"job_id": 5, "updated": True}
+    assert _tool_result(resumed) == {
+        "job_id": 5,
+        "updated": True,
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
     client.jobs.update.assert_called_once()
     call = client.jobs.update.call_args
     assert call.kwargs["job_id"] == 5
@@ -630,7 +654,11 @@ async def test_jobs_edit_schedule_and_name_updates_job_settings() -> None:
     assert paused.approval_id is not None
     resumed = await _approve(client, store, paused.approval_id)
     assert resumed.status == "ok"
-    assert _tool_result(resumed) == {"job_id": 5, "updated": True}
+    assert _tool_result(resumed) == {
+        "job_id": 5,
+        "updated": True,
+        "identity": {"kind": "user_obo", "label": "user"},
+    }
 
     client.jobs.update.assert_called_once()
     call = client.jobs.update.call_args
