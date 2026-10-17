@@ -1187,12 +1187,12 @@ async def test_run_turn_populates_turn_deps_user_token() -> None:
         return orig_iter(self, *args, **kwargs)  # type: ignore[arg-type]
 
     with patch.object(pydantic_ai.Agent, "iter", side_effect=capture_iter, autospec=True):
-        ctx = _ctx(store, FunctionModel(stream_function=model_fn), user_token="secret-token-777")
+        ctx = _ctx(store, FunctionModel(stream_function=model_fn), user_token="usr-tok-777")
         result = await run_turn(SESSION, "hi", ctx=ctx)
 
     assert result.status == "ok"
     assert len(captured_deps) == 1
-    assert captured_deps[0].user_token == "secret-token-777"
+    assert captured_deps[0].user_token == "usr-tok-777"
 
 
 def test_capabilities_for_turn_does_not_mutate_original_capability() -> None:
