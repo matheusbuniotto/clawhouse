@@ -18,9 +18,9 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 ## Handoff
 
 **Feature**: native-model-messages
-**Where**: S1 planned and checks validated
-**In progress**: Building S1 (Sub-issue 2 of Epic #77, #79)
-**Next step**: Implement store.py, turn.py, mentions.py changes and tests
+**Where**: Completed and squashed into main (PR #107 closed issue #79)
+**In progress**: Idle / ready for next sub-issue in Epic #77 (Issue #83 [6/14])
+**Next step**: Plan feature for Issue #83
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: feat/native-model-messages
+**Branch**: main
