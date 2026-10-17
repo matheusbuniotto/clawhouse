@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS clawhouse.sessions (
     id uuid PRIMARY KEY,
     owner_id text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    title text
+    title text,
+    messages text
 );
 
 CREATE TABLE IF NOT EXISTS clawhouse.runs (
@@ -207,6 +208,10 @@ class SessionStore(Protocol):
 
     async def transcript(self, session_id: str, owner_id: str) -> tuple[TranscriptEntry, ...]: ...
 
+    async def messages(self, session_id: str) -> bytes | None: ...
+
+    async def save_messages(self, session_id: str, messages: bytes) -> None: ...
+
     async def create_approval(
         self,
         *,
@@ -299,6 +304,7 @@ class _MemorySession:
     last_status: TurnStatus | None = None
     title: str | None = None
     last_run_at: datetime | None = None
+    messages: bytes | None = None
 
 
 class MemorySessionStore:
@@ -418,6 +424,21 @@ class MemorySessionStore:
             if session.owner_id != owner_id:
                 raise SessionForbidden(session_id)
             session.entries.clear()
+            session.messages = None
+
+    async def messages(self, session_id: str) -> bytes | None:
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFound(session_id)
+            return session.messages
+
+    async def save_messages(self, session_id: str, messages: bytes) -> None:
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise SessionNotFound(session_id)
+            session.messages = messages
 
     async def create_approval(
         self,
@@ -630,6 +651,9 @@ class LakebaseSessionStore:
             await self._pool.execute(
                 "ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS title text"
             )
+            await self._pool.execute(
+                "ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS messages text"
+            )
         with suppress(asyncpg.InsufficientPrivilegeError):
             await self._pool.execute(
                 "ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_status text"
@@ -807,10 +831,38 @@ class LakebaseSessionStore:
 
     async def clear_transcript(self, session_id: str, owner_id: str) -> None:
         await self._require_owner(session_id, owner_id)
-        await self._pool.execute(
-            "DELETE FROM clawhouse.transcript_entries WHERE session_id = $1",
+        session = _uuid(session_id)
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "DELETE FROM clawhouse.transcript_entries WHERE session_id = $1",
+                session,
+            )
+            await conn.execute(
+                "UPDATE clawhouse.sessions SET messages = NULL WHERE id = $1",
+                session,
+            )
+
+    async def messages(self, session_id: str) -> bytes | None:
+        row = await self._pool.fetchrow(
+            "SELECT messages FROM clawhouse.sessions WHERE id = $1",
             _uuid(session_id),
         )
+        if row is None:
+            raise SessionNotFound(session_id)
+        raw = row["messages"]
+        if raw is None:
+            return None
+        return raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
+
+    async def save_messages(self, session_id: str, messages: bytes) -> None:
+        text = messages.decode("utf-8") if isinstance(messages, bytes) else str(messages)
+        res = await self._pool.execute(
+            "UPDATE clawhouse.sessions SET messages = $1 WHERE id = $2",
+            text,
+            _uuid(session_id),
+        )
+        if res == "UPDATE 0":
+            raise SessionNotFound(session_id)
 
     async def delete_session(self, session_id: str, owner_id: str) -> bool:
         await self._require_owner(session_id, owner_id)

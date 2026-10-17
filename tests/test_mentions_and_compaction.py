@@ -12,6 +12,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from clawhouse.agent.history import to_model_messages
 from clawhouse.agent.roster import choose_agent, first_agent_mention
 from clawhouse.agent.turn import TurnContext, run_turn
+from clawhouse.capabilities import mentions as mentions_module
 from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.capabilities.mentions import (
     CompactionResult,
@@ -251,3 +252,7 @@ async def test_turn_with_skill_command_injects_instructions_into_turn(tmp_path: 
     # Verify that the injected context with skill instructions was passed to the agent
     assert any("### Skill Instructions: code_review" in p for p in received_prompts)
     assert any("Always check for edge cases and types." in p for p in received_prompts)
+
+
+def test_mentions_module_does_not_have_transcript_to_messages() -> None:
+    assert not hasattr(mentions_module, "_transcript_to_messages")

@@ -26,6 +26,7 @@ from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
     ModelMessage,
+    ModelMessagesTypeAdapter,
     ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
@@ -41,7 +42,11 @@ from pydantic_ai_harness.guardrails import GuardrailResult, ToolCallInfo, ToolGu
 
 from clawhouse.agent.commands import Command, CommandContext, dispatch_command, parse_command
 from clawhouse.agent.core import TurnDeps, clawhouse_agent, format_utc
-from clawhouse.agent.history import foreign_tool_filter, to_model_messages
+from clawhouse.agent.history import (
+    drop_unreturned_tool_calls,
+    foreign_tool_filter,
+    to_model_messages,
+)
 from clawhouse.agent.prompt import (
     RuntimeMeta,
     SystemPrompt,
@@ -661,6 +666,8 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
     prior = await ctx.store.transcript(claimed.session_id, ctx.owner_id)
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
+    history = await _load_session_history(ctx.store, claimed.session_id, ctx.owner_id, prior=prior)
+    history = drop_unreturned_tool_calls(history)
     await _append_user(claimed)
     if choice.missing is not None:
         await _warn(claimed, queue, missing_agent_warning(choice.missing))
@@ -678,8 +685,30 @@ async def _run_model(claimed: _Claimed, queue: _Queue) -> TurnResult:
         profile=profile,
         birth_ritual=birth_ritual,
         user_prompt=user_prompt,
-        history=to_model_messages(prior) or None,
+        history=history or None,
     )
+
+
+async def _load_session_history(
+    store: SessionStore,
+    session_id: str,
+    owner_id: str,
+    prior: tuple[TranscriptEntry, ...] | None = None,
+) -> list[ModelMessage]:
+    raw = await store.messages(session_id)
+    if raw:
+        try:
+            return ModelMessagesTypeAdapter.validate_json(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to deserialize native messages for session %s: %s; "
+                "falling back to transcript",
+                session_id,
+                exc,
+            )
+    if prior is None:
+        prior = await store.transcript(session_id, owner_id)
+    return to_model_messages(prior)
 
 
 async def _warn(claimed: _Claimed, queue: _Queue, text: str) -> None:
@@ -717,21 +746,23 @@ async def _run_model_resume(
     claimed = await _start_agent(claimed, queue, await _paused_agent(ctx, prior))
     profile = await ctx.store.get_user_profile(ctx.owner_id)
     birth_ritual = _birth_ritual_active(claimed, prior, profile)
-    call_args = approval.arguments
-    if ctx.user_token and "[REDACTED]" in call_args:
-        call_args = call_args.replace("[REDACTED]", ctx.user_token)
-    history = to_model_messages(prior)
-    history.append(
-        ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name=approval.tool_name,
-                    args=call_args,
-                    tool_call_id=approval.tool_call_id,
-                )
-            ]
+    history = await _load_session_history(ctx.store, claimed.session_id, ctx.owner_id, prior=prior)
+    if not any(
+        isinstance(p, ToolCallPart) and p.tool_call_id == approval.tool_call_id
+        for m in history
+        for p in getattr(m, "parts", [])
+    ):
+        history.append(
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name=approval.tool_name,
+                        args=approval.arguments,
+                        tool_call_id=approval.tool_call_id,
+                    )
+                ]
+            )
         )
-    )
     return await _invoke_agent(
         claimed,
         queue,
@@ -783,6 +814,7 @@ async def _invoke_agent(  # noqa: PLR0913
     )
     if usage:
         await _publish(ctx, queue, usage[0])
+    await claimed.ctx.store.save_messages(claimed.session_id, result.all_messages_json())
     if isinstance(result.output, DeferredToolRequests):
         return await _handle_deferred_approvals(claimed, queue, result.output)
     raw_reply = result.output if isinstance(result.output, str) else str(result.output)
