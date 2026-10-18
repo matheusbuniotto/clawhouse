@@ -1,7 +1,6 @@
 """Lakebase memory table and transcript FTS."""
 
 import os
-from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -76,5 +75,5 @@ async def test_fts_returns_owner_match_only() -> None:
         await store.close()
     assert hits
     assert all(hit.session_id == own.id for hit in hits)
-    assert hits[0].excerpt
-    assert datetime.now(UTC)
+    assert "refunds" in hits[0].excerpt
+    assert all(hit.session_id != other.id for hit in hits)

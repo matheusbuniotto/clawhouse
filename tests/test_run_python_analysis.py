@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -134,7 +135,8 @@ async def test_success_returns_logs_capped_at_20000_and_duration_ms() -> None:
     run = _run(life_cycle=RunLifeCycleState.TERMINATED, result=RunResultState.SUCCESS)
     client.jobs.submit.return_value = _submitted(run)
     client.jobs.get_run.return_value = run
-    client.jobs.get_run_output.return_value = RunOutput(logs="x" * 20_010)
+    raw = "HEAD" + ("x" * 20_006) + "TAIL"
+    client.jobs.get_run_output.return_value = RunOutput(logs=raw)
 
     result = await _tools(client).run_python_analysis("print(1)", execution_id="exec-4")
 
@@ -142,8 +144,10 @@ async def test_success_returns_logs_capped_at_20000_and_duration_ms() -> None:
     assert result["duration_ms"] == 2_000
     logs = result["logs"]
     assert isinstance(logs, str)
-    assert logs == "x" * 20_000
     assert len(logs) == 20_000
+    assert logs == raw[-20_000:]
+    assert logs.endswith("TAIL")
+    assert not logs.startswith("HEAD")
 
 
 @pytest.mark.asyncio
@@ -269,15 +273,18 @@ async def test_tool_call_frame_names_run_python_analysis_and_execution_id() -> N
     client = MagicMock()
     store = MemorySessionStore()
     model = _calls("run_python_analysis", {"code": "print(1)", "execution_id": "exec-sse"})
-    paused = await run_turn(SESSION, "analyze", ctx=_ctx(client, store, model, "user-token"))
+    emitted: list[ToolCallNotice] = []
+
+    async def capture(notice: object) -> None:
+        if isinstance(notice, ToolCallNotice):
+            emitted.append(notice)
+
+    ctx = _ctx(client, store, model, "user-token")
+    ctx = replace(ctx, emit=capture)
+    paused = await run_turn(SESSION, "analyze", ctx=ctx)
     assert paused.status == "pending_approval"
-    frame = _stream_frame(
-        ToolCallNotice(
-            name="run_python_analysis",
-            arguments=paused.transcript[1].content,
-            tool_call_id="call-1",
-        )
-    )
+    assert emitted, "turn emitted no tool_call notice"
+    frame = _stream_frame(emitted[0])
     assert frame is not None
     event, payload = frame
     assert event == "tool_call"

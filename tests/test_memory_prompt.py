@@ -31,10 +31,19 @@ def _capture(seen: list[str]) -> FunctionModel:
 
 @pytest.mark.asyncio
 async def test_turn_injects_at_most_5_entries_and_2000_chars() -> None:
-    store = MemorySessionStore(now=lambda: datetime(2026, 10, 12, 12, 0, tzinfo=UTC))
+    ticks = {"n": 0}
+
+    def now() -> datetime:
+        ticks["n"] += 1
+        return datetime(2026, 10, 12, 12, 0, ticks["n"], tzinfo=UTC)
+
+    store = MemorySessionStore(now=now)
     await store.open_session(SESSION, OWNER)
-    for index in range(6):
-        await store.save_memory(OWNER, f"refunds fact {index} " + ("x" * 500), None, None)
+    tie_old = await store.save_memory(OWNER, "refunds once", None, None)
+    await store.save_memory(OWNER, "refunds filler " + ("y" * 1800), None, None)
+    older = await store.save_memory(OWNER, "refunds refunds", None, None)
+    newer = await store.save_memory(OWNER, "refunds", None, None)
+    tie_new = await store.save_memory(OWNER, "refunds once", None, None)
     seen: list[str] = []
     await run_turn(
         SESSION,
@@ -50,6 +59,13 @@ async def test_turn_injects_at_most_5_entries_and_2000_chars() -> None:
     lines = [line for line in memory.splitlines() if line.startswith("[")]
     assert 1 <= len(lines) <= 5
     assert sum(len(line) for line in lines) + max(len(lines) - 1, 0) <= 2000
+    assert lines[0].startswith(f"[{older.id} {older.created_at.isoformat()}]")
+    assert newer.id not in lines[0]
+    assert newer.created_at > older.created_at
+    assert tie_new.created_at > tie_old.created_at
+    block = "\n".join(lines)
+    assert tie_new.id in block
+    assert tie_old.id not in block
     assert all(line.startswith("[") and "2026-10-12" in line for line in lines)
 
 

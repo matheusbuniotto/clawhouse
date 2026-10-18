@@ -101,9 +101,13 @@ async def test_search_excludes_other_owners(tmp_path: Path) -> None:
         transport=ASGITransport(app=_app(store, tmp_path)), base_url="http://test"
     ) as client:
         response = await client.get("/api/search", params={"q": "refunds"}, headers=HEADERS)
-    ids = {row["session_id"] for row in response.json()["results"]}
+    results = response.json()["results"]
+    ids = {row["session_id"] for row in results}
+    assert store._sessions[own].owner_id == OWNER
+    assert store._sessions[other].owner_id == OTHER
     assert own in ids
     assert other not in ids
+    assert all(store._sessions[row["session_id"]].owner_id == OWNER for row in results)
 
 
 @pytest.mark.asyncio
@@ -219,11 +223,15 @@ async def test_delete_missing_memory_returns_404(tmp_path: Path) -> None:
     async with AsyncClient(
         transport=ASGITransport(app=_app(store, tmp_path)), base_url="http://test"
     ) as client:
-        response = await client.delete(
+        missing = await client.delete(
             "/api/memory/00000000-0000-4000-8000-000000000099",
             headers=HEADERS,
         )
-    assert response.status_code == 404
+        foreign = await store.save_memory(OTHER, "hidden", None, None)
+        other_owner = await client.delete(f"/api/memory/{foreign.id}", headers=HEADERS)
+    assert missing.status_code == 404
+    assert other_owner.status_code == 404
+    assert (await store.list_memories(OTHER))[0].id == foreign.id
 
 
 @pytest.mark.asyncio

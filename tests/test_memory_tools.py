@@ -52,7 +52,8 @@ async def test_recall_returns_at_most_5_with_citation_fields() -> None:
     tool = next(entry for entry in result.transcript if entry.role == "tool_result")
     rows = json.loads(tool.content)
     assert len(rows) == 5
-    assert set(rows[0]) == {"id", "text", "table_fqn", "source_session_id", "created_at"}
+    expected = {"id", "text", "table_fqn", "source_session_id", "created_at"}
+    assert all(set(row) == expected for row in rows)
 
 
 @pytest.mark.asyncio
@@ -69,6 +70,7 @@ async def test_remember_persists_caller_row_and_returns_id() -> None:
     tool = next(entry for entry in result.transcript if entry.role == "tool_result")
     memory_id = json.loads(tool.content)["id"]
     stored = await store.list_memories(OWNER)
+    assert len(stored) == 1
     assert stored[0].id == memory_id
     assert stored[0].owner_id == OWNER
     assert stored[0].text == "net of refunds"
