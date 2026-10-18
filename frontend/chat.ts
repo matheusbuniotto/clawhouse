@@ -39,7 +39,90 @@ import {
 
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
+const VARIANT_KEY = "clawhouse.chat_variant";
 const WAITING_FOR_ANSWER = "Esperando sua resposta na pergunta acima.";
+
+export type ChatVariant = "classic" | "studio" | "capsule";
+
+interface FormattedModel {
+  id: string;
+  name: string;
+  provider: string;
+  tag: string;
+  icon: string;
+}
+
+function formatModelOption(id: string, label: string): FormattedModel {
+  const idLower = id.toLowerCase();
+  const labelLower = label.toLowerCase();
+  let provider = "Databricks";
+  let icon = "⚡";
+  if (idLower.includes("gpt") || idLower.includes("openai")) {
+    provider = "OpenAI";
+    icon = "❇️";
+  } else if (idLower.includes("claude") || idLower.includes("anthropic")) {
+    provider = "Anthropic";
+    icon = "✴️";
+  } else if (idLower.includes("meta") || idLower.includes("llama")) {
+    provider = "Meta";
+    icon = "🦙";
+  } else if (idLower.includes("dbrx") || labelLower.includes("dbrx")) {
+    provider = "Databricks";
+    icon = "🧱";
+  } else if (idLower.includes("mistral")) {
+    provider = "Mistral";
+    icon = "🌪️";
+  }
+
+  let name = label;
+  if (name.startsWith("Databricks · ")) name = name.slice("Databricks · ".length);
+  if (name.startsWith("databricks-")) name = name.slice("databricks-".length);
+  name = name.replace(/-instruct$/i, "").replace(/-chat$/i, "");
+  name = name.replace(/meta-llama-/i, "Llama-");
+  name = name.replace(/(\d+)-(\d+)/g, "$1.$2");
+  if (/gpt-?4o/i.test(label) || /gpt-?4o/i.test(id)) {
+    name = "GPT-4o";
+  } else if (/gpt-?4/i.test(label) || /gpt-?4/i.test(id)) {
+    name = "GPT-4";
+  } else {
+    name = name
+      .split("-")
+      .map((p) => {
+        const lower = p.toLowerCase();
+        if (
+          lower === "3" ||
+          lower === "1" ||
+          lower === "2" ||
+          lower === "70b" ||
+          lower === "8b" ||
+          lower === "405b"
+        ) {
+          return p.toUpperCase();
+        }
+        return p.charAt(0).toUpperCase() + p.slice(1);
+      })
+      .join(" ");
+  }
+
+  let tag = "Default";
+  if (
+    idLower.includes("fast") ||
+    idLower.includes("mini") ||
+    idLower.includes("flash") ||
+    idLower.includes("8b")
+  ) {
+    tag = "Fast";
+  } else if (
+    idLower.includes("reasoning") ||
+    idLower.includes("think") ||
+    idLower.includes("r1") ||
+    idLower.includes("70b")
+  ) {
+    tag = "Reasoning";
+  }
+
+  return { id, name, provider, tag, icon };
+}
 
 interface Entry {
   role: "user" | "assistant" | "tool_call" | "tool_result" | "notice";
@@ -80,7 +163,33 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   clearButton.id = "chat-clear";
   clearButton.type = "button";
   const headerActions = el("div", "chat-header-actions");
-  headerActions.append(renameButton, clearButton);
+
+  // Variant Switcher Pill Group
+  const variantSwitcher = el("div", "chat-variant-switcher");
+  variantSwitcher.setAttribute("role", "radiogroup");
+  variantSwitcher.setAttribute("aria-label", "Composer layout variant");
+
+  const variantBtnClassic = el("button", "variant-pill active", "1. OpenClaw Classic");
+  variantBtnClassic.type = "button";
+  variantBtnClassic.dataset.variant = "classic";
+  variantBtnClassic.title = "Variant 1: OpenClaw Classic Unified Card (2026.9.3 / 2026.9.4)";
+
+  const variantBtnStudio = el("button", "variant-pill", "2. Studio HUD");
+  variantBtnStudio.type = "button";
+  variantBtnStudio.dataset.variant = "studio";
+  variantBtnStudio.title = "Variant 2: Studio Pro HUD (2026.9.2 Two-Pane & MCP Studio)";
+
+  const variantBtnCapsule = el("button", "variant-pill", "3. Agent Capsule");
+  variantBtnCapsule.type = "button";
+  variantBtnCapsule.dataset.variant = "capsule";
+  variantBtnCapsule.title = "Variant 3: Agent Capsule & Floating Dock (2026.9.5 Automation & Drafts)";
+
+  const variantBtnCompare = el("button", "variant-pill variant-compare-btn", "✨ Compare 3");
+  variantBtnCompare.type = "button";
+  variantBtnCompare.title = "Compare all 3 variants side-by-side with live simulator";
+
+  variantSwitcher.append(variantBtnClassic, variantBtnStudio, variantBtnCapsule, variantBtnCompare);
+  headerActions.append(variantSwitcher, renameButton, clearButton);
   header.append(titleLabel, headerActions);
 
   const transcript = el("section", "log");
@@ -90,21 +199,117 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const form = document.createElement("form");
   form.id = "composer";
   form.className = "composer";
+  form.dataset.variant = "classic";
+
+  // Variant 2: Studio Upper Deck (Agent Roster & Horizon Meter)
+  const studioDeck = el("div", "studio-deck");
+  const studioAgentStrip = el("div", "studio-agent-strip");
+  const studioActiveAgentBadge = el("span", "studio-active-agent", "● 🦀 main (Lead)");
+  const studioDelegateLabel = el("span", "studio-delegate-label", "Delegate:");
+  const studioDelegateChips = el("div", "studio-delegate-chips");
+  studioAgentStrip.append(studioActiveAgentBadge, studioDelegateLabel, studioDelegateChips);
+
+  const studioCtxStrip = el("div", "studio-ctx-strip");
+  studioCtxStrip.title = "Context Horizon Meter — Click for details";
+  const studioCtxTrack = el("div", "studio-ctx-track");
+  const studioCtxFill = el("div", "studio-ctx-fill");
+  studioCtxTrack.append(studioCtxFill);
+  const studioCtxLabel = el("span", "studio-ctx-label", "0 / 128k (0%)");
+  studioCtxStrip.append(studioCtxTrack, studioCtxLabel);
+  studioDeck.append(studioAgentStrip, studioCtxStrip);
+
+  // Variant 3: Capsule Top Ribbon (Active Persona & Draft Status)
+  const capsuleRibbon = el("div", "capsule-ribbon");
+  const capsuleAgentBadge = el("div", "capsule-agent-badge");
+  const capsulePulse = el("span", "capsule-pulse-dot");
+  const capsuleAgentLabel = el("span", "capsule-agent-name", "🦀 main");
+  const capsulePersonaTag = el("span", "capsule-persona-tag", "Active Agent");
+  capsuleAgentBadge.append(capsulePulse, capsuleAgentLabel, capsulePersonaTag);
+
+  const capsuleDraftBadge = el("div", "capsule-draft-badge");
+  const capsuleDraftDot = el("span", "capsule-draft-dot");
+  const capsuleDraftText = el("span", "capsule-draft-text", "Ready");
+  capsuleDraftBadge.append(capsuleDraftDot, capsuleDraftText);
+  capsuleRibbon.append(capsuleAgentBadge, capsuleDraftBadge);
 
   const input = document.createElement("textarea");
   input.id = "message";
   input.rows = 1;
-  input.placeholder = "Message the agent";
+  input.placeholder = "Message 🦀 main (or type @ to delegate)...";
   input.required = true;
 
   const toolbar = el("div", "composer-toolbar");
+
+  // Left Toolbar: Action button (+), Agent Selector Pill, Typing Status, Studio Commands
+  const toolbarLeft = el("div", "composer-toolbar-left");
+
+  const attachBtn = el("button", "composer-action-btn", "+");
+  attachBtn.type = "button";
+  attachBtn.title = "Add attachments, SQL tables, or tools";
+  attachBtn.setAttribute("aria-label", "Attachments and tools");
+
+  const agentWrapper = el("div", "agent-selector-wrapper");
+  const agentTriggerBtn = el("button", "agent-trigger");
+  agentTriggerBtn.id = "agent-trigger";
+  agentTriggerBtn.type = "button";
+  agentTriggerBtn.setAttribute("aria-haspopup", "menu");
+  agentTriggerBtn.setAttribute("aria-expanded", "false");
+  agentTriggerBtn.title = "Switch active agent or delegate";
+  const agentEmojiSpan = el("span", "agent-trigger-emoji", "🦀");
+  const agentNameSpan = el("span", "agent-trigger-label", "main");
+  const agentChevronSpan = el("span", "agent-trigger-chevron", "▾");
+  agentTriggerBtn.append(agentEmojiSpan, agentNameSpan, agentChevronSpan);
+
+  const agentPopover = el("div", "agent-popover");
+  agentPopover.id = "agent-popover";
+  agentPopover.hidden = true;
+  agentPopover.setAttribute("role", "menu");
+  agentWrapper.append(agentTriggerBtn, agentPopover);
+
+  const typingStatusPill = el("span", "typing-status-pill");
+  const typingPulse = el("span", "typing-pulse-dot");
+  const typingStatusText = el("span", "typing-status-text", "Typing · not sent");
+  typingStatusPill.append(typingPulse, typingStatusText);
+  typingStatusPill.hidden = true;
+
+  const studioCmdBtn = el("button", "studio-cmd-pill", "/ Commands");
+  studioCmdBtn.type = "button";
+  studioCmdBtn.title = "Open slash command menu";
+
+  const studioToolChip = el("span", "studio-tool-chip", "🛠 6 Tools");
+  studioToolChip.title = "Active capabilities: Lakeflow, Lakebase, SQL Warehouse";
+
+  toolbarLeft.append(attachBtn, agentWrapper, typingStatusPill, studioCmdBtn, studioToolChip);
+
+  // Right Toolbar: Custom Model Selector, Context Meter with popover, Abort, Send
+  const toolbarRight = el("div", "composer-toolbar-right");
+
+  const modelSelectorWrapper = el("div", "model-selector-wrapper");
   const modelLabel = el("label", "sr", "Model");
   modelLabel.htmlFor = "model";
   const modelPicker = document.createElement("select");
   modelPicker.id = "model";
   modelPicker.className = "model-pill";
 
-  // Context-window meter: a ring showing the input tokens sent to the model.
+  const modelCustomTrigger = el("button", "model-custom-trigger");
+  modelCustomTrigger.id = "model-custom-trigger";
+  modelCustomTrigger.type = "button";
+  modelCustomTrigger.setAttribute("aria-haspopup", "listbox");
+  modelCustomTrigger.setAttribute("aria-expanded", "false");
+  modelCustomTrigger.title = "Choose model endpoint";
+  const modelTriggerIcon = el("span", "model-trigger-icon", "⚡");
+  const modelTriggerName = el("span", "model-trigger-name", "Model");
+  const modelTriggerChevron = el("span", "model-trigger-chevron", "▾");
+  modelCustomTrigger.append(modelTriggerIcon, modelTriggerName, modelTriggerChevron);
+
+  const modelCustomPopover = el("div", "model-custom-popover");
+  modelCustomPopover.id = "model-custom-popover";
+  modelCustomPopover.hidden = true;
+  modelCustomPopover.setAttribute("role", "listbox");
+
+  modelSelectorWrapper.append(modelLabel, modelPicker, modelCustomTrigger, modelCustomPopover);
+
+  // Context-window meter: a ring showing the input tokens sent to the model + popover.
   const meter = el("div", "ctx-meter");
   meter.id = "ctx-meter";
   meter.dataset.level = "ok";
@@ -127,21 +332,67 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     ringFill,
   );
   const meterLabel = el("span", "ctx-label", "0");
-  meter.append(ring, meterLabel);
+
+  // Horizon mini bar (integrated like Studio B)
+  const horizonBar = el("div", "ctx-horizon-bar");
+  const horizonFill = el("div", "ctx-horizon-fill");
+  horizonBar.append(horizonFill);
+
+  const meterCapacity = el("span", "ctx-capacity", "");
+  const meterPct = el("span", "ctx-pct", "");
+  const meterDivider = el("span", "ctx-divider", "·");
+  const meterCostPill = el("span", "ctx-cost-pill", "$0.00");
+  const meterChevron = el("span", "ctx-chevron", "▾");
+
+  const ctxPopover = el("div", "ctx-popover");
+  ctxPopover.id = "ctx-popover";
+  ctxPopover.hidden = true;
+  meter.append(
+    ring,
+    horizonBar,
+    meterLabel,
+    meterCapacity,
+    meterPct,
+    meterDivider,
+    meterCostPill,
+    meterChevron,
+    ctxPopover,
+  );
 
   const abortButton = el("button", "abort", "Stop");
   abortButton.id = "abort";
   abortButton.type = "button";
   abortButton.hidden = true;
-  const sendButton = el("button", "send", "Send");
+
+  const sendButton = el("button", "send");
   sendButton.type = "submit";
-  toolbar.append(modelLabel, modelPicker, meter, abortButton, sendButton);
+  const sendIcon = svgEl("svg", {
+    width: "16",
+    height: "16",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2.5",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+  });
+  sendIcon.append(
+    svgEl("line", { x1: "12", y1: "19", x2: "12", y2: "5" }),
+    svgEl("polyline", { points: "5 12 12 5 19 12" }),
+  );
+  const sendLabel = el("span", "send-label", "Send");
+  const sendShortcut = el("span", "send-shortcut", "⌘↵");
+  sendButton.append(sendIcon, sendLabel, sendShortcut);
+
+  toolbarRight.append(modelSelectorWrapper, meter, abortButton, sendButton);
+  toolbar.append(toolbarLeft, toolbarRight);
 
   const statusLine = el("p", "status");
   statusLine.id = "status";
   statusLine.setAttribute("role", "status");
 
-  form.append(input, toolbar, statusLine);
+  form.append(studioDeck, capsuleRibbon, input, toolbar, statusLine);
   root.append(header, transcript, form);
 
   let draft: HTMLElement | null = null;
@@ -154,7 +405,56 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let controller: AbortController | null = null;
 
   let contextTokens = 0;
+  let outputTokens = 0;
   let contextWindow: number | null = null;
+
+  function getModelPricing(modelId: string): { inputPerMillion: number; outputPerMillion: number; label: string } {
+    const m = modelId.toLowerCase();
+    if (m.includes("llama-3-3-70b") || m.includes("llama-3.3-70b")) {
+      return { inputPerMillion: 0.40, outputPerMillion: 1.00, label: "Llama 3.3 70B ($0.40/1M)" };
+    }
+    if (m.includes("llama-3-1-8b") || m.includes("llama-3.1-8b") || m.includes("8b")) {
+      return { inputPerMillion: 0.05, outputPerMillion: 0.15, label: "Llama 3.1 8B ($0.05/1M)" };
+    }
+    if (m.includes("llama-3-1-405b") || m.includes("llama-3.1-405b") || m.includes("405b")) {
+      return { inputPerMillion: 1.50, outputPerMillion: 3.00, label: "Llama 3.1 405B ($1.50/1M)" };
+    }
+    if (m.includes("dbrx")) {
+      return { inputPerMillion: 0.75, outputPerMillion: 2.25, label: "DBRX ($0.75/1M)" };
+    }
+    if (m.includes("claude-3-5-sonnet") || m.includes("claude-3-7-sonnet") || m.includes("sonnet")) {
+      return { inputPerMillion: 3.00, outputPerMillion: 15.00, label: "Claude 3.5 Sonnet ($3.00/1M)" };
+    }
+    if (m.includes("claude-3-5-haiku") || m.includes("haiku")) {
+      return { inputPerMillion: 0.80, outputPerMillion: 4.00, label: "Claude 3.5 Haiku ($0.80/1M)" };
+    }
+    if (m.includes("gpt-4o-mini")) {
+      return { inputPerMillion: 0.15, outputPerMillion: 0.60, label: "GPT-4o-mini ($0.15/1M)" };
+    }
+    if (m.includes("gpt-4o") || m.includes("gpt-4")) {
+      return { inputPerMillion: 2.50, outputPerMillion: 10.00, label: "GPT-4o ($2.50/1M)" };
+    }
+    return { inputPerMillion: 0.50, outputPerMillion: 1.50, label: "Databricks Standard ($0.50/1M)" };
+  }
+
+  function calculateCost(modelId: string, inTokens: number, outTokens: number): { inCost: number; outCost: number; totalCost: number; rateLabel: string } {
+    const pricing = getModelPricing(modelId);
+    const inCost = (inTokens / 1_000_000) * pricing.inputPerMillion;
+    const outCost = (outTokens / 1_000_000) * pricing.outputPerMillion;
+    return {
+      inCost,
+      outCost,
+      totalCost: inCost + outCost,
+      rateLabel: pricing.label,
+    };
+  }
+
+  function formatCost(dollars: number): string {
+    if (dollars <= 0) return "$0.00";
+    if (dollars < 0.001) return "<$0.001";
+    if (dollars < 0.01) return `$${dollars.toFixed(3)}`;
+    return `$${dollars.toFixed(2)}`;
+  }
 
   function formatTokens(value: number): string {
     if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
@@ -170,25 +470,521 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     return "ok";
   }
 
+  function renderCtxPopover(denominator: number, ratio: number, level: string): void {
+    ctxPopover.replaceChildren();
+    const pricing = calculateCost(modelPicker.value || "", contextTokens, outputTokens);
+
+    const title = el("div", "ctx-popover-title", "Token & Cost Ledger");
+
+    const horizonBar = el("div", "ctx-popover-horizon");
+    const horizonFill = el("div", "ctx-popover-horizon-fill");
+    horizonFill.style.width = `${Math.min(100, Math.round(ratio * 100))}%`;
+    horizonFill.dataset.level = level;
+    horizonBar.append(horizonFill);
+
+    const rowTokens = el("div", "ctx-popover-row");
+    rowTokens.append(el("span", "", "Tokens Used"), el("strong", "", contextTokens.toLocaleString()));
+    const rowMax = el("div", "ctx-popover-row");
+    rowMax.append(el("span", "", "Window Limit"), el("strong", "", `${denominator.toLocaleString()} tokens`));
+    const rowPct = el("div", "ctx-popover-row");
+    rowPct.append(el("span", "", "Capacity Used"), el("strong", "", `${(ratio * 100).toFixed(1)}%`));
+    const rowRemaining = el("div", "ctx-popover-row");
+    rowRemaining.append(
+      el("span", "", "Remaining"),
+      el("strong", "", `${Math.max(0, denominator - contextTokens).toLocaleString()} tokens`),
+    );
+
+    const rowCost = el("div", "ctx-popover-row ctx-popover-cost-row");
+    rowCost.append(
+      el("span", "", "Est. Turn Cost"),
+      el("strong", "ctx-cost-highlight", formatCost(pricing.totalCost)),
+    );
+
+    const rowTier = el("div", "ctx-popover-row ctx-popover-tier");
+    rowTier.append(el("span", "", "Pricing Tier"), el("span", "model-badge-tag", pricing.rateLabel));
+
+    const rowHealth = el("div", "ctx-popover-row");
+    rowHealth.append(el("span", "", "Health Gauge"), el("strong", `status-${level}`, level.toUpperCase()));
+    ctxPopover.append(title, horizonBar, rowTokens, rowMax, rowPct, rowRemaining, rowCost, rowTier, rowHealth);
+  }
+
   function renderMeter(): void {
-    // The ring fills against the model's context window; 300k is a sane gauge
-    // when the window is unknown. Colour is absolute, per the product call.
-    const denominator = contextWindow ?? 300_000;
+    const denominator = contextWindow ?? 128_000;
     const ratio =
       denominator > 0 ? Math.min(1, contextTokens / denominator) : 0;
-    meter.dataset.level = usageLevel(contextTokens);
+    const level = usageLevel(contextTokens);
+    const pct = Math.round(ratio * 100);
+    const pricing = calculateCost(modelPicker.value || "", contextTokens, outputTokens);
+
+    meter.dataset.level = level;
     ringFill.setAttribute(
       "stroke-dashoffset",
       String(ringCircumference * (1 - ratio)),
     );
     meterLabel.textContent = formatTokens(contextTokens);
+
+    horizonFill.style.width = `${Math.min(100, pct)}%`;
+    horizonFill.dataset.level = level;
+    meterCapacity.textContent = `/ ${formatTokens(denominator)}`;
+    meterPct.textContent = `(${pct}%)`;
+    meterCostPill.textContent = formatCost(pricing.totalCost);
+
     const detail = contextWindow
-      ? `${contextTokens.toLocaleString()} / ${contextWindow.toLocaleString()} input tokens`
-      : `${contextTokens.toLocaleString()} input tokens; context window unknown`;
-    meter.title = detail;
+      ? `${contextTokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%) · ${formatCost(pricing.totalCost)}`
+      : `${contextTokens.toLocaleString()} tokens · ${formatCost(pricing.totalCost)}`;
+    meter.title = `Context & Cost: ${detail} — Click for full ledger`;
     meter.setAttribute("aria-label", `Context: ${detail}`);
+
+    // Synchronize Variant 2: Studio Horizon Meter
+    studioCtxFill.style.width = `${Math.min(100, pct)}%`;
+    studioCtxFill.dataset.level = level;
+    studioCtxLabel.textContent = `${formatTokens(contextTokens)} / ${formatTokens(denominator)} (${pct}%) · ${formatCost(pricing.totalCost)}`;
+
+    renderCtxPopover(denominator, ratio, level);
   }
 
+  // Emoji per handle, for headers rebuilt from a reloaded transcript.
+  const agentEmoji = new Map<string, string>();
+  let agentOptions: AgentOption[] = [];
+
+  let currentVariant: ChatVariant = "classic";
+  const storedVariant = (sessionStorage.getItem(VARIANT_KEY) ||
+    localStorage.getItem(VARIANT_KEY)) as ChatVariant | null;
+  if (storedVariant && ["classic", "studio", "capsule"].includes(storedVariant)) {
+    currentVariant = storedVariant;
+  }
+
+  let currentAgentName = ctx.url.searchParams.get("agent") || "main";
+  let currentAgentEmoji = "🦀";
+
+  function updatePlaceholder(): void {
+    const emoji =
+      agentEmoji.get(currentAgentName) ||
+      (currentAgentName === "main" ? "🦀" : "🤖");
+    currentAgentEmoji = emoji;
+    if (currentVariant === "classic") {
+      input.placeholder = `Message ${emoji} ${currentAgentName} (or type @ to delegate)...`;
+    } else if (currentVariant === "studio") {
+      input.placeholder = `Message @${currentAgentName} or type / for commands...`;
+    } else {
+      input.placeholder = `Prompt ${emoji} ${currentAgentName}...`;
+    }
+    agentEmojiSpan.textContent = emoji;
+    agentNameSpan.textContent = currentAgentName;
+    capsuleAgentLabel.textContent = `${emoji} ${currentAgentName}`;
+    studioActiveAgentBadge.textContent = `● ${emoji} ${currentAgentName} (Lead)`;
+  }
+
+  function applyVariant(variant: ChatVariant): void {
+    currentVariant = variant;
+    form.dataset.variant = variant;
+    localStorage.setItem(VARIANT_KEY, variant);
+    sessionStorage.setItem(VARIANT_KEY, variant);
+    for (const btn of [variantBtnClassic, variantBtnStudio, variantBtnCapsule]) {
+      const match = btn.dataset.variant === variant;
+      btn.classList.toggle("active", match);
+      btn.setAttribute("aria-checked", String(match));
+    }
+    updatePlaceholder();
+  }
+
+  variantBtnClassic.addEventListener("click", () => applyVariant("classic"));
+  variantBtnStudio.addEventListener("click", () => applyVariant("studio"));
+  variantBtnCapsule.addEventListener("click", () => applyVariant("capsule"));
+  variantBtnCompare.addEventListener("click", () => openPrototypeModal());
+
+  function updateDraftStatus(): void {
+    const val = input.value.trim();
+    const hasText = val.length > 0;
+    typingStatusPill.hidden = !hasText;
+    if (hasText) {
+      const wordCount = val.split(/\s+/).filter(Boolean).length;
+      capsuleDraftBadge.classList.add("has-draft");
+      capsuleDraftText.textContent = `Typing · not sent (${wordCount} words)`;
+    } else {
+      capsuleDraftBadge.classList.remove("has-draft");
+      capsuleDraftText.textContent = "Ready";
+    }
+  }
+
+  function selectAgent(name: string, emoji?: string): void {
+    currentAgentName = name;
+    if (emoji) agentEmoji.set(name, emoji);
+    updatePlaceholder();
+    renderAgentOptions();
+    agentPopover.hidden = true;
+    agentTriggerBtn.setAttribute("aria-expanded", "false");
+    input.focus();
+  }
+
+  function renderAgentOptions(): void {
+    agentPopover.replaceChildren();
+    studioDelegateChips.replaceChildren();
+
+    const title = el("div", "model-popover-header", "Active Persona & Delegates");
+    agentPopover.append(title);
+
+    const fullList =
+      agentOptions.length > 0
+        ? agentOptions
+        : [
+            {
+              name: "main",
+              signature_emoji: "🦀",
+              description: "Default workspace orchestrator",
+            },
+          ];
+
+    for (const ag of fullList) {
+      const emoji = ag.signature_emoji || (ag.name === "main" ? "🦀" : "🤖");
+      const isSelected = ag.name === currentAgentName;
+
+      const item = el(
+        "button",
+        `agent-popover-item ${isSelected ? "selected" : ""}`,
+      );
+      item.type = "button";
+      const head = el("div", "agent-popover-head");
+      head.append(el("span", "", emoji), el("strong", "", `@${ag.name}`));
+      if (isSelected) head.append(el("span", "model-badge-tag tag-fast", "Active"));
+      const desc = el(
+        "div",
+        "agent-popover-desc",
+        ag.description || "Agent persona",
+      );
+      item.append(head, desc);
+      item.addEventListener("click", () => selectAgent(ag.name, emoji));
+      agentPopover.append(item);
+
+      if (!isSelected) {
+        const chip = el("button", "delegate-chip", `+ @${ag.name}`);
+        chip.type = "button";
+        chip.title = `Delegate turn to @${ag.name}`;
+        chip.addEventListener("click", () => {
+          const prefix = input.value.trim().length > 0 ? " " : "";
+          input.value = `${input.value}${prefix}@${ag.name} `;
+          grow();
+          input.focus();
+          inspectTrigger();
+        });
+        studioDelegateChips.append(chip);
+      }
+    }
+  }
+
+  function renderModelOptions(models: ModelOption[]): void {
+    modelCustomPopover.replaceChildren();
+    const title = el("div", "model-popover-header", "Available Model Endpoints");
+    modelCustomPopover.append(title);
+
+    const activeId =
+      modelPicker.value ||
+      (models.find((m) => m.default)?.id ?? models[0]?.id);
+
+    for (const opt of models) {
+      const fmt = formatModelOption(opt.id, opt.label);
+      const isSelected = opt.id === activeId;
+      if (isSelected) {
+        modelTriggerIcon.textContent = fmt.icon;
+        modelTriggerName.textContent = fmt.name;
+        modelTriggerName.title = opt.label;
+      }
+
+      const item = el(
+        "button",
+        `model-popover-item ${isSelected ? "selected" : ""}`,
+      );
+      item.type = "button";
+      item.dataset.modelId = opt.id;
+
+      const left = el("div", "model-popover-info");
+      const label = el("strong", "model-item-name", `${fmt.icon} ${fmt.name}`);
+      left.append(label);
+
+      const meta = el("div", "model-popover-meta");
+      meta.append(el("span", "model-badge-tag", fmt.provider));
+      if (fmt.tag !== "Default") {
+        meta.append(
+          el("span", `model-badge-tag tag-${fmt.tag.toLowerCase()}`, fmt.tag),
+        );
+      }
+      if (opt.default) {
+        meta.append(el("span", "model-badge-tag", "Default"));
+      }
+      if (isSelected) {
+        meta.append(el("span", "model-badge-tag tag-fast", "✓"));
+      }
+
+      item.append(left, meta);
+      item.addEventListener("click", () => {
+        modelPicker.value = opt.id;
+        sessionStorage.setItem(MODEL_KEY, opt.id);
+        modelTriggerIcon.textContent = fmt.icon;
+        modelTriggerName.textContent = fmt.name;
+        modelCustomPopover.hidden = true;
+        modelCustomTrigger.setAttribute("aria-expanded", "false");
+        modelPicker.dispatchEvent(new Event("change", { bubbles: true }));
+        renderModelOptions(models);
+      });
+
+      modelCustomPopover.append(item);
+    }
+  }
+
+  function closeAllCustomPopovers(): void {
+    agentPopover.hidden = true;
+    agentTriggerBtn.setAttribute("aria-expanded", "false");
+    modelCustomPopover.hidden = true;
+    modelCustomTrigger.setAttribute("aria-expanded", "false");
+    ctxPopover.hidden = true;
+  }
+
+  agentTriggerBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const next = agentPopover.hidden;
+    closeAllCustomPopovers();
+    agentPopover.hidden = !next;
+    agentTriggerBtn.setAttribute("aria-expanded", String(!next));
+  });
+
+  modelCustomTrigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const next = modelCustomPopover.hidden;
+    closeAllCustomPopovers();
+    modelCustomPopover.hidden = !next;
+    modelCustomTrigger.setAttribute("aria-expanded", String(!next));
+  });
+
+  meter.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const next = ctxPopover.hidden;
+    closeAllCustomPopovers();
+    ctxPopover.hidden = !next;
+  });
+
+  studioCtxStrip.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const next = ctxPopover.hidden;
+    closeAllCustomPopovers();
+    ctxPopover.hidden = !next;
+  });
+
+  function openPrototypeModal(): void {
+    let modal = document.querySelector("#prototype-modal") as HTMLElement | null;
+    if (modal) modal.remove();
+
+    modal = el("div", "prototype-modal-backdrop");
+    modal.id = "prototype-modal";
+
+    const dialog = el("div", "prototype-modal-dialog");
+
+    const mHeader = el("div", "prototype-modal-header");
+    const mTitle = el(
+      "h2",
+      "prototype-modal-title",
+      "Clawhouse Chat Interface Prototypes (OpenClaw References)",
+    );
+    const mClose = el("button", "prototype-modal-close", "✕");
+    mClose.type = "button";
+    mClose.setAttribute("aria-label", "Close prototype modal");
+    mClose.addEventListener("click", () => modal?.remove());
+    mHeader.append(mTitle, mClose);
+
+    const mBody = el("div", "prototype-modal-body");
+
+    // Simulator Bar
+    const simBar = el("div", "prototype-sim-bar");
+    const simTokensGroup = el("div", "prototype-sim-group");
+    simTokensGroup.append(el("label", "", "Simulate Context:"));
+    const simSlider = document.createElement("input");
+    simSlider.type = "range";
+    simSlider.className = "prototype-sim-slider";
+    simSlider.min = "0";
+    simSlider.max = "320000";
+    simSlider.step = "5000";
+    simSlider.value = String(contextTokens || 12000);
+
+    const simValueLabel = el(
+      "strong",
+      "",
+      `${formatTokens(Number(simSlider.value))} tokens (${usageLevel(Number(simSlider.value))})`,
+    );
+    simTokensGroup.append(simSlider, simValueLabel);
+
+    const simAgentGroup = el("div", "prototype-sim-group");
+    simAgentGroup.append(el("label", "", "Test Agent:"));
+    for (const testAgent of [
+      { name: "main", emoji: "🦀" },
+      { name: "analyst", emoji: "📊" },
+      { name: "sql-expert", emoji: "💾" },
+    ]) {
+      const aBtn = el(
+        "button",
+        "prototype-sim-btn",
+        `${testAgent.emoji} @${testAgent.name}`,
+      );
+      aBtn.type = "button";
+      aBtn.addEventListener("click", () => {
+        selectAgent(testAgent.name, testAgent.emoji);
+        updateModalPreview();
+      });
+      simAgentGroup.append(aBtn);
+    }
+
+    simBar.append(simTokensGroup, simAgentGroup);
+
+    // Grid of 3 Variants
+    const grid = el("div", "prototype-grid");
+
+    // Card 1: OpenClaw Classic
+    const card1 = el(
+      "div",
+      `prototype-card ${currentVariant === "classic" ? "active-variant" : ""}`,
+    );
+    const card1Head = el("div", "prototype-card-head");
+    card1Head.append(
+      el("h3", "prototype-card-title", "1. OpenClaw Classic Card"),
+      el("span", "prototype-card-badge", "Flagship 2026.9.3 / 2026.9.4"),
+    );
+    const card1Desc = el(
+      "p",
+      "prototype-card-desc",
+      "Direct port of OpenClaw's primary unified composer card: inset rounded container, seamless borderless prompt, inside toolbar with agent & model pills, typing status badge, and signature circular send button.",
+    );
+    const card1Features = el("ul", "prototype-card-features");
+    card1Features.append(
+      el("li", "", "Unified 18px rounded card with borderless textarea"),
+      el(
+        "li",
+        "",
+        "Inside toolbar: Attachment +, Active Persona pill, Model popover",
+      ),
+      el("li", "", "Typing · not sent draft state with amber pulsing dot"),
+      el("li", "", "Signature 34px circular accent Send button (↑)"),
+    );
+    const card1Select = el(
+      "button",
+      "prototype-select-btn",
+      currentVariant === "classic" ? "Currently Active" : "Activate Variant 1",
+    );
+    card1Select.type = "button";
+    card1Select.addEventListener("click", () => {
+      applyVariant("classic");
+      modal?.remove();
+    });
+    card1.append(card1Head, card1Desc, card1Features, card1Select);
+
+    // Card 2: Studio Pro HUD
+    const card2 = el(
+      "div",
+      `prototype-card ${currentVariant === "studio" ? "active-variant" : ""}`,
+    );
+    const card2Head = el("div", "prototype-card-head");
+    card2Head.append(
+      el("h3", "prototype-card-title", "2. Studio Pro HUD"),
+      el("span", "prototype-card-badge", "Two-Pane & MCP 2026.9.2"),
+    );
+    const card2Desc = el(
+      "p",
+      "prototype-card-desc",
+      "Cockpit layout engineered for data teams: upper deck with Agent Roster and quick delegate chips (+ @analyst), horizontal Context Horizon Meter, and lower command bay with slash palette.",
+    );
+    const card2Features = el("ul", "prototype-card-features");
+    card2Features.append(
+      el(
+        "li",
+        "",
+        "Upper Deck: Active Agent badge + 1-click delegate chips (+ @analyst, + @sql)",
+      ),
+      el(
+        "li",
+        "",
+        "Horizontal Context Horizon Meter with percentage & color gauge",
+      ),
+      el(
+        "li",
+        "",
+        "Lower Bay: / Slash commands trigger, Tools counter, Databricks serving endpoint",
+      ),
+      el("li", "", "Fast, distraction-free prompt editor"),
+    );
+    const card2Select = el(
+      "button",
+      "prototype-select-btn",
+      currentVariant === "studio" ? "Currently Active" : "Activate Variant 2",
+    );
+    card2Select.type = "button";
+    card2Select.addEventListener("click", () => {
+      applyVariant("studio");
+      modal?.remove();
+    });
+    card2.append(card2Head, card2Desc, card2Features, card2Select);
+
+    // Card 3: Agent Capsule & Floating Dock
+    const card3 = el(
+      "div",
+      `prototype-card ${currentVariant === "capsule" ? "active-variant" : ""}`,
+    );
+    const card3Head = el("div", "prototype-card-head");
+    card3Head.append(
+      el("h3", "prototype-card-title", "3. Agent Capsule & Dock"),
+      el("span", "prototype-card-badge", "Automation 2026.9.5"),
+    );
+    const card3Desc = el(
+      "p",
+      "prototype-card-desc",
+      "Modern floating capsule with glass backdrop blur: top persona ribbon with live word counter, segmented docked pills for agent, model, and context headroom, plus elevated Send ⌘↵ pill.",
+    );
+    const card3Features = el("ul", "prototype-card-features");
+    card3Features.append(
+      el("li", "", "Floating capsule with 24px radius & backdrop-filter blur"),
+      el(
+        "li",
+        "",
+        "Top Ribbon: Pulse persona indicator + Live draft word count tracker",
+      ),
+      el(
+        "li",
+        "",
+        "Docked Segmented Pills: [🦀 main ▾] [⚡ Llama 3.3 ▾] [🟢 Context free]",
+      ),
+      el("li", "", "Elevated Pill Send button with ⌘↵ shortcut hint"),
+    );
+    const card3Select = el(
+      "button",
+      "prototype-select-btn",
+      currentVariant === "capsule" ? "Currently Active" : "Activate Variant 3",
+    );
+    card3Select.type = "button";
+    card3Select.addEventListener("click", () => {
+      applyVariant("capsule");
+      modal?.remove();
+    });
+    card3.append(card3Head, card3Desc, card3Features, card3Select);
+
+    grid.append(card1, card2, card3);
+    mBody.append(simBar, grid);
+    dialog.append(mHeader, mBody);
+    modal.append(dialog);
+
+    function updateModalPreview(): void {
+      const val = Number(simSlider.value);
+      const lvl = usageLevel(val);
+      simValueLabel.textContent = `${formatTokens(val)} tokens (${lvl})`;
+      contextTokens = val;
+      renderMeter();
+    }
+
+    simSlider.addEventListener("input", updateModalPreview);
+
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.remove();
+    });
+
+    document.body.append(modal);
+  }
+
+  applyVariant(currentVariant);
   renderMeter();
 
   function sessionId(): string {
@@ -341,9 +1137,6 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     transcript.replaceChildren(el("p", "empty", "This session is empty."));
   }
 
-  // Emoji per handle, for headers rebuilt from a reloaded transcript.
-  const agentEmoji = new Map<string, string>();
-  let agentOptions: AgentOption[] = [];
   let headerOwed = false;
 
   function headerFor(entry: Entry): void {
@@ -542,6 +1335,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         ? saved
         : body.models.find((option) => option.default)?.id;
     if (wanted) modelPicker.value = wanted;
+    renderModelOptions(body.models);
   }
 
   async function loadAgents(): Promise<void> {
@@ -555,6 +1349,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         if (agent.signature_emoji)
           agentEmoji.set(agent.name, agent.signature_emoji);
       }
+      renderAgentOptions();
+      updatePlaceholder();
     } catch {
       // Headers fall back to the bare handle.
     }
@@ -782,6 +1578,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     if (frame.event === "usage") {
       contextTokens = payload.input_tokens ?? 0;
+      if (payload.output_tokens !== undefined) {
+        outputTokens = payload.output_tokens;
+      }
       contextWindow = payload.context_window ?? null;
       renderMeter();
       return;
@@ -1085,10 +1884,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     closePopover();
+    closeAllCustomPopovers();
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
     clearDraft();
+    updateDraftStatus();
     grow();
     void sendMessage(text);
   });
@@ -1097,6 +1898,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     grow();
     inspectTrigger();
     saveDraft();
+    updateDraftStatus();
   });
 
   input.addEventListener("keydown", (event) => {
@@ -1128,6 +1930,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       }
     }
 
+    if (event.key === "Escape") {
+      closeAllCustomPopovers();
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       form.requestSubmit();
@@ -1138,10 +1944,31 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (popover && !form.contains(event.target as Node)) {
       closePopover();
     }
+    const target = event.target as Node;
+    if (!agentWrapper.contains(target)) {
+      agentPopover.hidden = true;
+      agentTriggerBtn.setAttribute("aria-expanded", "false");
+    }
+    if (!modelSelectorWrapper.contains(target)) {
+      modelCustomPopover.hidden = true;
+      modelCustomTrigger.setAttribute("aria-expanded", "false");
+    }
+    if (
+      !meter.contains(target) &&
+      !studioCtxStrip.contains(target)
+    ) {
+      ctxPopover.hidden = true;
+    }
   });
 
   modelPicker.addEventListener("change", () => {
     sessionStorage.setItem(MODEL_KEY, modelPicker.value);
+    const selectedOption = modelPicker.options[modelPicker.selectedIndex];
+    if (selectedOption) {
+      const fmt = formatModelOption(modelPicker.value, selectedOption.textContent || "");
+      modelTriggerIcon.textContent = fmt.icon;
+      modelTriggerName.textContent = fmt.name;
+    }
     // The new model's window is unknown until its first turn reports usage.
     contextWindow = null;
     renderMeter();

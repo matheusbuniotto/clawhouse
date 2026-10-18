@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
+import { mount } from "./chat.js";
 import type { ScreenContext } from "./shell.js";
 
 const SESSION = "11111111-1111-4111-8111-111111111111";
@@ -729,4 +730,195 @@ test("clears transcript after confirmation", async () => {
   const log = document.querySelector("#log") as HTMLElement;
   expect(log.children).toHaveLength(1);
   expect(log.textContent).toContain("Transcript cleared.");
+});
+
+test("prototype variant switcher changes composer variant and persists preference", async () => {
+  const root = document.createElement("div");
+  document.body.replaceChildren(root);
+  localStorage.clear();
+  sessionStorage.clear();
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url === "/api/agents") return jsonResponse([]);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [], run_state: "idle" });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url.endsWith("/approvals")) return jsonResponse([]);
+    return jsonResponse({});
+  });
+
+  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
+
+  const composer = root.querySelector("#composer") as HTMLElement;
+  expect(composer.dataset.variant).toBe("classic");
+
+  const studioBtn = root.querySelector('button[data-variant="studio"]') as HTMLButtonElement;
+  studioBtn.click();
+  expect(composer.dataset.variant).toBe("studio");
+  expect(localStorage.getItem("clawhouse.chat_variant")).toBe("studio");
+
+  const capsuleBtn = root.querySelector('button[data-variant="capsule"]') as HTMLButtonElement;
+  capsuleBtn.click();
+  expect(composer.dataset.variant).toBe("capsule");
+  expect(localStorage.getItem("clawhouse.chat_variant")).toBe("capsule");
+
+  const classicBtn = root.querySelector('button[data-variant="classic"]') as HTMLButtonElement;
+  classicBtn.click();
+  expect(composer.dataset.variant).toBe("classic");
+  expect(localStorage.getItem("clawhouse.chat_variant")).toBe("classic");
+});
+
+test("active agent selection updates placeholder, persona pill, and delegate chips", async () => {
+  const root = document.createElement("div");
+  document.body.replaceChildren(root);
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url === "/api/agents")
+      return jsonResponse([
+        { name: "main", signature_emoji: "🦀", description: "Default orchestrator" },
+        { name: "analyst", signature_emoji: "📊", description: "Data analyst" },
+      ]);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [], run_state: "idle" });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url.endsWith("/approvals")) return jsonResponse([]);
+    return jsonResponse({});
+  });
+
+  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
+
+  await vi.waitFor(() => {
+    const trigger = root.querySelector("#agent-trigger");
+    expect(trigger?.textContent).toContain("main");
+  });
+
+  const input = root.querySelector("#message") as HTMLTextAreaElement;
+  expect(input.placeholder).toContain("🦀 main");
+
+  // Open agent popover and pick analyst
+  const agentTrigger = root.querySelector("#agent-trigger") as HTMLButtonElement;
+  agentTrigger.click();
+  const popover = root.querySelector("#agent-popover") as HTMLElement;
+  expect(popover.hidden).toBe(false);
+
+  await vi.waitFor(() => {
+    const items = popover.querySelectorAll(".agent-popover-item");
+    expect(items.length).toBeGreaterThan(1);
+  });
+
+  const analystItem = Array.from(popover.querySelectorAll(".agent-popover-item")).find(
+    (el) => el.textContent?.includes("analyst"),
+  ) as HTMLButtonElement;
+  analystItem.click();
+
+  expect(input.placeholder).toContain("📊 analyst");
+  expect(agentTrigger.textContent).toContain("analyst");
+});
+
+test("custom model selector syncs with native model select and displays formatted label", async () => {
+  const root = document.createElement("div");
+  document.body.replaceChildren(root);
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/models") {
+      return jsonResponse({
+        models: [
+          {
+            id: "databricks-meta-llama-3-3-70b-instruct",
+            label: "Databricks · databricks-meta-llama-3-3-70b-instruct",
+            default: true,
+          },
+          { id: "gpt-4o", label: "GPT-4o", default: false },
+        ],
+      });
+    }
+    if (url === "/api/agents") return jsonResponse([]);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [], run_state: "idle" });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url.endsWith("/approvals")) return jsonResponse([]);
+    return jsonResponse({});
+  });
+
+  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
+
+  await vi.waitFor(() => {
+    const trigger = root.querySelector("#model-custom-trigger");
+    expect(trigger?.textContent).toContain("Llama 3.3 70B");
+  });
+
+  const nativeSelect = root.querySelector("#model") as HTMLSelectElement;
+  expect(nativeSelect.value).toBe("databricks-meta-llama-3-3-70b-instruct");
+
+  // Open model popover and switch to gpt-4o
+  const modelTrigger = root.querySelector("#model-custom-trigger") as HTMLButtonElement;
+  modelTrigger.click();
+  const popover = root.querySelector("#model-custom-popover") as HTMLElement;
+  expect(popover.hidden).toBe(false);
+
+  const gptItem = popover.querySelector('button[data-model-id="gpt-4o"]') as HTMLButtonElement;
+  gptItem.click();
+
+  expect(nativeSelect.value).toBe("gpt-4o");
+  expect(modelTrigger.textContent).toContain("GPT-4o");
+});
+
+test("context meter popover and studio horizon meter update on usage", async () => {
+  const root = document.createElement("div");
+  document.body.replaceChildren(root);
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url === "/api/agents") return jsonResponse([]);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [], run_state: "idle" });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url.endsWith("/approvals")) return jsonResponse([]);
+    return jsonResponse({});
+  });
+
+  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
+
+  const meter = root.querySelector("#ctx-meter") as HTMLElement;
+  expect(meter.querySelector(".ctx-horizon-bar")).not.toBeNull();
+  expect(meter.querySelector(".ctx-cost-pill")).not.toBeNull();
+
+  meter.click();
+  const popover = root.querySelector("#ctx-popover") as HTMLElement;
+  expect(popover.hidden).toBe(false);
+  expect(popover.textContent).toContain("Tokens Used");
+  expect(popover.textContent).toContain("Token & Cost Ledger");
+  expect(popover.textContent).toContain("Est. Turn Cost");
+});
+
+test("prototype comparison modal opens and allows simulating context tokens", async () => {
+  const root = document.createElement("div");
+  document.body.replaceChildren(root);
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    if (url === "/api/agents") return jsonResponse([]);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [], run_state: "idle" });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url.endsWith("/approvals")) return jsonResponse([]);
+    return jsonResponse({});
+  });
+
+  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
+
+  const compareBtn = root.querySelector(".variant-compare-btn") as HTMLButtonElement;
+  compareBtn.click();
+
+  const modal = document.querySelector("#prototype-modal") as HTMLElement;
+  expect(modal).not.toBeNull();
+  expect(modal.textContent).toContain("OpenClaw Classic Card");
+  expect(modal.textContent).toContain("Studio Pro HUD");
+  expect(modal.textContent).toContain("Agent Capsule & Dock");
+
+  const closeBtn = modal.querySelector(".prototype-modal-close") as HTMLButtonElement;
+  closeBtn.click();
+  expect(document.querySelector("#prototype-modal")).toBeNull();
 });
