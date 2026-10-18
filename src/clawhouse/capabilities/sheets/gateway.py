@@ -1,25 +1,26 @@
-"""Google Sheets write capability through Databricks AI Gateway system.ai.google_drive.
-
-Mutating tools (create_google_sheet, update_google_sheet) require in-chat approval.
-Acts strictly with the user's forwarded token; fails closed when no token is present.
-"""
+"""HTTP RPC gateway client and validation for Google Sheets."""
 
 from __future__ import annotations
 
 import json
 import logging
 import os
-import re
+import sys
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Any
 
 import anyio
 import requests
 from databricks.sdk import WorkspaceClient
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-from pydantic_ai.capabilities import AbstractCapability
-from pydantic_ai.toolsets import FunctionToolset
+
+from clawhouse.capabilities.sheets.geometry import (
+    ID_RE,
+    TAB_RE,
+    NewSheet,
+    SheetUpdate,
+    a1_range,
+    neutralized,
+)
 
 logger = logging.getLogger("clawhouse.sheets")
 
@@ -29,15 +30,8 @@ REMOTE_READ = "google_file_read"
 REMOTE_UPDATE = "google_sheet_update_values"
 SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
-MAX_ROWS = 500
-MAX_COLUMNS = 26
-MAX_CELL_CHARS = 1_000
 TIMEOUT_SECONDS = 30
 MAX_RESPONSE_BYTES = 512_000
-
-FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-ID_RE = re.compile(r"^[A-Za-z0-9_-]{20,100}$")
-TAB_RE = re.compile(r"^[^\[\]:*?/\\']+$")
 AUTH_CODES = frozenset({-32042, -32006})
 
 NO_TOKEN = "A forwarded Databricks user token is required. Nothing was written."
@@ -46,93 +40,6 @@ TIMED_OUT = "Google Sheets timed out. Check your Drive before retrying."
 AUTHORIZE = "Authorize Google Drive in Databricks Catalog Explorer. Nothing was written."
 REJECTED = "Google rejected the request. Check your Drive before retrying."
 UNAVAILABLE = "Google Sheets unavailable. Check your Drive before retrying."
-
-Cell = str | bool | int | float | None
-
-
-def _require_rectangle(rows: list[list[Cell]]) -> None:
-    width = len(rows[0])
-    if not 1 <= width <= MAX_COLUMNS or any(len(row) != width for row in rows):
-        message = f"rows must be rectangular and 1 to {MAX_COLUMNS} columns wide"
-        raise ValueError(message)
-    if any(len(cell) > MAX_CELL_CHARS for row in rows for cell in row if isinstance(cell, str)):
-        message = f"a cell is longer than {MAX_CELL_CHARS} characters"
-        raise ValueError(message)
-
-
-def _bounded_rows(rows: list[list[Cell]]) -> list[list[Cell]]:
-    if rows:
-        _require_rectangle(rows)
-    return rows
-
-
-Rows = Annotated[
-    list[list[Cell]],
-    Field(min_length=1, max_length=MAX_ROWS),
-    BeforeValidator(_bounded_rows),
-]
-
-
-class Table(BaseModel):
-    """A bounded rectangle. The model does not choose where the write ends."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    tab: str = Field(min_length=1, max_length=100, pattern=TAB_RE.pattern)
-    rows: Rows
-
-
-class NewSheet(BaseModel):
-    """A new spreadsheet in the user's own Drive. Values land on its first tab."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    title: str = Field(min_length=1, max_length=100)
-    rows: Rows
-
-
-class SheetUpdate(Table):
-    """Overwrite one block in a spreadsheet this app is allowed to edit."""
-
-    spreadsheet_id: str = Field(pattern=ID_RE.pattern)
-    first_column: str = Field(default="A", pattern=r"^[A-Z]{1,2}$")
-    first_row: int = Field(default=1, ge=1, le=100_000)
-
-    @property
-    def a1_range(self) -> str:
-        """The exact block that will be overwritten, derived from the data's shape."""
-        return a1_range(self.tab, self.first_column, self.first_row, self.rows)
-
-
-def _column_index(name: str) -> int:
-    index = 0
-    for letter in name:
-        index = index * 26 + ord(letter) - ord("A") + 1
-    return index
-
-
-def _column_name(index: int) -> str:
-    name = ""
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        name = chr(ord("A") + remainder) + name
-    return name
-
-
-def a1_range(tab: str, first_column: str, first_row: int, rows: list[list[Cell]]) -> str:
-    last = _column_name(_column_index(first_column) + len(rows[0]) - 1)
-    end_row = first_row + len(rows) - 1
-    return f"'{tab}'!{first_column}{first_row}:{last}{end_row}"
-
-
-def _as_text(cell: Cell) -> Cell:
-    if isinstance(cell, str) and cell.startswith(FORMULA_PREFIXES):
-        return f"'{cell}"
-    return cell
-
-
-def neutralized(rows: list[list[Cell]]) -> list[list[Cell]]:
-    return [[_as_text(cell) for cell in row] for row in rows]
 
 
 class GatewayStatusError(Exception):
@@ -155,6 +62,11 @@ def normalize_host(host: str) -> str:
 
 
 def databricks_host() -> str:
+    mod = sys.modules.get("clawhouse.capabilities.sheets")
+    if mod is not None:
+        patched = getattr(mod, "databricks_host", None)
+        if patched is not None and patched is not databricks_host:
+            return str(patched())
     host = os.environ.get("DATABRICKS_HOST", "").strip()
     if host:
         return normalize_host(host)
@@ -411,49 +323,3 @@ async def _guarded(
     except Exception as exc:
         logger.exception("Google Sheets write failed")
         return {"error": _failure(exc)}
-
-
-async def write_new_sheet(token: str, sheet: NewSheet, host: str | None = None) -> dict[str, Any]:
-    resolved_host = host or (databricks_host() if token else "")
-    return await _guarded(token, lambda: _write_new(token, resolved_host, sheet))
-
-
-async def write_sheet_update(
-    token: str, update: SheetUpdate, host: str | None = None
-) -> dict[str, Any]:
-    resolved_host = host or (databricks_host() if token else "")
-    return await _guarded(token, lambda: _write_update(token, resolved_host, update))
-
-
-WRITE_TOOLS = frozenset({"create_google_sheet", "update_google_sheet"})
-
-
-def sheets_toolset(token: str, host: str | None = None) -> FunctionToolset[Any]:
-    async def create_google_sheet(sheet: NewSheet) -> dict[str, Any]:
-        """Create a new Google Sheet in your own Drive, only after you approve it in chat.
-
-        The first row is usually the header. Cells that start with = + - or @ are written
-        as text. Values land on the spreadsheet's first tab; the result names that tab.
-        """
-        return await write_new_sheet(token, sheet, host=host)
-
-    async def update_google_sheet(update: SheetUpdate) -> dict[str, Any]:
-        """Overwrite one block of a Google Sheet created through this app, after you approve it.
-
-        The block starts at first_column/first_row and is as large as rows. Nothing else changes.
-        """
-        return await write_sheet_update(token, update, host=host)
-
-    return FunctionToolset([create_google_sheet, update_google_sheet])
-
-
-@dataclass
-class GoogleSheetsCapability(AbstractCapability[Any]):
-    """Google Sheets writes for signed-in user via AI Gateway system.ai.google_drive."""
-
-    user_token: str = ""
-    host: str | None = None
-    id: str | None = "google_sheets"
-
-    def get_toolset(self) -> FunctionToolset[Any]:
-        return sheets_toolset(self.user_token, host=self.host)

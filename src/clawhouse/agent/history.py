@@ -1,12 +1,16 @@
 """Replay a transcript as Pydantic AI model messages, and trim it for the agent that reads it."""
 
+from __future__ import annotations
+
+import logging
 from collections.abc import Collection, Sequence
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.messages import (
     ModelMessage,
+    ModelMessagesTypeAdapter,
     ModelRequest,
     ModelResponse,
     TextPart,
@@ -16,6 +20,11 @@ from pydantic_ai.messages import (
 )
 
 from clawhouse.store.shapes import TranscriptEntry
+
+if TYPE_CHECKING:
+    from clawhouse.store.store import SessionStore
+
+logger = logging.getLogger("clawhouse.turn")
 
 
 def to_model_messages(entries: Sequence[TranscriptEntry]) -> list[ModelMessage]:
@@ -131,3 +140,22 @@ def drop_unreturned_tool_calls(messages: Sequence[ModelMessage]) -> list[ModelMe
         else:
             result.append(m)
     return result
+
+
+async def load_session_history(
+    store: SessionStore,
+    session_id: str,
+    owner_id: str,
+    prior: tuple[TranscriptEntry, ...] | None = None,
+) -> list[ModelMessage]:
+    raw = await store.messages(session_id)
+    if raw:
+        try:
+            return ModelMessagesTypeAdapter.validate_json(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to deserialize native messages for session %s: %s", session_id, exc
+            )
+    if prior is None:
+        prior = await store.transcript(session_id, owner_id)
+    return to_model_messages(prior)
