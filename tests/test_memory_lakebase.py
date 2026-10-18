@@ -43,9 +43,10 @@ async def test_memory_entries_and_transcript_search_idx() -> None:
         await store.close()
     names = {row["column_name"] for row in columns}
     assert names >= {"id", "owner_id", "text", "source_session_id", "table_fqn", "created_at"}
-    assert index is not None
-    assert "gin" in index.lower()
-    assert "to_tsvector('english', content)" in index
+    assert index == (
+        "CREATE INDEX transcript_search_idx ON clawhouse.transcript_entries "
+        "USING gin (to_tsvector('english'::regconfig, content))"
+    )
 
 
 @pytest.mark.asyncio
