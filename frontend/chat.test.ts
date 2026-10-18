@@ -769,7 +769,7 @@ test("prototype variant switcher changes composer variant and persists preferenc
   expect(localStorage.getItem("clawhouse.chat_variant")).toBe("classic");
 });
 
-test("active agent selection updates placeholder, persona pill, and delegate chips", async () => {
+test("active agent display shows name and updates on delegate chip click", async () => {
   const root = document.createElement("div");
   document.body.replaceChildren(root);
 
@@ -790,31 +790,25 @@ test("active agent selection updates placeholder, persona pill, and delegate chi
   mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
 
   await vi.waitFor(() => {
-    const trigger = root.querySelector("#agent-trigger");
-    expect(trigger?.textContent).toContain("main");
+    const badge = root.querySelector("#agent-badge");
+    expect(badge?.textContent).toContain("main");
   });
 
   const input = root.querySelector("#message") as HTMLTextAreaElement;
   expect(input.placeholder).toContain("🦀 main");
 
-  // Open agent popover and pick analyst
-  const agentTrigger = root.querySelector("#agent-trigger") as HTMLButtonElement;
-  agentTrigger.click();
-  const popover = root.querySelector("#agent-popover") as HTMLElement;
-  expect(popover.hidden).toBe(false);
+  // In Studio mode, delegate chips allow appending @analyst
+  const studioBtn = root.querySelector('button[data-variant="studio"]') as HTMLButtonElement;
+  studioBtn.click();
 
   await vi.waitFor(() => {
-    const items = popover.querySelectorAll(".agent-popover-item");
-    expect(items.length).toBeGreaterThan(1);
+    const chip = root.querySelector(".delegate-chip") as HTMLButtonElement;
+    expect(chip?.textContent).toContain("analyst");
   });
 
-  const analystItem = Array.from(popover.querySelectorAll(".agent-popover-item")).find(
-    (el) => el.textContent?.includes("analyst"),
-  ) as HTMLButtonElement;
-  analystItem.click();
-
-  expect(input.placeholder).toContain("📊 analyst");
-  expect(agentTrigger.textContent).toContain("analyst");
+  const analystChip = root.querySelector(".delegate-chip") as HTMLButtonElement;
+  analystChip.click();
+  expect(input.value).toContain("@analyst");
 });
 
 test("custom model selector syncs with native model select and displays formatted label", async () => {

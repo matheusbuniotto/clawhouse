@@ -5,7 +5,6 @@
 }
 
 .model-custom-popover[hidden],
-.agent-popover[hidden],
 .ctx-popover[hidden],
 .rail-agent-popover[hidden],
 .composer-popover[hidden],
@@ -735,27 +734,27 @@ body {
   color: var(--text-strong);
 }
 
-.composer[data-variant="classic"] .agent-trigger,
-.composer:not([data-variant]) .agent-trigger {
-  min-height: 26px;
-  padding: 0 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
+.composer[data-variant="classic"] .agent-badge,
+.composer:not([data-variant]) .agent-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  transition: all var(--duration-fast) var(--ease);
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  user-select: none;
 }
 
-.composer[data-variant="classic"] .agent-trigger:hover,
-.composer:not([data-variant]) .agent-trigger:hover {
-  background: var(--bg-hover);
+.composer[data-variant="classic"] .agent-badge-emoji,
+.composer:not([data-variant]) .agent-badge-emoji {
+  font-size: 13px;
+}
+
+.composer[data-variant="classic"] .agent-badge-label,
+.composer:not([data-variant]) .agent-badge-label {
   color: var(--text-strong);
+  font-weight: 600;
 }
 
 .composer[data-variant="classic"] .model-custom-trigger,
@@ -1197,91 +1196,22 @@ body {
   align-items: center;
 }
 
-.agent-trigger {
+.agent-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-full);
-  background: var(--bg-hover);
-  color: var(--text-strong);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease);
-}
-
-.agent-trigger:hover {
-  background: var(--card);
-  border-color: var(--border-hover);
-}
-
-.agent-trigger-emoji {
-  font-size: 14px;
-}
-
-.agent-trigger-label {
-  font-weight: 500;
-}
-
-.agent-trigger-chevron {
-  font-size: 10px;
+  gap: 5px;
   color: var(--muted);
-}
-
-.agent-popover {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  min-width: 260px;
-  max-width: 340px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: var(--popover);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  padding: 6px;
-  z-index: 120;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.agent-popover-item {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  transition: all var(--duration-fast) var(--ease);
-}
-
-.agent-popover-item:hover,
-.agent-popover-item.selected {
-  background: var(--bg-hover);
-  color: var(--text-strong);
-}
-
-.agent-popover-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-  font-size: var(--font-size-sm);
-}
-
-.agent-popover-desc {
   font-size: var(--font-size-xs);
-  color: var(--muted);
-  margin-top: 2px;
+  user-select: none;
+}
+
+.agent-badge-emoji {
+  font-size: 13px;
+}
+
+.agent-badge-label {
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 /* Studio Agent Strip & Chips */

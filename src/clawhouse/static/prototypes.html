@@ -382,13 +382,10 @@
                 <div class="composer-toolbar">
                   <div class="composer-toolbar-left">
                     <button class="composer-action-btn" type="button" title="Attachments and tools">+</button>
-                    <div class="agent-selector-wrapper">
-                      <button class="agent-trigger" type="button" id="agent-trigger-1">
-                        <span class="agent-trigger-emoji">🦀</span>
-                        <span class="agent-trigger-label">main</span>
-                        <span class="agent-trigger-chevron">▾</span>
-                      </button>
-                    </div>
+                    <span class="agent-badge" id="agent-badge-1" title="Active agent">
+                      <span class="agent-badge-emoji">🦀</span>
+                      <span class="agent-badge-label">main</span>
+                    </span>
                     <span class="typing-status-pill" id="typing-v1" hidden>
                       <span class="typing-pulse-dot"></span>
                       <span class="typing-status-text">Typing · not sent</span>
@@ -715,10 +712,12 @@
       });
 
       // Update Variant 1
-      const aTrig1 = document.getElementById("agent-trigger-1");
-      if (aTrig1) {
-        aTrig1.querySelector(".agent-trigger-emoji").textContent = activeEmoji;
-        aTrig1.querySelector(".agent-trigger-label").textContent = activeAgent;
+      const aBadge1 = document.getElementById("agent-badge-1");
+      if (aBadge1) {
+        const emojiEl = aBadge1.querySelector(".agent-badge-emoji");
+        const labelEl = aBadge1.querySelector(".agent-badge-label");
+        if (emojiEl) emojiEl.textContent = activeEmoji;
+        if (labelEl) labelEl.textContent = activeAgent;
       }
       const cLead1 = document.getElementById("classic-lead-1");
       if (cLead1) cLead1.textContent = `● ${activeEmoji} ${activeAgent}`;

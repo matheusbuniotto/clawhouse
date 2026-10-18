@@ -159,22 +159,12 @@ export function mount(root, ctx) {
     attachBtn.type = "button";
     attachBtn.title = "Add attachments, SQL tables, or tools";
     attachBtn.setAttribute("aria-label", "Attachments and tools");
-    const agentWrapper = el("div", "agent-selector-wrapper");
-    const agentTriggerBtn = el("button", "agent-trigger");
-    agentTriggerBtn.id = "agent-trigger";
-    agentTriggerBtn.type = "button";
-    agentTriggerBtn.setAttribute("aria-haspopup", "menu");
-    agentTriggerBtn.setAttribute("aria-expanded", "false");
-    agentTriggerBtn.title = "Switch active agent or delegate";
-    const agentEmojiSpan = el("span", "agent-trigger-emoji", "🦀");
-    const agentNameSpan = el("span", "agent-trigger-label", "main");
-    const agentChevronSpan = el("span", "agent-trigger-chevron", "▾");
-    agentTriggerBtn.append(agentEmojiSpan, agentNameSpan, agentChevronSpan);
-    const agentPopover = el("div", "agent-popover");
-    agentPopover.id = "agent-popover";
-    agentPopover.hidden = true;
-    agentPopover.setAttribute("role", "menu");
-    agentWrapper.append(agentTriggerBtn, agentPopover);
+    const agentBadge = el("span", "agent-badge");
+    agentBadge.id = "agent-badge";
+    agentBadge.title = "Active agent";
+    const agentEmojiSpan = el("span", "agent-badge-emoji", "🦀");
+    const agentNameSpan = el("span", "agent-badge-label", "main");
+    agentBadge.append(agentEmojiSpan, agentNameSpan);
     const typingStatusPill = el("span", "typing-status-pill");
     const typingPulse = el("span", "typing-pulse-dot");
     const typingStatusText = el("span", "typing-status-text", "Typing · not sent");
@@ -185,7 +175,7 @@ export function mount(root, ctx) {
     studioCmdBtn.title = "Open slash command menu";
     const studioToolChip = el("span", "studio-tool-chip", "🛠 6 Tools");
     studioToolChip.title = "Active capabilities: Lakeflow, Lakebase, SQL Warehouse";
-    toolbarLeft.append(attachBtn, agentWrapper, typingStatusPill, studioCmdBtn, studioToolChip);
+    toolbarLeft.append(attachBtn, agentBadge, typingStatusPill, studioCmdBtn, studioToolChip);
     // Right Toolbar: Custom Model Selector, Context Meter with popover, Abort, Send
     const toolbarRight = el("div", "composer-toolbar-right");
     const modelSelectorWrapper = el("div", "model-selector-wrapper");
@@ -461,15 +451,10 @@ export function mount(root, ctx) {
             agentEmoji.set(name, emoji);
         updatePlaceholder();
         renderAgentOptions();
-        agentPopover.hidden = true;
-        agentTriggerBtn.setAttribute("aria-expanded", "false");
         input.focus();
     }
     function renderAgentOptions() {
-        agentPopover.replaceChildren();
         studioDelegateChips.replaceChildren();
-        const title = el("div", "model-popover-header", "Active Persona & Delegates");
-        agentPopover.append(title);
         const fullList = agentOptions.length > 0
             ? agentOptions
             : [
@@ -480,18 +465,7 @@ export function mount(root, ctx) {
                 },
             ];
         for (const ag of fullList) {
-            const emoji = ag.signature_emoji || (ag.name === "main" ? "🦀" : "🤖");
             const isSelected = ag.name === currentAgentName;
-            const item = el("button", `agent-popover-item ${isSelected ? "selected" : ""}`);
-            item.type = "button";
-            const head = el("div", "agent-popover-head");
-            head.append(el("span", "", emoji), el("strong", "", `@${ag.name}`));
-            if (isSelected)
-                head.append(el("span", "model-badge-tag tag-fast", "Active"));
-            const desc = el("div", "agent-popover-desc", ag.description || "Agent persona");
-            item.append(head, desc);
-            item.addEventListener("click", () => selectAgent(ag.name, emoji));
-            agentPopover.append(item);
             if (!isSelected) {
                 const chip = el("button", "delegate-chip", `+ @${ag.name}`);
                 chip.type = "button";
@@ -553,19 +527,10 @@ export function mount(root, ctx) {
         }
     }
     function closeAllCustomPopovers() {
-        agentPopover.hidden = true;
-        agentTriggerBtn.setAttribute("aria-expanded", "false");
         modelCustomPopover.hidden = true;
         modelCustomTrigger.setAttribute("aria-expanded", "false");
         ctxPopover.hidden = true;
     }
-    agentTriggerBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const next = agentPopover.hidden;
-        closeAllCustomPopovers();
-        agentPopover.hidden = !next;
-        agentTriggerBtn.setAttribute("aria-expanded", String(!next));
-    });
     modelCustomTrigger.addEventListener("click", (e) => {
         e.stopPropagation();
         const next = modelCustomPopover.hidden;
@@ -1566,10 +1531,6 @@ export function mount(root, ctx) {
             closePopover();
         }
         const target = event.target;
-        if (!agentWrapper.contains(target)) {
-            agentPopover.hidden = true;
-            agentTriggerBtn.setAttribute("aria-expanded", "false");
-        }
         if (!modelSelectorWrapper.contains(target)) {
             modelCustomPopover.hidden = true;
             modelCustomTrigger.setAttribute("aria-expanded", "false");
