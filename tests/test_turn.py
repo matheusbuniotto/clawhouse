@@ -403,6 +403,8 @@ async def test_turn_shows_the_skill_catalog_without_the_body(tmp_path: Path) -> 
         "report_progress",
         "create_google_sheet",
         "update_google_sheet",
+        "remember",
+        "recall",
     }
     assert not any(name in offered[0] for name in _FILE_TOOLS)
 
@@ -604,6 +606,8 @@ async def test_empty_skill_library_offers_only_builtin_tools(tmp_path: Path) -> 
         "report_progress",
         "create_google_sheet",
         "update_google_sheet",
+        "remember",
+        "recall",
     }
 
 

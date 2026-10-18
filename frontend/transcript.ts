@@ -380,8 +380,10 @@ function toolOutputSection(output: string): HTMLElement {
 
   const parsed = tryParseTabular(output);
   const job = parsed ? null : tryParseJobView(output);
+  const analysis = analysisResult(output);
   const sheetLink = sheetResultLink(output);
   if (sheetLink) section.append(sheetLink);
+  if (analysis) section.append(analysis);
   if (parsed) {
     section.append(renderTabularView(parsed, output));
   } else if (job) {
@@ -396,6 +398,36 @@ interface TabularData {
   columns: string[];
   rows: (unknown[] | Record<string, unknown>)[];
   row_count?: number;
+}
+
+function analysisResult(output: string): HTMLElement | null {
+  const data = parseObject(output);
+  if (!data) return null;
+  const failed = data.result_state === "FAILED" || data.status === "TIMED_OUT_WAITING";
+  if (typeof data.result_state !== "string" && !failed) return null;
+  const box = el("div", "analysis-result");
+  if (typeof data.result_state === "string") {
+    box.append(el("span", "analysis-result-state", data.result_state));
+  }
+  if (typeof data.duration_ms === "number") {
+    box.append(el("span", "analysis-duration", String(data.duration_ms)));
+  }
+  if (typeof data.logs === "string") box.append(el("pre", "analysis-logs", data.logs));
+  if (failed) {
+    const errorText =
+      typeof data.error === "string"
+        ? data.error
+        : data.status === "TIMED_OUT_WAITING"
+          ? "TIMED_OUT_WAITING"
+          : "";
+    if (errorText) box.append(el("p", "analysis-error", errorText));
+    if (typeof data.run_page_url === "string") {
+      const link = el("a", "analysis-run-link", "Open run");
+      link.href = data.run_page_url;
+      box.append(link);
+    }
+  }
+  return box;
 }
 
 function tryParseTabular(text: string): TabularData | null {

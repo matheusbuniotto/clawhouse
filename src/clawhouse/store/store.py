@@ -26,8 +26,10 @@ from clawhouse.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
     CustomAgent,
+    MemoryEntry,
     RunState,
     ScheduleEntry,
+    SearchHit,
     SessionSummary,
     TranscriptEntry,
     TurnStatus,
@@ -138,6 +140,18 @@ CREATE TABLE IF NOT EXISTS clawhouse.schedules (
 
 CREATE INDEX IF NOT EXISTS schedules_owner_idx
     ON clawhouse.schedules (owner_id);
+
+CREATE TABLE IF NOT EXISTS clawhouse.memory_entries (
+    id uuid PRIMARY KEY,
+    owner_id text NOT NULL,
+    text text NOT NULL,
+    source_session_id uuid NULL REFERENCES clawhouse.sessions (id),
+    table_fqn text NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS transcript_search_idx
+    ON clawhouse.transcript_entries USING GIN (to_tsvector('english', content));
 
 CREATE INDEX IF NOT EXISTS schedules_due_idx
     ON clawhouse.schedules (status, next_run_at)
@@ -272,6 +286,26 @@ class SessionStore(Protocol):
         last_error: str | None = None,
     ) -> ScheduleEntry | None: ...
 
+    async def save_memory(
+        self,
+        owner_id: str,
+        text: str,
+        source_session_id: str | None = None,
+        table_fqn: str | None = None,
+    ) -> MemoryEntry: ...
+
+    async def list_memories(self, owner_id: str, limit: int = 20) -> tuple[MemoryEntry, ...]: ...
+
+    async def delete_memory(self, owner_id: str, memory_id: str) -> bool: ...
+
+    async def search_transcripts(
+        self, owner_id: str, query: str, limit: int
+    ) -> tuple[SearchHit, ...]: ...
+
+    async def rank_memories(
+        self, owner_id: str, query: str, limit: int = 5
+    ) -> tuple[MemoryEntry, ...]: ...
+
     async def close(self) -> None: ...
 
 
@@ -300,6 +334,7 @@ class _MemorySession:
     owner_id: str
     created_at: datetime
     entries: list[TranscriptEntry] = field(default_factory=list)
+    entry_times: list[datetime] = field(default_factory=list)
     running: str | None = None
     last_status: TurnStatus | None = None
     title: str | None = None
@@ -316,6 +351,7 @@ class MemorySessionStore:
         self._profiles: dict[str, UserProfile] = {}
         self._custom_agents: dict[str, list[CustomAgent]] = {}
         self._schedules: dict[str, ScheduleEntry] = {}
+        self._memories: list[MemoryEntry] = []
         self._now = now
         self._lock = asyncio.Lock()
 
@@ -358,6 +394,7 @@ class MemorySessionStore:
             self._approvals = {
                 k: v for k, v in self._approvals.items() if v.session_id != session_id
             }
+            self._memories = [row for row in self._memories if row.source_session_id != session_id]
             return True
 
     async def get_session(self, session_id: str, owner_id: str) -> SessionSummary:
@@ -398,6 +435,7 @@ class MemorySessionStore:
             if session.running != run_id:
                 raise RunNotActive(run_id)
             session.entries.append(entry)
+            session.entry_times.append(self._now())
             session.last_run_at = self._now()
 
     async def finish_run(self, session_id: str, run_id: str, status: TurnStatus) -> None:
@@ -606,6 +644,77 @@ class MemorySessionStore:
             )
             self._schedules[schedule_id] = updated
             return updated
+
+    async def save_memory(
+        self,
+        owner_id: str,
+        text: str,
+        source_session_id: str | None = None,
+        table_fqn: str | None = None,
+    ) -> MemoryEntry:
+        if source_session_id is not None:
+            await self.get_session(source_session_id, owner_id)
+        entry = MemoryEntry(
+            id=str(uuid4()),
+            owner_id=owner_id,
+            text=text,
+            created_at=self._now(),
+            source_session_id=source_session_id,
+            table_fqn=table_fqn,
+        )
+        async with self._lock:
+            self._memories.append(entry)
+        return entry
+
+    async def list_memories(self, owner_id: str, limit: int = 20) -> tuple[MemoryEntry, ...]:
+        owned = [row for row in self._memories if row.owner_id == owner_id]
+        owned.sort(key=lambda row: row.created_at, reverse=True)
+        return tuple(owned[:limit])
+
+    async def delete_memory(self, owner_id: str, memory_id: str) -> bool:
+        async with self._lock:
+            for index, row in enumerate(self._memories):
+                if row.id == memory_id and row.owner_id == owner_id:
+                    del self._memories[index]
+                    return True
+        return False
+
+    async def search_transcripts(
+        self, owner_id: str, query: str, limit: int
+    ) -> tuple[SearchHit, ...]:
+        needle = query.casefold()
+        hits: list[SearchHit] = []
+        for session_id, session in self._sessions.items():
+            if session.owner_id != owner_id:
+                continue
+            for entry, created_at in zip(session.entries, session.entry_times, strict=False):
+                if needle not in entry.content.casefold():
+                    continue
+                hits.append(
+                    SearchHit(
+                        session_id=session_id,
+                        role=entry.role,
+                        excerpt=entry.content[:240],
+                        created_at=created_at,
+                    )
+                )
+        hits.sort(key=lambda hit: hit.created_at, reverse=True)
+        return tuple(hits[:limit])
+
+    async def rank_memories(
+        self, owner_id: str, query: str, limit: int = 5
+    ) -> tuple[MemoryEntry, ...]:
+        terms = [term for term in query.casefold().split() if term]
+        ranked: list[tuple[int, MemoryEntry]] = []
+        for row in self._memories:
+            if row.owner_id != owner_id:
+                continue
+            text = row.text.casefold()
+            score = sum(text.count(term) for term in terms)
+            if score:
+                ranked.append((score, row))
+        ranked.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
+        return tuple(row for _score, row in ranked[:limit])
 
     async def close(self) -> None:
         return None
@@ -868,6 +977,9 @@ class LakebaseSessionStore:
         await self._require_owner(session_id, owner_id)
         session = _uuid(session_id)
         async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "DELETE FROM clawhouse.memory_entries WHERE source_session_id = $1", session
+            )
             await conn.execute("DELETE FROM clawhouse.approvals WHERE session_id = $1", session)
             await conn.execute(
                 "DELETE FROM clawhouse.transcript_entries WHERE session_id = $1", session
@@ -875,6 +987,99 @@ class LakebaseSessionStore:
             await conn.execute("DELETE FROM clawhouse.runs WHERE session_id = $1", session)
             deleted = await conn.execute("DELETE FROM clawhouse.sessions WHERE id = $1", session)
             return "DELETE 1" in deleted
+
+    async def save_memory(
+        self,
+        owner_id: str,
+        text: str,
+        source_session_id: str | None = None,
+        table_fqn: str | None = None,
+    ) -> MemoryEntry:
+        if source_session_id is not None:
+            await self.get_session(source_session_id, owner_id)
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO clawhouse.memory_entries (id, owner_id, text, source_session_id, table_fqn)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, owner_id, text, source_session_id, table_fqn, created_at
+            """,
+            uuid4(),
+            owner_id,
+            text,
+            _uuid(source_session_id) if source_session_id else None,
+            table_fqn,
+        )
+        return _memory_from_row(row)
+
+    async def list_memories(self, owner_id: str, limit: int = 20) -> tuple[MemoryEntry, ...]:
+        rows = await self._pool.fetch(
+            """
+            SELECT id, owner_id, text, source_session_id, table_fqn, created_at
+            FROM clawhouse.memory_entries
+            WHERE owner_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            owner_id,
+            limit,
+        )
+        return tuple(_memory_from_row(row) for row in rows)
+
+    async def delete_memory(self, owner_id: str, memory_id: str) -> bool:
+        deleted = await self._pool.execute(
+            "DELETE FROM clawhouse.memory_entries WHERE id = $1 AND owner_id = $2",
+            _uuid(memory_id),
+            owner_id,
+        )
+        return "DELETE 1" in deleted
+
+    async def search_transcripts(
+        self, owner_id: str, query: str, limit: int
+    ) -> tuple[SearchHit, ...]:
+        rows = await self._pool.fetch(
+            """
+            SELECT s.id AS session_id, t.role, left(t.content, 240) AS excerpt, r.started_at
+            FROM clawhouse.transcript_entries AS t
+            JOIN clawhouse.sessions AS s ON s.id = t.session_id
+            JOIN clawhouse.runs AS r ON r.id = t.run_id
+            WHERE s.owner_id = $1
+              AND to_tsvector('english', t.content) @@ websearch_to_tsquery('english', $2)
+            ORDER BY r.started_at DESC
+            LIMIT $3
+            """,
+            owner_id,
+            query,
+            limit,
+        )
+        return tuple(
+            SearchHit(
+                session_id=str(row["session_id"]),
+                role=row["role"],
+                excerpt=row["excerpt"],
+                created_at=row["started_at"],
+            )
+            for row in rows
+        )
+
+    async def rank_memories(
+        self, owner_id: str, query: str, limit: int = 5
+    ) -> tuple[MemoryEntry, ...]:
+        rows = await self._pool.fetch(
+            """
+            SELECT id, owner_id, text, source_session_id, table_fqn, created_at,
+                   ts_rank(to_tsvector('english', text), websearch_to_tsquery('english', $2))
+                       AS rank
+            FROM clawhouse.memory_entries
+            WHERE owner_id = $1
+              AND to_tsvector('english', text) @@ websearch_to_tsquery('english', $2)
+            ORDER BY rank DESC, created_at DESC
+            LIMIT $3
+            """,
+            owner_id,
+            query,
+            limit,
+        )
+        return tuple(_memory_from_row(row) for row in rows)
 
     async def close(self) -> None:
         await self._pool.close()
@@ -1301,6 +1506,18 @@ def _constraint_name(exc: BaseException) -> str | None:
 
 def _uuid(value: str) -> UUID:
     return UUID(value)
+
+
+def _memory_from_row(row: asyncpg.Record) -> MemoryEntry:
+    source = row["source_session_id"]
+    return MemoryEntry(
+        id=str(row["id"]),
+        owner_id=row["owner_id"],
+        text=row["text"],
+        created_at=row["created_at"],
+        source_session_id=str(source) if source else None,
+        table_fqn=row["table_fqn"],
+    )
 
 
 def _entry_from_row(row: asyncpg.Record) -> TranscriptEntry:

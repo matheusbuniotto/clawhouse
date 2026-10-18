@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import (
     ModelMessage,
     ModelMessagesTypeAdapter,
@@ -18,6 +19,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 from pydantic_ai_harness.compaction import (
     ClearToolResults,
     SummarizingCompaction,
@@ -285,3 +287,54 @@ async def execute_compaction(
         summary=_find_summary_text(compacted),
         entries=_compacted_entries(compacted),
     )
+
+
+_MEMORY_LIMIT = 5
+_MEMORY_CHARS = 2000
+
+
+def format_memory_block(entries: Sequence[Any]) -> str:
+    """At most 5 lines, 2000 characters, each prefixed with id and created_at."""
+    lines: list[str] = []
+    used = 0
+    for entry in list(entries)[:_MEMORY_LIMIT]:
+        line = f"[{entry.id} {entry.created_at.isoformat()}] {entry.text}"
+        extra = len(line) + (1 if lines else 0)
+        if used + extra > _MEMORY_CHARS:
+            break
+        lines.append(line)
+        used += extra
+    return "\n".join(lines)
+
+
+class MemoryCapability(AbstractCapability[Any]):
+    """Explicit remember/recall tools. No turn writes memory unless one of these runs."""
+
+    def __init__(self, store: object, owner_id: str) -> None:
+        self.store = store
+        self.owner_id = owner_id
+
+    def get_toolset(self) -> AgentToolset[Any]:
+        store = self.store
+        owner_id = self.owner_id
+
+        async def remember(text: str, table_fqn: str | None = None) -> dict[str, str]:
+            """Save a fact for the caller and return its id."""
+            entry = await store.save_memory(owner_id, text, None, table_fqn)  # type: ignore[attr-defined]
+            return {"id": entry.id}
+
+        async def recall(query: str) -> list[dict[str, object]]:
+            """Return at most 5 cited memory entries for the caller."""
+            rows = await store.rank_memories(owner_id, query, limit=5)  # type: ignore[attr-defined]
+            return [
+                {
+                    "id": row.id,
+                    "text": row.text,
+                    "table_fqn": row.table_fqn,
+                    "source_session_id": row.source_session_id,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+
+        return FunctionToolset([remember, recall])

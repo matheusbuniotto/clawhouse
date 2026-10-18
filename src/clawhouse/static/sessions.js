@@ -26,7 +26,42 @@ export function mount(root) {
         count.textContent =
             visible === 1 ? "1 session" : `${visible} sessions`;
     }
-    search.addEventListener("input", updateFilter);
+    const searchError = el("p", "sessions-error", "Search failed");
+    searchError.hidden = true;
+    toolbar.append(searchError);
+    search.addEventListener("input", () => {
+        const query = search.value.trim();
+        if (query.length < 2) {
+            searchError.hidden = true;
+            updateFilter();
+            return;
+        }
+        void searchSessions(query);
+    });
+    async function searchSessions(query) {
+        try {
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            if (!response.ok)
+                throw new Error(String(response.status));
+            const body = (await response.json());
+            searchError.hidden = true;
+            list.replaceChildren();
+            if (body.results.length === 0) {
+                list.append(el("li", "empty", "No matching transcript entries."));
+                return;
+            }
+            for (const hit of body.results) {
+                const row = el("li", "session");
+                const link = el("a", "session-link", hit.excerpt);
+                link.href = `/chat?session=${hit.session_id}`;
+                row.append(link);
+                list.append(row);
+            }
+        }
+        catch {
+            searchError.hidden = false;
+        }
+    }
     function render(items) {
         list.replaceChildren();
         if (items.length === 0) {
