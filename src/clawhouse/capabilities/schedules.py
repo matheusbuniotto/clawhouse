@@ -153,6 +153,24 @@ async def run_scheduled_turn(
         return result
 
 
+async def _execute_due_turn(
+    due: ScheduleEntry,
+    store: SessionStore,
+    run_turn_fn: Callable[[str, str, TurnContext], Awaitable[TurnResult]],
+    make_turn_ctx: Callable[[ScheduleEntry], TurnContext],
+) -> None:
+    try:
+        await run_scheduled_turn(
+            due,
+            store=store,
+            run_turn_fn=run_turn_fn,
+            make_turn_ctx=make_turn_ctx,
+            now_fn=lambda: datetime.now(UTC),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("scheduled turn failed: %s", type(exc).__name__)  # noqa: TRY400
+
+
 async def schedule_worker(
     store: SessionStore,
     run_turn_fn: Callable[[str, str, TurnContext], Awaitable[TurnResult]],
@@ -168,16 +186,7 @@ async def schedule_worker(
             now = datetime.now(UTC)
             due_list = await store.claim_due_schedules(now)
             for due in due_list:
-                try:
-                    await run_scheduled_turn(
-                        due,
-                        store=store,
-                        run_turn_fn=run_turn_fn,
-                        make_turn_ctx=make_turn_ctx,
-                        now_fn=lambda: datetime.now(UTC),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("scheduled turn failed: %s", type(exc).__name__)  # noqa: TRY400
+                await _execute_due_turn(due, store, run_turn_fn, make_turn_ctx)
         except Exception as exc:  # noqa: BLE001
             logger.error("schedule worker loop error: %s", type(exc).__name__)  # noqa: TRY400
 

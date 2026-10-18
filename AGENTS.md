@@ -23,7 +23,7 @@ Manual equivalents when prek is unavailable:
 
 ```bash
 uv run ruff check --fix . && uv run ruff format .
-uv run complexipy src --max-complexity-allowed 15
+uv run complexipy src --max-complexity-allowed 10
 uv run pyright
 ```
 
@@ -43,6 +43,14 @@ CI (`quality.yml`) runs ruff, complexipy, pyright, vulture, jscpd, and pytest on
 - Lakeflow Job Lifecycle: `jobs_create` supports `task_type="agentic"`, `task_type="sql"`, and `task_type="python"`, plus Quartz cron schedules. `jobs_edit` updates settings/schedules/queries, `jobs_delete` removes jobs, and `jobs_get_run_output` retrieves execution logs and analytical reports.
 - Issues carry behavior and acceptance criteria, never file paths or code snippets (they rot).
 - Vertical slices: each ticket is demoable end to end through every layer it touches, sized for one fresh context.
+
+### Good-looking code in Clawhouse
+
+- **Early returns first**: Guard clauses handle errors, empty checks, and bounds at the top; the happy path has zero indentation.
+- **Small named helpers**: One level of abstraction per function; break nested blocks and loops into small, focused pure functions.
+- **Typed models over dicts**: Frozen dataclasses or Pydantic models for every boundary; zero untyped `dict[str, Any]` across modules.
+- **Ruff layout**: Target 100 chars, double quotes, no trailing commas when fitting one line, strict standard imports (`I`).
+- **Deep modules**: Hide complex operations behind a minimal interface; caller learns 1 function, gets full leverage.
 
 ## Agent skills
 

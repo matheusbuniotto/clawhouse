@@ -208,18 +208,29 @@ def principal_of(user: object) -> Principal:
     return Principal(user_name=name, groups=frozenset(names | {"users"}))
 
 
+def _entry_matches_principal(entry: object, who: Principal) -> bool:
+    user = getattr(entry, "user_name", None)
+    if user and user.lower() == who.user_name.lower():
+        return True
+    group = getattr(entry, "group_name", None)
+    return bool(group and group in who.groups)
+
+
+def _entry_permission_levels(entry: object) -> set[str]:
+    levels: set[str] = set()
+    for perm in getattr(entry, "all_permissions", None) or ():
+        level = getattr(perm, "permission_level", None)
+        if level is not None:
+            levels.add(str(getattr(level, "value", level)))
+    return levels
+
+
 def levels_for(acl: Iterable[object], who: Principal) -> set[str]:
     """Every permission level the ACL grants this user, directly or through a group."""
     levels: set[str] = set()
     for entry in acl:
-        user = getattr(entry, "user_name", None)
-        group = getattr(entry, "group_name", None)
-        if not ((user and user.lower() == who.user_name.lower()) or (group in who.groups)):
-            continue
-        for perm in getattr(entry, "all_permissions", None) or ():
-            level = getattr(perm, "permission_level", None)
-            if level is not None:
-                levels.add(str(getattr(level, "value", level)))
+        if _entry_matches_principal(entry, who):
+            levels.update(_entry_permission_levels(entry))
     return levels
 
 

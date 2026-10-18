@@ -26,6 +26,28 @@ class BootstrapContext:
     notice: str | None
 
 
+def _apply_user_directives(
+    text: str, cut: bool, missing: bool, *, directives: str, limit: int
+) -> tuple[str, bool, bool]:
+    if missing:
+        return directives[:limit], len(directives) > limit, False
+    combined = f"{text}\n\n{directives}".strip()
+    return combined[:limit], cut or (len(combined) > limit), False
+
+
+def _read_bootstrap_source(
+    name: str, path: Path, limit: int, user_directives: str | None
+) -> tuple[BootstrapFile | None, bool]:
+    text, cut, missing = _read(path, name, limit)
+    if name == "CONTEXT.md" and missing:
+        return None, False
+    if name == "USER.md" and user_directives:
+        text, cut, missing = _apply_user_directives(
+            text, cut, missing, directives=user_directives, limit=limit
+        )
+    return BootstrapFile(name=name, text=text, missing=missing), cut
+
+
 def load_bootstrap(
     paths: WorkspacePaths,
     *,
@@ -35,24 +57,13 @@ def load_bootstrap(
     files: list[BootstrapFile] = []
     truncated = False
     for name, path, limit in _sources(paths):
-        text, cut, missing = _read(path, name, limit)
-        if name == "CONTEXT.md" and missing:
-            continue
-        if name == "USER.md" and user_directives:
-            if missing:
-                missing = False
-                text = user_directives[:limit]
-                cut = len(user_directives) > limit
-            else:
-                combined = f"{text}\n\n{user_directives}".strip()
-                cut = cut or (len(combined) > limit)
-                text = combined[:limit]
-        files.append(BootstrapFile(name=name, text=text, missing=missing))
-        truncated = truncated or cut
+        file, cut = _read_bootstrap_source(name, path, limit, user_directives)
+        if file is not None:
+            files.append(file)
+            truncated = truncated or cut
     fitted, cut_more = _fit_total(tuple(files))
-    if truncated or cut_more:
-        return BootstrapContext(files=fitted, notice=_NOTICE)
-    return BootstrapContext(files=fitted, notice=None)
+    notice = _NOTICE if (truncated or cut_more) else None
+    return BootstrapContext(files=fitted, notice=notice)
 
 
 def load_bootstrap_directives(user_directives: str) -> BootstrapContext:
@@ -84,9 +95,7 @@ def _sources(paths: WorkspacePaths) -> tuple[tuple[str, Path, int], ...]:
     )
 
 
-def _fit_total(files: tuple[BootstrapFile, ...]) -> tuple[tuple[BootstrapFile, ...], bool]:
-    texts = {item.name: item.text for item in files}
-    protected = {item.name for item in files if item.missing}
+def _trim_overflow(texts: dict[str, str], protected: set[str]) -> bool:
     truncated = False
     for name in _OVERFLOW:
         extra = sum(len(text) for text in texts.values()) - _TOTAL_CAP
@@ -95,10 +104,16 @@ def _fit_total(files: tuple[BootstrapFile, ...]) -> tuple[tuple[BootstrapFile, .
         if name in protected:
             continue
         shortened = _shorten(texts[name], extra)
-        if shortened == texts[name]:
-            continue
-        texts[name] = shortened
-        truncated = True
+        if shortened != texts[name]:
+            texts[name] = shortened
+            truncated = True
+    return truncated
+
+
+def _fit_total(files: tuple[BootstrapFile, ...]) -> tuple[tuple[BootstrapFile, ...], bool]:
+    texts = {item.name: item.text for item in files}
+    protected = {item.name for item in files if item.missing}
+    truncated = _trim_overflow(texts, protected)
     fitted = tuple(
         BootstrapFile(name=item.name, text=texts[item.name], missing=item.missing) for item in files
     )

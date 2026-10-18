@@ -79,29 +79,29 @@ class DisambiguatedTool:
     parameters_schema: dict[str, object] | None = None
 
 
+def _assign_safe_name(base: str, used_names: set[str], max_length: int) -> str:
+    if base not in used_names:
+        return base
+    counter = 1
+    while True:
+        suffix = f"_{counter}"
+        candidate = f"{base[: max_length - len(suffix)]}{suffix}"
+        if candidate not in used_names:
+            return candidate
+        counter += 1
+
+
 def disambiguate_tool_names(
     tools: Sequence[RawMCPTool],
     max_length: int = MAX_TOOL_NAME_LENGTH,
 ) -> list[DisambiguatedTool]:
     used_names: set[str] = set()
     results: list[DisambiguatedTool] = []
-    # Sort deterministically by (server_name, tool_name) prior to suffix disambiguation
     sorted_tools = sorted(tools, key=lambda t: (t.server_name, t.tool_name))
 
     for raw in sorted_tools:
         base = safe_tool_name(raw.server_name, raw.tool_name)[:max_length]
-        if base not in used_names:
-            assigned = base
-        else:
-            counter = 1
-            while True:
-                suffix = f"_{counter}"
-                prefix = base[: max_length - len(suffix)]
-                candidate = f"{prefix}{suffix}"
-                if candidate not in used_names:
-                    assigned = candidate
-                    break
-                counter += 1
+        assigned = _assign_safe_name(base, used_names, max_length)
         used_names.add(assigned)
         results.append(
             DisambiguatedTool(
@@ -113,7 +113,6 @@ def disambiguate_tool_names(
             )
         )
 
-    # Sort deterministically by safe name
     results.sort(key=lambda t: t.safe_name)
     return results
 
@@ -131,20 +130,22 @@ def _scrub_pydantic(obj: BaseModel, token: str) -> object:
     return dumped
 
 
-def _scrub_dataclass(obj: object, token: str) -> object:
-    dumped = scrub_object(asdict(obj), token)  # type: ignore[arg-type]
+def _scrub_dataclass(obj: Any, token: str) -> object:
+    dumped: Any = scrub_object(asdict(obj), token)
     with suppress(TypeError, ValueError):
-        return type(obj)(**dumped)  # type: ignore[call-arg]
+        cls: Any = type(obj)
+        return cls(**dumped)
     return dumped
 
 
 def _scrub_dict_object(obj: object, token: str) -> object:
     with suppress(AttributeError, TypeError):
         for k, v in list(vars(obj).items()):
-            if not k.startswith("_"):
-                scrubbed_v = scrub_object(v, token)
-                if scrubbed_v != v:
-                    setattr(obj, k, scrubbed_v)
+            if k.startswith("_"):
+                continue
+            scrubbed_v = scrub_object(v, token)
+            if scrubbed_v != v:
+                setattr(obj, k, scrubbed_v)
     return obj
 
 
@@ -158,19 +159,27 @@ def _scrub_typed_object(obj: object, token: str) -> object:
     return obj
 
 
+def _scrub_dict(mapping: dict[Any, Any], token: str) -> dict[Any, Any]:
+    return {
+        (scrub_token(k, token) if isinstance(k, str) else k): scrub_object(v, token)
+        for k, v in mapping.items()
+    }
+
+
+def _scrub_sequence(seq: list[Any] | tuple[Any, ...], token: str) -> list[Any] | tuple[Any, ...]:
+    items = [scrub_object(v, token) for v in seq]
+    return tuple(items) if isinstance(seq, tuple) else items
+
+
 def scrub_object(obj: object, token: str) -> object:
     if not token or obj is None:
         return obj
     if isinstance(obj, str):
         return scrub_token(obj, token)
     if isinstance(obj, dict):
-        return {
-            (scrub_token(k, token) if isinstance(k, str) else k): scrub_object(v, token)
-            for k, v in obj.items()
-        }
+        return _scrub_dict(obj, token)
     if isinstance(obj, list | tuple):
-        items = [scrub_object(v, token) for v in obj]
-        return tuple(items) if isinstance(obj, tuple) else items
+        return _scrub_sequence(obj, token)
     return _scrub_typed_object(obj, token)
 
 
@@ -250,7 +259,7 @@ async def _fetch_server_tools(
         raw_items = (await res) if isinstance(res, Awaitable) else res
         items = list(raw_items) if isinstance(raw_items, list | tuple) else []
     else:
-        dict_tools = await toolset.get_tools(None)  # type: ignore[arg-type]
+        dict_tools = await cast(Any, toolset).get_tools(None)
         items = list(dict_tools.values())
     return [_raw_tool_from_item(item, server_name, token) for item in items if _item_name(item)]
 

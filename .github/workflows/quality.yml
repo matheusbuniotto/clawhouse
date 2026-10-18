@@ -52,7 +52,10 @@ jobs:
           uv run ruff format --check .
 
       - name: Cognitive Complexity Gate (Complexipy)
-        run: uv run complexipy src --max-complexity-allowed 15
+        run: uv run complexipy src --max-complexity-allowed 10
+
+      - name: AST Size Limits Gate
+        run: python3 scripts/check_ast_limits.py
 
       - name: Type Check & Hallucination Guard (Pyright)
         run: uv run pyright

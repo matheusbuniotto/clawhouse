@@ -80,6 +80,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.ruff.lint]
+preview = true
 select = [
     "F",      # Pyflakes (hallucinated variables, unused imports)
     "E", "W", # pycodestyle
@@ -91,6 +92,7 @@ select = [
     "A",      # flake8-builtins (shadowing builtins)
     "C4",     # flake8-comprehensions
     "C90",    # mccabe (cyclomatic complexity)
+    "C901",   # mccabe complex structure
     "T10",    # flake8-debugger
     "T20",    # flake8-print (disallow lingering print statements)
     "SIM",    # flake8-simplify (collapsing redundant nested logic)
@@ -98,6 +100,9 @@ select = [
     "ARG",    # flake8-unused-arguments
     "ERA",    # eradicate (commented-out dead code)
     "PLR",    # Pylint Refactor (metrics & code structure)
+    "PLR0912",# too many branches
+    "PLR0913",# too many arguments
+    "PLR1702",# too many nested blocks
     "PLW",    # Pylint Warnings
     "PLE",    # Pylint Errors
     "PLC",    # Pylint Conventions
@@ -117,6 +122,22 @@ ignore = [
 
     # Don't require long docstring error messages to be separate classes if trivial
     "TRY003",
+
+    # Unstable preview rules activated by preview=true under broad selectors
+    "PLC1901",
+    "PLC2701",
+    "PLR0904",
+    "PLR0914",
+    "PLR2044",
+    "PLR6201",
+    "PLR6301",
+    "RUF029",
+    "RUF056",
+    "RUF069",
+    "RUF105",
+    "RUF201",
+    "SIM910",
+    "UP052",
 ]
 
 [tool.ruff.lint.mccabe]
