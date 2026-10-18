@@ -29,6 +29,7 @@ dependencies = [
 "src/clawhouse/static/dom.js" = "clawhouse/static/dom.js"
 "src/clawhouse/static/highlight.js" = "clawhouse/static/highlight.js"
 "src/clawhouse/static/index.html" = "clawhouse/static/index.html"
+"src/clawhouse/static/prototypes.html" = "clawhouse/static/prototypes.html"
 "src/clawhouse/static/jobs.js" = "clawhouse/static/jobs.js"
 "src/clawhouse/static/mentions.js" = "clawhouse/static/mentions.js"
 "src/clawhouse/static/new.js" = "clawhouse/static/new.js"
