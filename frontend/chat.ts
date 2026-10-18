@@ -420,7 +420,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
     const rowCost = el("div", "ctx-popover-row ctx-popover-cost-row");
     rowCost.append(
-      el("span", "", "Est. Turn Cost"),
+      el("span", "", "Est. Turn Cost (approx)"),
       el("strong", "ctx-cost-highlight", formatCost(pricing.totalCost)),
     );
 
@@ -429,7 +429,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
     const rowHealth = el("div", "ctx-popover-row");
     rowHealth.append(el("span", "", "Health Gauge"), el("strong", `status-${level}`, level.toUpperCase()));
-    ctxPopover.append(title, horizonBar, rowTokens, rowMax, rowPct, rowRemaining, rowCost, rowTier, rowHealth);
+
+    const note = el("div", "ctx-popover-disclaimer", "* Illustrative estimate based on standard token pricing.");
+    ctxPopover.append(title, horizonBar, rowTokens, rowMax, rowPct, rowRemaining, rowCost, rowTier, rowHealth, note);
   }
 
   function renderMeter(): void {

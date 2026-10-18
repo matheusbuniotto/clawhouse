@@ -1582,6 +1582,14 @@ body {
   font-family: var(--font-mono);
 }
 
+.ctx-popover-disclaimer {
+  font-size: 10px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 4px;
+}
+
 .abort {
   min-height: 30px;
   padding: 0 12px;

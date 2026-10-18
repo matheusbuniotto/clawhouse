@@ -302,12 +302,13 @@ export function mount(root, ctx) {
         const rowRemaining = el("div", "ctx-popover-row");
         rowRemaining.append(el("span", "", "Remaining"), el("strong", "", `${Math.max(0, denominator - contextTokens).toLocaleString()} tokens`));
         const rowCost = el("div", "ctx-popover-row ctx-popover-cost-row");
-        rowCost.append(el("span", "", "Est. Turn Cost"), el("strong", "ctx-cost-highlight", formatCost(pricing.totalCost)));
+        rowCost.append(el("span", "", "Est. Turn Cost (approx)"), el("strong", "ctx-cost-highlight", formatCost(pricing.totalCost)));
         const rowTier = el("div", "ctx-popover-row ctx-popover-tier");
         rowTier.append(el("span", "", "Pricing Tier"), el("span", "model-badge-tag", pricing.rateLabel));
         const rowHealth = el("div", "ctx-popover-row");
         rowHealth.append(el("span", "", "Health Gauge"), el("strong", `status-${level}`, level.toUpperCase()));
-        ctxPopover.append(title, horizonBar, rowTokens, rowMax, rowPct, rowRemaining, rowCost, rowTier, rowHealth);
+        const note = el("div", "ctx-popover-disclaimer", "* Illustrative estimate based on standard token pricing.");
+        ctxPopover.append(title, horizonBar, rowTokens, rowMax, rowPct, rowRemaining, rowCost, rowTier, rowHealth, note);
     }
     function renderMeter() {
         const denominator = contextWindow ?? 128_000;
