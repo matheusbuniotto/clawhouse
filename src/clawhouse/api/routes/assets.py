@@ -39,11 +39,6 @@ def _page_routes(app: FastAPI) -> None:
         del caller
         return FileResponse(STATIC / "index.html")
 
-    @app.get("/prototypes")
-    @app.get("/prototypes.html")
-    async def prototypes_page() -> FileResponse:
-        return FileResponse(STATIC / "prototypes.html")
-
 
 def _asset_routes(app: FastAPI) -> None:
     _style_routes(app)

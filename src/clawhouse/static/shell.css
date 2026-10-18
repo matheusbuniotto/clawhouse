@@ -5,7 +5,6 @@
 }
 
 .model-custom-popover[hidden],
-.agent-popover[hidden],
 .ctx-popover[hidden],
 .rail-agent-popover[hidden],
 .composer-popover[hidden],
@@ -649,36 +648,39 @@ body {
   cursor: pointer;
 }
 
-/* Composer — 3 OpenClaw variants (Classic Integrated Card, Studio Pro HUD, Agent Capsule) */
+/* Composer — Agent Capsule & Unified Card */
 .composer {
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 8px 0 20px;
-}
-
-/* Variant 1: OpenClaw Classic Integrated Card (Default) — Official 2026.9.3 / 2026.9.4 */
-.composer[data-variant="classic"],
-.composer:not([data-variant]) {
+  padding: 2px 0 0;
   background: var(--card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow);
-  padding: 0;
-  transition: border-color var(--duration-fast) var(--ease), box-shadow var(--duration-fast) var(--ease);
+  box-shadow: var(--shadow-lg);
+  transition: all var(--duration-fast) var(--ease);
 }
 
-.composer[data-variant="classic"]:focus-within,
-.composer:not([data-variant]):focus-within {
+.composer:focus-within {
   border-color: var(--border-hover);
   box-shadow: var(--shadow-lg);
 }
 
-.composer[data-variant="classic"] textarea,
-.composer:not([data-variant]) textarea {
+.capsule-ribbon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+}
+
+.composer textarea {
   width: 100%;
   resize: none;
-  padding: 14px 18px 8px;
+  padding: 12px 18px 8px;
   border: none;
   background: transparent;
   color: inherit;
@@ -689,73 +691,43 @@ body {
   box-shadow: none;
 }
 
-/* Classic Card Toolbar: OpenClaw flat elegance */
-.composer[data-variant="classic"] .composer-toolbar,
-.composer:not([data-variant]) .composer-toolbar {
+.composer .composer-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 14px 10px;
+  padding: 6px 16px 12px;
   gap: 8px;
 }
 
-.composer[data-variant="classic"] .composer-toolbar-left,
-.composer:not([data-variant]) .composer-toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.composer[data-variant="classic"] .composer-toolbar-right,
-.composer:not([data-variant]) .composer-toolbar-right {
+.composer-toolbar-left,
+.composer-toolbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.composer[data-variant="classic"] .composer-action-btn,
-.composer:not([data-variant]) .composer-action-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--muted);
-  font-size: 18px;
+.composer-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text-strong);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 16px;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease);
 }
 
-.composer[data-variant="classic"] .composer-action-btn:hover,
-.composer:not([data-variant]) .composer-action-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-strong);
+.composer-action-btn:hover {
+  background: var(--card);
+  border-color: var(--border-hover);
 }
 
-.composer[data-variant="classic"] .agent-trigger,
-.composer:not([data-variant]) .agent-trigger {
-  min-height: 26px;
-  padding: 0 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: all var(--duration-fast) var(--ease);
-}
-
-.composer[data-variant="classic"] .agent-trigger:hover,
-.composer:not([data-variant]) .agent-trigger:hover {
-  background: var(--bg-hover);
-  color: var(--text-strong);
+.agent-badge {
+  display: none;
 }
 
 .composer[data-variant="classic"] .model-custom-trigger,
@@ -1024,10 +996,6 @@ body {
   display: none;
 }
 
-.capsule-ribbon {
-  display: none;
-}
-
 .typing-status-pill {
   display: none;
 }
@@ -1197,91 +1165,22 @@ body {
   align-items: center;
 }
 
-.agent-trigger {
+.agent-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-full);
-  background: var(--bg-hover);
-  color: var(--text-strong);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease);
-}
-
-.agent-trigger:hover {
-  background: var(--card);
-  border-color: var(--border-hover);
-}
-
-.agent-trigger-emoji {
-  font-size: 14px;
-}
-
-.agent-trigger-label {
-  font-weight: 500;
-}
-
-.agent-trigger-chevron {
-  font-size: 10px;
+  gap: 5px;
   color: var(--muted);
-}
-
-.agent-popover {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  min-width: 260px;
-  max-width: 340px;
-  max-height: 320px;
-  overflow-y: auto;
-  background: var(--popover);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  padding: 6px;
-  z-index: 120;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.agent-popover-item {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  transition: all var(--duration-fast) var(--ease);
-}
-
-.agent-popover-item:hover,
-.agent-popover-item.selected {
-  background: var(--bg-hover);
-  color: var(--text-strong);
-}
-
-.agent-popover-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-  font-size: var(--font-size-sm);
-}
-
-.agent-popover-desc {
   font-size: var(--font-size-xs);
-  color: var(--muted);
-  margin-top: 2px;
+  user-select: none;
+}
+
+.agent-badge-emoji {
+  font-size: 13px;
+}
+
+.agent-badge-label {
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 /* Studio Agent Strip & Chips */
@@ -1681,6 +1580,14 @@ body {
 .ctx-popover-row strong {
   color: var(--text-strong);
   font-family: var(--font-mono);
+}
+
+.ctx-popover-disclaimer {
+  font-size: 10px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 4px;
 }
 
 .abort {
