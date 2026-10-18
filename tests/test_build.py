@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_SOURCE = ROOT / "src" / "clawhouse" / "api" / "app.py"
+ASSETS_SOURCE = ROOT / "src" / "clawhouse" / "api" / "routes" / "assets.py"
 FRONTEND = ROOT / "frontend"
 STATIC = ROOT / "src" / "clawhouse" / "static"
 STATIC_PREFIX = "clawhouse/static/"
@@ -15,9 +16,12 @@ IMPORT_SPECIFIER = re.compile(r"""(?:\bfrom\s+|\bimport\s*\(|\bimport\s+)["'](\.
 
 
 def _served_static_files() -> set[str]:
-    """Every static filename `app.py` hands to a FileResponse, in serve order."""
-    source = APP_SOURCE.read_text(encoding="utf-8")
-    return set(re.findall(r'STATIC / "([^"]+)"', source))
+    """Every static filename handed to a FileResponse, in serve order."""
+    found: set[str] = set()
+    for source_file in (APP_SOURCE, ASSETS_SOURCE):
+        if source_file.exists():
+            found.update(re.findall(r'STATIC / "([^"]+)"', source_file.read_text(encoding="utf-8")))
+    return found
 
 
 def _force_include_declared() -> set[str]:
