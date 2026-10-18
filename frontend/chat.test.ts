@@ -732,7 +732,7 @@ test("clears transcript after confirmation", async () => {
   expect(log.textContent).toContain("Transcript cleared.");
 });
 
-test("prototype variant switcher changes composer variant and persists preference", async () => {
+test("composer defaults to Agent Capsule layout with ribbon and clean toolbar", async () => {
   const root = document.createElement("div");
   document.body.replaceChildren(root);
   localStorage.clear();
@@ -751,25 +751,29 @@ test("prototype variant switcher changes composer variant and persists preferenc
   mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
 
   const composer = root.querySelector("#composer") as HTMLElement;
-  expect(composer.dataset.variant).toBe("classic");
-
-  const studioBtn = root.querySelector('button[data-variant="studio"]') as HTMLButtonElement;
-  studioBtn.click();
-  expect(composer.dataset.variant).toBe("studio");
-  expect(localStorage.getItem("clawhouse.chat_variant")).toBe("studio");
-
-  const capsuleBtn = root.querySelector('button[data-variant="capsule"]') as HTMLButtonElement;
-  capsuleBtn.click();
   expect(composer.dataset.variant).toBe("capsule");
-  expect(localStorage.getItem("clawhouse.chat_variant")).toBe("capsule");
 
-  const classicBtn = root.querySelector('button[data-variant="classic"]') as HTMLButtonElement;
-  classicBtn.click();
-  expect(composer.dataset.variant).toBe("classic");
-  expect(localStorage.getItem("clawhouse.chat_variant")).toBe("classic");
+  // Top ribbon shows active agent and ready draft status
+  const capsuleRibbon = root.querySelector(".capsule-ribbon") as HTMLElement;
+  expect(capsuleRibbon).not.toBeNull();
+  expect(capsuleRibbon.querySelector(".capsule-agent-name")?.textContent).toBe("🦀 main");
+  expect(capsuleRibbon.querySelector(".capsule-draft-text")?.textContent).toBe("Ready");
+
+  // Bottom toolbar left contains only the '+' attach action button — no duplicate '#agent-badge'
+  const toolbarLeft = root.querySelector(".composer-toolbar-left") as HTMLElement;
+  expect(toolbarLeft.querySelector(".composer-action-btn")?.textContent).toBe("+");
+  expect(toolbarLeft.querySelector("#agent-badge")).toBeNull();
+
+  // Typing updates draft status in the top ribbon
+  const input = root.querySelector("#message") as HTMLTextAreaElement;
+  input.value = "Hello agent";
+  input.dispatchEvent(new Event("input"));
+  expect(capsuleRibbon.querySelector(".capsule-draft-text")?.textContent).toBe(
+    "Typing · not sent (2 words)",
+  );
 });
 
-test("active agent display shows name and updates on delegate chip click", async () => {
+test("active agent display shows name in top ribbon and updates on agent query param", async () => {
   const root = document.createElement("div");
   document.body.replaceChildren(root);
 
@@ -787,28 +791,15 @@ test("active agent display shows name and updates on delegate chip click", async
     return jsonResponse({});
   });
 
-  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
+  mount(root, { url: new URL("http://localhost/chat?agent=analyst"), navigate: () => {} });
 
   await vi.waitFor(() => {
-    const badge = root.querySelector("#agent-badge");
-    expect(badge?.textContent).toContain("main");
+    const agentName = root.querySelector(".capsule-agent-name");
+    expect(agentName?.textContent).toBe("📊 analyst");
   });
 
   const input = root.querySelector("#message") as HTMLTextAreaElement;
-  expect(input.placeholder).toContain("🦀 main");
-
-  // In Studio mode, delegate chips allow appending @analyst
-  const studioBtn = root.querySelector('button[data-variant="studio"]') as HTMLButtonElement;
-  studioBtn.click();
-
-  await vi.waitFor(() => {
-    const chip = root.querySelector(".delegate-chip") as HTMLButtonElement;
-    expect(chip?.textContent).toContain("analyst");
-  });
-
-  const analystChip = root.querySelector(".delegate-chip") as HTMLButtonElement;
-  analystChip.click();
-  expect(input.value).toContain("@analyst");
+  expect(input.placeholder).toBe("Prompt 📊 analyst...");
 });
 
 test("custom model selector syncs with native model select and displays formatted label", async () => {
@@ -859,7 +850,7 @@ test("custom model selector syncs with native model select and displays formatte
   expect(modelTrigger.textContent).toContain("GPT-4o");
 });
 
-test("context meter popover and studio horizon meter update on usage", async () => {
+test("context meter popover updates on usage", async () => {
   const root = document.createElement("div");
   document.body.replaceChildren(root);
 
@@ -885,34 +876,4 @@ test("context meter popover and studio horizon meter update on usage", async () 
   expect(popover.textContent).toContain("Tokens Used");
   expect(popover.textContent).toContain("Token & Cost Ledger");
   expect(popover.textContent).toContain("Est. Turn Cost");
-});
-
-test("prototype comparison modal opens and allows simulating context tokens", async () => {
-  const root = document.createElement("div");
-  document.body.replaceChildren(root);
-
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url === "/api/models") return jsonResponse({ models: [] });
-    if (url === "/api/agents") return jsonResponse([]);
-    if (url.endsWith("/transcript")) return jsonResponse({ entries: [], run_state: "idle" });
-    if (url.endsWith("/questions")) return jsonResponse([]);
-    if (url.endsWith("/approvals")) return jsonResponse([]);
-    return jsonResponse({});
-  });
-
-  mount(root, { url: new URL("http://localhost/chat"), navigate: () => {} });
-
-  const compareBtn = root.querySelector(".variant-compare-btn") as HTMLButtonElement;
-  compareBtn.click();
-
-  const modal = document.querySelector("#prototype-modal") as HTMLElement;
-  expect(modal).not.toBeNull();
-  expect(modal.textContent).toContain("OpenClaw Classic Card");
-  expect(modal.textContent).toContain("Studio Pro HUD");
-  expect(modal.textContent).toContain("Agent Capsule & Dock");
-
-  const closeBtn = modal.querySelector(".prototype-modal-close") as HTMLButtonElement;
-  closeBtn.click();
-  expect(document.querySelector("#prototype-modal")).toBeNull();
 });

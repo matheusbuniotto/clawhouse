@@ -39,10 +39,7 @@ import {
 
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
-const VARIANT_KEY = "clawhouse.chat_variant";
 const WAITING_FOR_ANSWER = "Esperando sua resposta na pergunta acima.";
-
-export type ChatVariant = "classic" | "studio" | "capsule";
 
 interface FormattedModel {
   id: string;
@@ -164,32 +161,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   clearButton.type = "button";
   const headerActions = el("div", "chat-header-actions");
 
-  // Variant Switcher Pill Group
-  const variantSwitcher = el("div", "chat-variant-switcher");
-  variantSwitcher.setAttribute("role", "radiogroup");
-  variantSwitcher.setAttribute("aria-label", "Composer layout variant");
-
-  const variantBtnClassic = el("button", "variant-pill active", "1. OpenClaw Classic");
-  variantBtnClassic.type = "button";
-  variantBtnClassic.dataset.variant = "classic";
-  variantBtnClassic.title = "Variant 1: OpenClaw Classic Unified Card (2026.9.3 / 2026.9.4)";
-
-  const variantBtnStudio = el("button", "variant-pill", "2. Studio HUD");
-  variantBtnStudio.type = "button";
-  variantBtnStudio.dataset.variant = "studio";
-  variantBtnStudio.title = "Variant 2: Studio Pro HUD (2026.9.2 Two-Pane & MCP Studio)";
-
-  const variantBtnCapsule = el("button", "variant-pill", "3. Agent Capsule");
-  variantBtnCapsule.type = "button";
-  variantBtnCapsule.dataset.variant = "capsule";
-  variantBtnCapsule.title = "Variant 3: Agent Capsule & Floating Dock (2026.9.5 Automation & Drafts)";
-
-  const variantBtnCompare = el("button", "variant-pill variant-compare-btn", "✨ Compare 3");
-  variantBtnCompare.type = "button";
-  variantBtnCompare.title = "Compare all 3 variants side-by-side with live simulator";
-
-  variantSwitcher.append(variantBtnClassic, variantBtnStudio, variantBtnCapsule, variantBtnCompare);
-  headerActions.append(variantSwitcher, renameButton, clearButton);
+  headerActions.append(renameButton, clearButton);
   header.append(titleLabel, headerActions);
 
   const transcript = el("section", "log");
@@ -199,26 +171,9 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const form = document.createElement("form");
   form.id = "composer";
   form.className = "composer";
-  form.dataset.variant = "classic";
+  form.dataset.variant = "capsule";
 
-  // Variant 2: Studio Upper Deck (Agent Roster & Horizon Meter)
-  const studioDeck = el("div", "studio-deck");
-  const studioAgentStrip = el("div", "studio-agent-strip");
-  const studioActiveAgentBadge = el("span", "studio-active-agent", "● 🦀 main (Lead)");
-  const studioDelegateLabel = el("span", "studio-delegate-label", "Delegate:");
-  const studioDelegateChips = el("div", "studio-delegate-chips");
-  studioAgentStrip.append(studioActiveAgentBadge, studioDelegateLabel, studioDelegateChips);
-
-  const studioCtxStrip = el("div", "studio-ctx-strip");
-  studioCtxStrip.title = "Context Horizon Meter — Click for details";
-  const studioCtxTrack = el("div", "studio-ctx-track");
-  const studioCtxFill = el("div", "studio-ctx-fill");
-  studioCtxTrack.append(studioCtxFill);
-  const studioCtxLabel = el("span", "studio-ctx-label", "0 / 128k (0%)");
-  studioCtxStrip.append(studioCtxTrack, studioCtxLabel);
-  studioDeck.append(studioAgentStrip, studioCtxStrip);
-
-  // Variant 3: Capsule Top Ribbon (Active Persona & Draft Status)
+  // Capsule Top Ribbon (Active Persona & Draft Status)
   const capsuleRibbon = el("div", "capsule-ribbon");
   const capsuleAgentBadge = el("div", "capsule-agent-badge");
   const capsulePulse = el("span", "capsule-pulse-dot");
@@ -235,12 +190,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const input = document.createElement("textarea");
   input.id = "message";
   input.rows = 1;
-  input.placeholder = "Message 🦀 main (or type @ to delegate)...";
+  input.placeholder = "Prompt 🦀 main...";
   input.required = true;
 
   const toolbar = el("div", "composer-toolbar");
 
-  // Left Toolbar: Action button (+), Agent Selector Pill, Typing Status, Studio Commands
+  // Left Toolbar: Action button (+)
   const toolbarLeft = el("div", "composer-toolbar-left");
 
   const attachBtn = el("button", "composer-action-btn", "+");
@@ -248,27 +203,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   attachBtn.title = "Add attachments, SQL tables, or tools";
   attachBtn.setAttribute("aria-label", "Attachments and tools");
 
-  const agentBadge = el("span", "agent-badge");
-  agentBadge.id = "agent-badge";
-  agentBadge.title = "Active agent";
-  const agentEmojiSpan = el("span", "agent-badge-emoji", "🦀");
-  const agentNameSpan = el("span", "agent-badge-label", "main");
-  agentBadge.append(agentEmojiSpan, agentNameSpan);
-
-  const typingStatusPill = el("span", "typing-status-pill");
-  const typingPulse = el("span", "typing-pulse-dot");
-  const typingStatusText = el("span", "typing-status-text", "Typing · not sent");
-  typingStatusPill.append(typingPulse, typingStatusText);
-  typingStatusPill.hidden = true;
-
-  const studioCmdBtn = el("button", "studio-cmd-pill", "/ Commands");
-  studioCmdBtn.type = "button";
-  studioCmdBtn.title = "Open slash command menu";
-
-  const studioToolChip = el("span", "studio-tool-chip", "🛠 6 Tools");
-  studioToolChip.title = "Active capabilities: Lakeflow, Lakebase, SQL Warehouse";
-
-  toolbarLeft.append(attachBtn, agentBadge, typingStatusPill, studioCmdBtn, studioToolChip);
+  toolbarLeft.append(attachBtn);
 
   // Right Toolbar: Custom Model Selector, Context Meter with popover, Abort, Send
   const toolbarRight = el("div", "composer-toolbar-right");
@@ -381,7 +316,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   statusLine.id = "status";
   statusLine.setAttribute("role", "status");
 
-  form.append(studioDeck, capsuleRibbon, input, toolbar, statusLine);
+  form.append(capsuleRibbon, input, toolbar, statusLine);
   root.append(header, transcript, form);
 
   let draft: HTMLElement | null = null;
@@ -524,24 +459,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     meter.title = `Context & Cost: ${detail} — Click for full ledger`;
     meter.setAttribute("aria-label", `Context: ${detail}`);
 
-    // Synchronize Variant 2: Studio Horizon Meter
-    studioCtxFill.style.width = `${Math.min(100, pct)}%`;
-    studioCtxFill.dataset.level = level;
-    studioCtxLabel.textContent = `${formatTokens(contextTokens)} / ${formatTokens(denominator)} (${pct}%) · ${formatCost(pricing.totalCost)}`;
-
     renderCtxPopover(denominator, ratio, level);
   }
 
   // Emoji per handle, for headers rebuilt from a reloaded transcript.
   const agentEmoji = new Map<string, string>();
   let agentOptions: AgentOption[] = [];
-
-  let currentVariant: ChatVariant = "classic";
-  const storedVariant = (sessionStorage.getItem(VARIANT_KEY) ||
-    localStorage.getItem(VARIANT_KEY)) as ChatVariant | null;
-  if (storedVariant && ["classic", "studio", "capsule"].includes(storedVariant)) {
-    currentVariant = storedVariant;
-  }
 
   let currentAgentName = ctx.url.searchParams.get("agent") || "main";
   let currentAgentEmoji = "🦀";
@@ -551,41 +474,13 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       agentEmoji.get(currentAgentName) ||
       (currentAgentName === "main" ? "🦀" : "🤖");
     currentAgentEmoji = emoji;
-    if (currentVariant === "classic") {
-      input.placeholder = `Message ${emoji} ${currentAgentName} (or type @ to delegate)...`;
-    } else if (currentVariant === "studio") {
-      input.placeholder = `Message @${currentAgentName} or type / for commands...`;
-    } else {
-      input.placeholder = `Prompt ${emoji} ${currentAgentName}...`;
-    }
-    agentEmojiSpan.textContent = emoji;
-    agentNameSpan.textContent = currentAgentName;
+    input.placeholder = `Prompt ${emoji} ${currentAgentName}...`;
     capsuleAgentLabel.textContent = `${emoji} ${currentAgentName}`;
-    studioActiveAgentBadge.textContent = `● ${emoji} ${currentAgentName} (Lead)`;
   }
-
-  function applyVariant(variant: ChatVariant): void {
-    currentVariant = variant;
-    form.dataset.variant = variant;
-    localStorage.setItem(VARIANT_KEY, variant);
-    sessionStorage.setItem(VARIANT_KEY, variant);
-    for (const btn of [variantBtnClassic, variantBtnStudio, variantBtnCapsule]) {
-      const match = btn.dataset.variant === variant;
-      btn.classList.toggle("active", match);
-      btn.setAttribute("aria-checked", String(match));
-    }
-    updatePlaceholder();
-  }
-
-  variantBtnClassic.addEventListener("click", () => applyVariant("classic"));
-  variantBtnStudio.addEventListener("click", () => applyVariant("studio"));
-  variantBtnCapsule.addEventListener("click", () => applyVariant("capsule"));
-  variantBtnCompare.addEventListener("click", () => openPrototypeModal());
 
   function updateDraftStatus(): void {
     const val = input.value.trim();
     const hasText = val.length > 0;
-    typingStatusPill.hidden = !hasText;
     if (hasText) {
       const wordCount = val.split(/\s+/).filter(Boolean).length;
       capsuleDraftBadge.classList.add("has-draft");
@@ -600,40 +495,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     currentAgentName = name;
     if (emoji) agentEmoji.set(name, emoji);
     updatePlaceholder();
-    renderAgentOptions();
     input.focus();
-  }
-
-  function renderAgentOptions(): void {
-    studioDelegateChips.replaceChildren();
-
-    const fullList =
-      agentOptions.length > 0
-        ? agentOptions
-        : [
-            {
-              name: "main",
-              signature_emoji: "🦀",
-              description: "Default workspace orchestrator",
-            },
-          ];
-
-    for (const ag of fullList) {
-      const isSelected = ag.name === currentAgentName;
-      if (!isSelected) {
-        const chip = el("button", "delegate-chip", `+ @${ag.name}`);
-        chip.type = "button";
-        chip.title = `Delegate turn to @${ag.name}`;
-        chip.addEventListener("click", () => {
-          const prefix = input.value.trim().length > 0 ? " " : "";
-          input.value = `${input.value}${prefix}@${ag.name} `;
-          grow();
-          input.focus();
-          inspectTrigger();
-        });
-        studioDelegateChips.append(chip);
-      }
-    }
   }
 
   function renderModelOptions(models: ModelOption[]): void {
@@ -716,229 +578,8 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     ctxPopover.hidden = !next;
   });
 
-  studioCtxStrip.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const next = ctxPopover.hidden;
-    closeAllCustomPopovers();
-    ctxPopover.hidden = !next;
-  });
-
-  function openPrototypeModal(): void {
-    let modal = document.querySelector("#prototype-modal") as HTMLElement | null;
-    if (modal) modal.remove();
-
-    modal = el("div", "prototype-modal-backdrop");
-    modal.id = "prototype-modal";
-
-    const dialog = el("div", "prototype-modal-dialog");
-
-    const mHeader = el("div", "prototype-modal-header");
-    const mTitle = el(
-      "h2",
-      "prototype-modal-title",
-      "Clawhouse Chat Interface Prototypes (OpenClaw References)",
-    );
-    const mClose = el("button", "prototype-modal-close", "✕");
-    mClose.type = "button";
-    mClose.setAttribute("aria-label", "Close prototype modal");
-    mClose.addEventListener("click", () => modal?.remove());
-    mHeader.append(mTitle, mClose);
-
-    const mBody = el("div", "prototype-modal-body");
-
-    // Simulator Bar
-    const simBar = el("div", "prototype-sim-bar");
-    const simTokensGroup = el("div", "prototype-sim-group");
-    simTokensGroup.append(el("label", "", "Simulate Context:"));
-    const simSlider = document.createElement("input");
-    simSlider.type = "range";
-    simSlider.className = "prototype-sim-slider";
-    simSlider.min = "0";
-    simSlider.max = "320000";
-    simSlider.step = "5000";
-    simSlider.value = String(contextTokens || 12000);
-
-    const simValueLabel = el(
-      "strong",
-      "",
-      `${formatTokens(Number(simSlider.value))} tokens (${usageLevel(Number(simSlider.value))})`,
-    );
-    simTokensGroup.append(simSlider, simValueLabel);
-
-    const simAgentGroup = el("div", "prototype-sim-group");
-    simAgentGroup.append(el("label", "", "Test Agent:"));
-    for (const testAgent of [
-      { name: "main", emoji: "🦀" },
-      { name: "analyst", emoji: "📊" },
-      { name: "sql-expert", emoji: "💾" },
-    ]) {
-      const aBtn = el(
-        "button",
-        "prototype-sim-btn",
-        `${testAgent.emoji} @${testAgent.name}`,
-      );
-      aBtn.type = "button";
-      aBtn.addEventListener("click", () => {
-        selectAgent(testAgent.name, testAgent.emoji);
-        updateModalPreview();
-      });
-      simAgentGroup.append(aBtn);
-    }
-
-    simBar.append(simTokensGroup, simAgentGroup);
-
-    // Grid of 3 Variants
-    const grid = el("div", "prototype-grid");
-
-    // Card 1: OpenClaw Classic
-    const card1 = el(
-      "div",
-      `prototype-card ${currentVariant === "classic" ? "active-variant" : ""}`,
-    );
-    const card1Head = el("div", "prototype-card-head");
-    card1Head.append(
-      el("h3", "prototype-card-title", "1. OpenClaw Classic Card"),
-      el("span", "prototype-card-badge", "Flagship 2026.9.3 / 2026.9.4"),
-    );
-    const card1Desc = el(
-      "p",
-      "prototype-card-desc",
-      "Direct port of OpenClaw's primary unified composer card: inset rounded container, seamless borderless prompt, inside toolbar with agent & model pills, typing status badge, and signature circular send button.",
-    );
-    const card1Features = el("ul", "prototype-card-features");
-    card1Features.append(
-      el("li", "", "Unified 18px rounded card with borderless textarea"),
-      el(
-        "li",
-        "",
-        "Inside toolbar: Attachment +, Active Persona pill, Model popover",
-      ),
-      el("li", "", "Typing · not sent draft state with amber pulsing dot"),
-      el("li", "", "Signature 34px circular accent Send button (↑)"),
-    );
-    const card1Select = el(
-      "button",
-      "prototype-select-btn",
-      currentVariant === "classic" ? "Currently Active" : "Activate Variant 1",
-    );
-    card1Select.type = "button";
-    card1Select.addEventListener("click", () => {
-      applyVariant("classic");
-      modal?.remove();
-    });
-    card1.append(card1Head, card1Desc, card1Features, card1Select);
-
-    // Card 2: Studio Pro HUD
-    const card2 = el(
-      "div",
-      `prototype-card ${currentVariant === "studio" ? "active-variant" : ""}`,
-    );
-    const card2Head = el("div", "prototype-card-head");
-    card2Head.append(
-      el("h3", "prototype-card-title", "2. Studio Pro HUD"),
-      el("span", "prototype-card-badge", "Two-Pane & MCP 2026.9.2"),
-    );
-    const card2Desc = el(
-      "p",
-      "prototype-card-desc",
-      "Cockpit layout engineered for data teams: upper deck with Agent Roster and quick delegate chips (+ @analyst), horizontal Context Horizon Meter, and lower command bay with slash palette.",
-    );
-    const card2Features = el("ul", "prototype-card-features");
-    card2Features.append(
-      el(
-        "li",
-        "",
-        "Upper Deck: Active Agent badge + 1-click delegate chips (+ @analyst, + @sql)",
-      ),
-      el(
-        "li",
-        "",
-        "Horizontal Context Horizon Meter with percentage & color gauge",
-      ),
-      el(
-        "li",
-        "",
-        "Lower Bay: / Slash commands trigger, Tools counter, Databricks serving endpoint",
-      ),
-      el("li", "", "Fast, distraction-free prompt editor"),
-    );
-    const card2Select = el(
-      "button",
-      "prototype-select-btn",
-      currentVariant === "studio" ? "Currently Active" : "Activate Variant 2",
-    );
-    card2Select.type = "button";
-    card2Select.addEventListener("click", () => {
-      applyVariant("studio");
-      modal?.remove();
-    });
-    card2.append(card2Head, card2Desc, card2Features, card2Select);
-
-    // Card 3: Agent Capsule & Floating Dock
-    const card3 = el(
-      "div",
-      `prototype-card ${currentVariant === "capsule" ? "active-variant" : ""}`,
-    );
-    const card3Head = el("div", "prototype-card-head");
-    card3Head.append(
-      el("h3", "prototype-card-title", "3. Agent Capsule & Dock"),
-      el("span", "prototype-card-badge", "Automation 2026.9.5"),
-    );
-    const card3Desc = el(
-      "p",
-      "prototype-card-desc",
-      "Modern floating capsule with glass backdrop blur: top persona ribbon with live word counter, segmented docked pills for agent, model, and context headroom, plus elevated Send ⌘↵ pill.",
-    );
-    const card3Features = el("ul", "prototype-card-features");
-    card3Features.append(
-      el("li", "", "Floating capsule with 24px radius & backdrop-filter blur"),
-      el(
-        "li",
-        "",
-        "Top Ribbon: Pulse persona indicator + Live draft word count tracker",
-      ),
-      el(
-        "li",
-        "",
-        "Docked Segmented Pills: [🦀 main ▾] [⚡ Llama 3.3 ▾] [🟢 Context free]",
-      ),
-      el("li", "", "Elevated Pill Send button with ⌘↵ shortcut hint"),
-    );
-    const card3Select = el(
-      "button",
-      "prototype-select-btn",
-      currentVariant === "capsule" ? "Currently Active" : "Activate Variant 3",
-    );
-    card3Select.type = "button";
-    card3Select.addEventListener("click", () => {
-      applyVariant("capsule");
-      modal?.remove();
-    });
-    card3.append(card3Head, card3Desc, card3Features, card3Select);
-
-    grid.append(card1, card2, card3);
-    mBody.append(simBar, grid);
-    dialog.append(mHeader, mBody);
-    modal.append(dialog);
-
-    function updateModalPreview(): void {
-      const val = Number(simSlider.value);
-      const lvl = usageLevel(val);
-      simValueLabel.textContent = `${formatTokens(val)} tokens (${lvl})`;
-      contextTokens = val;
-      renderMeter();
-    }
-
-    simSlider.addEventListener("input", updateModalPreview);
-
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) modal.remove();
-    });
-
-    document.body.append(modal);
-  }
-
-  applyVariant(currentVariant);
+  updatePlaceholder();
+  updateDraftStatus();
   renderMeter();
 
   function sessionId(): string {
@@ -1303,7 +944,6 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         if (agent.signature_emoji)
           agentEmoji.set(agent.name, agent.signature_emoji);
       }
-      renderAgentOptions();
       updatePlaceholder();
     } catch {
       // Headers fall back to the bare handle.
@@ -1903,10 +1543,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       modelCustomPopover.hidden = true;
       modelCustomTrigger.setAttribute("aria-expanded", "false");
     }
-    if (
-      !meter.contains(target) &&
-      !studioCtxStrip.contains(target)
-    ) {
+    if (!meter.contains(target)) {
       ctxPopover.hidden = true;
     }
   });
