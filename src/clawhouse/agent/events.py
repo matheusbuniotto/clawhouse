@@ -183,6 +183,36 @@ async def _record(claimed: _Claimed, notice: TurnNotice) -> None:
         await _append(claimed, entry)
 
 
+def _is_skipped_tool(notice: TurnNotice, skip_tool_call_id: str | None) -> bool:
+    return bool(
+        skip_tool_call_id
+        and isinstance(notice, ToolCallNotice)
+        and notice.tool_call_id == skip_tool_call_id
+    )
+
+
+async def _process_stream_event(
+    event: AgentStreamEvent,
+    claimed: _Claimed,
+    queue: _Queue,
+    *,
+    skip_tool_call_id: str | None,
+    usage: list[UsageNotice] | None,
+) -> None:
+    if isinstance(event, ContextUsageEvent):
+        if usage is not None:
+            usage[:] = [_usage_notice(event)]
+        return
+    notice = notice_from(event)
+    if notice is None or _is_skipped_tool(notice, skip_tool_call_id):
+        return
+    scrubbed = _scrub_notice(notice, claimed.ctx.user_token)
+    await _record(claimed, scrubbed)
+    shown = _as_progress(scrubbed)
+    if shown is not None:
+        await _publish(claimed.ctx, queue, shown)
+
+
 def _persist_and_emit(
     claimed: _Claimed,
     queue: _Queue,
@@ -195,26 +225,10 @@ def _persist_and_emit(
         events: AsyncIterable[AgentStreamEvent],
     ) -> None:
         del run_ctx
-        token = claimed.ctx.user_token
         async for event in events:
-            if isinstance(event, ContextUsageEvent):
-                if usage is not None:
-                    usage[:] = [_usage_notice(event)]
-                continue
-            notice = notice_from(event)
-            if notice is None:
-                continue
-            if (
-                skip_tool_call_id
-                and isinstance(notice, ToolCallNotice)
-                and notice.tool_call_id == skip_tool_call_id
-            ):
-                continue
-            scrubbed = _scrub_notice(notice, token)
-            await _record(claimed, scrubbed)
-            shown = _as_progress(scrubbed)
-            if shown is not None:
-                await _publish(claimed.ctx, queue, shown)
+            await _process_stream_event(
+                event, claimed, queue, skip_tool_call_id=skip_tool_call_id, usage=usage
+            )
 
     return handle
 

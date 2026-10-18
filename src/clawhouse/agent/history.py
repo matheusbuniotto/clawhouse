@@ -119,26 +119,37 @@ def foreign_tool_filter(ctx: RunContext[Any], messages: list[ModelMessage]) -> l
     return drop_foreign_tool_parts(messages, known.keys())
 
 
+def _collect_return_ids(messages: Sequence[ModelMessage]) -> set[str]:
+    return_ids: set[str] = set()
+    for m in messages:
+        for p in getattr(m, "parts", []):
+            if isinstance(p, ToolReturnPart):
+                return_ids.add(p.tool_call_id)
+    return return_ids
+
+
+def _is_unreturned_call(part: object, return_ids: set[str]) -> bool:
+    return isinstance(part, ToolCallPart) and part.tool_call_id not in return_ids
+
+
+def _filter_response_parts(message: ModelResponse, return_ids: set[str]) -> ModelResponse | None:
+    parts = [p for p in message.parts if not _is_unreturned_call(p, return_ids)]
+    if not parts:
+        return None
+    return replace(message, parts=parts)
+
+
 def drop_unreturned_tool_calls(messages: Sequence[ModelMessage]) -> list[ModelMessage]:
     """Drop any ToolCallPart that does not have a matching ToolReturnPart in messages."""
-    return_ids = {
-        p.tool_call_id
-        for m in messages
-        for p in getattr(m, "parts", [])
-        if isinstance(p, ToolReturnPart)
-    }
+    return_ids = _collect_return_ids(messages)
     result: list[ModelMessage] = []
     for m in messages:
-        if isinstance(m, ModelResponse):
-            parts = [
-                p
-                for p in m.parts
-                if not (isinstance(p, ToolCallPart) and p.tool_call_id not in return_ids)
-            ]
-            if parts:
-                result.append(replace(m, parts=parts))
-        else:
+        if not isinstance(m, ModelResponse):
             result.append(m)
+            continue
+        filtered = _filter_response_parts(m, return_ids)
+        if filtered is not None:
+            result.append(filtered)
     return result
 
 

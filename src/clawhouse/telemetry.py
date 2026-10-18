@@ -38,33 +38,46 @@ def parse_otlp_headers(raw: str | None) -> dict[str, str] | None:
     return headers or None
 
 
+def _configure_mlflow_uri(settings: Settings) -> None:
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+        return
+    is_databricks = bool(
+        settings.workspace_host
+        or os.environ.get("DATABRICKS_HOST")
+        or (settings.mlflow_experiment and settings.mlflow_experiment.startswith("/"))
+    )
+    if is_databricks:
+        mlflow.set_tracking_uri("databricks")
+
+
+def _configure_mlflow_experiment(experiment: str | None) -> None:
+    if not experiment:
+        return
+    warehouse_id = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID") or os.environ.get(
+        "DATABRICKS_WAREHOUSE_ID"
+    )
+    if warehouse_id:
+        os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
+    mlflow.set_experiment(experiment)
+
+
+def _enable_mlflow_autolog() -> None:
+    pydantic_ai_mod = getattr(mlflow, "pydantic_ai", None)
+    if pydantic_ai_mod is not None and hasattr(pydantic_ai_mod, "autolog"):
+        pydantic_ai_mod.autolog()
+        logger.info("MLflow Pydantic AI autologging enabled")
+
+
 def setup_mlflow_tracing(settings: Settings) -> None:
     """Initialize MLflow Tracing with native Pydantic AI autologging."""
     if not settings.mlflow_enabled:
         return
     try:
-        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-        if not tracking_uri:
-            if (
-                settings.workspace_host
-                or os.environ.get("DATABRICKS_HOST")
-                or (settings.mlflow_experiment and settings.mlflow_experiment.startswith("/"))
-            ):
-                mlflow.set_tracking_uri("databricks")
-        else:
-            mlflow.set_tracking_uri(tracking_uri)
-
-        if settings.mlflow_experiment:
-            warehouse_id = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID") or os.environ.get(
-                "DATABRICKS_WAREHOUSE_ID"
-            )
-            if warehouse_id:
-                os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = warehouse_id
-            mlflow.set_experiment(settings.mlflow_experiment)
-        pydantic_ai_mod = getattr(mlflow, "pydantic_ai", None)
-        if pydantic_ai_mod is not None and hasattr(pydantic_ai_mod, "autolog"):
-            pydantic_ai_mod.autolog()
-            logger.info("MLflow Pydantic AI autologging enabled")
+        _configure_mlflow_uri(settings)
+        _configure_mlflow_experiment(settings.mlflow_experiment)
+        _enable_mlflow_autolog()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to initialize MLflow tracing: %s", exc)
 

@@ -6,6 +6,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.capabilities import AbstractCapability
@@ -116,16 +117,17 @@ async def _describe_table(
     try:
         client = databricks_cap.client_factory(databricks_cap.user_token)
         info = client.tables.get(full_name=table_name)
-        cols_text = []
-        for col in getattr(info, "columns", None) or []:
-            t_name = getattr(col, "type_text", getattr(col, "type_name", "UNKNOWN"))
-            cols_text.append(f"- {col.name}: {t_name}")
-        comment = getattr(info, "comment", None)
-        comment_str = f"Comment: {comment}\n" if comment else ""
-        return f"{comment_str}Columns:\n" + "\n".join(cols_text)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to describe mentioned table %s: %s", table_name, exc)
         return f"Table {table_name} metadata unavailable."
+
+    cols_text = []
+    for col in getattr(info, "columns", None) or []:
+        t_name = getattr(col, "type_text", getattr(col, "type_name", "UNKNOWN"))
+        cols_text.append(f"- {col.name}: {t_name}")
+    comment = getattr(info, "comment", None)
+    comment_str = f"Comment: {comment}\n" if comment else ""
+    return f"{comment_str}Columns:\n" + "\n".join(cols_text)
 
 
 def _read_file_content(file_path: str, workspace: WorkspacePaths | None) -> str | None:
@@ -142,26 +144,30 @@ def _read_file_content(file_path: str, workspace: WorkspacePaths | None) -> str 
     return None
 
 
+def _find_skill_file(skill_name: str, workspace: WorkspacePaths) -> Path | None:
+    candidate = workspace.skills / skill_name / "SKILL.md"
+    if candidate.exists():
+        return candidate
+    repo_root = workspace.directory.parent.parent.parent
+    for alt in (
+        repo_root / ".agents" / "skills" / skill_name / "SKILL.md",
+        repo_root / "skills" / skill_name / "SKILL.md",
+    ):
+        if alt.exists():
+            return alt
+    return None
+
+
 def _read_skill_instructions(skill_name: str, workspace: WorkspacePaths | None) -> str | None:
     if not workspace:
         return None
-    candidate = workspace.skills / skill_name / "SKILL.md"
-    if not candidate.exists():
-        repo_root = workspace.directory.parent.parent.parent
-        for alt in (
-            repo_root / ".agents" / "skills" / skill_name / "SKILL.md",
-            repo_root / "skills" / skill_name / "SKILL.md",
-        ):
-            if alt.exists():
-                candidate = alt
-                break
-
-    if candidate.exists() and candidate.is_file():
-        try:
-            return candidate.read_text(encoding="utf-8")[:8000]
-        except Exception:  # noqa: BLE001
-            return None
-    return None
+    candidate = _find_skill_file(skill_name, workspace)
+    if candidate is None or not candidate.is_file():
+        return None
+    try:
+        return candidate.read_text(encoding="utf-8")[:8000]
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,13 +178,21 @@ class CompactionResult:
     entries: tuple[TranscriptEntry, ...]
 
 
+def _summary_from_message(message: ModelMessage) -> str | None:
+    if not isinstance(message, ModelRequest):
+        return None
+    for part in message.parts:
+        if isinstance(part, SystemPromptPart) and part.content:
+            return part.content.removeprefix(_SUMMARY_PREFIX)
+    return None
+
+
 def _find_summary_text(compacted: Sequence[ModelMessage]) -> str:
     """The summarizer's prose: the first system part, minus the harness prefix."""
     for message in compacted:
-        if isinstance(message, ModelRequest):
-            for part in message.parts:
-                if isinstance(part, SystemPromptPart) and part.content:
-                    return part.content.removeprefix(_SUMMARY_PREFIX)
+        summary = _summary_from_message(message)
+        if summary is not None:
+            return summary
     return "Session context successfully compacted."
 
 
@@ -310,7 +324,7 @@ def format_memory_block(entries: Sequence[Any]) -> str:
 class MemoryCapability(AbstractCapability[Any]):
     """Explicit remember/recall tools. No turn writes memory unless one of these runs."""
 
-    def __init__(self, store: object, owner_id: str) -> None:
+    def __init__(self, store: SessionStore, owner_id: str) -> None:
         self.store = store
         self.owner_id = owner_id
 
@@ -320,12 +334,12 @@ class MemoryCapability(AbstractCapability[Any]):
 
         async def remember(text: str, table_fqn: str | None = None) -> dict[str, str]:
             """Save a fact for the caller and return its id."""
-            entry = await store.save_memory(owner_id, text, None, table_fqn)  # type: ignore[attr-defined]
+            entry = await store.save_memory(owner_id, text, None, table_fqn)
             return {"id": entry.id}
 
         async def recall(query: str) -> list[dict[str, object]]:
             """Return at most 5 cited memory entries for the caller."""
-            rows = await store.rank_memories(owner_id, query, limit=5)  # type: ignore[attr-defined]
+            rows = await store.rank_memories(owner_id, query, limit=5)
             return [
                 {
                     "id": row.id,

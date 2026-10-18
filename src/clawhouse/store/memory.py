@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from clawhouse.store.mappers import _collect_session_activities, _memory_summary
+from clawhouse.store.mappers import (
+    _collect_session_activities,
+    _memory_summary,
+    _score_memory_row,
+)
 from clawhouse.store.protocol import (
     ApprovalAlreadyResolved,
     ApprovalNotFound,
@@ -381,15 +385,14 @@ class MemorySessionStore:
     async def rank_memories(
         self, owner_id: str, query: str, limit: int = 5
     ) -> tuple[MemoryEntry, ...]:
-        terms = [term for term in query.casefold().split() if term]
-        ranked: list[tuple[int, MemoryEntry]] = []
-        for row in self._memories:
-            if row.owner_id == owner_id:
-                score = sum(row.text.casefold().count(term) for term in terms)
-                if score:
-                    ranked.append((score, row))
-        ranked.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
-        return tuple(row for _score, row in ranked[:limit])
+        terms = [t for t in query.casefold().split() if t]
+        scored = [
+            (score, r)
+            for r in self._memories
+            if (score := _score_memory_row(r, owner_id, terms)) > 0
+        ]
+        scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
+        return tuple(r for _, r in scored[:limit])
 
     async def close(self) -> None:
         return None

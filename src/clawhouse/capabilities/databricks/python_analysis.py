@@ -66,22 +66,28 @@ def _output_fields(out: object | None) -> dict[str, object]:
     }
 
 
+def _fetch_task_output(client: WorkspaceClient, task: object) -> tuple[str | None, str | None]:
+    task_run_id = getattr(task, "run_id", None)
+    if task_run_id is None:
+        return None, None
+    try:
+        task_out = client.jobs.get_run_output(run_id=task_run_id)
+    except Exception as exc:  # noqa: BLE001
+        return None, str(exc)
+    log = str(task_out.logs) if getattr(task_out, "logs", None) else None
+    err = str(task_out.error) if getattr(task_out, "error", None) else None
+    return log, err
+
+
 def _task_outputs(client: WorkspaceClient, tasks: list[object]) -> dict[str, object]:
     logs: list[str] = []
     errors: list[str] = []
     for task in tasks:
-        task_run_id = getattr(task, "run_id", None)
-        if task_run_id is None:
-            continue
-        try:
-            task_out = client.jobs.get_run_output(run_id=task_run_id)
-        except Exception as exc:  # noqa: BLE001
-            errors.append(str(exc))
-            continue
-        if getattr(task_out, "logs", None):
-            logs.append(str(task_out.logs))
-        if getattr(task_out, "error", None):
-            errors.append(str(task_out.error))
+        log, err = _fetch_task_output(client, task)
+        if log:
+            logs.append(log)
+        if err:
+            errors.append(err)
     return {"logs": "\n".join(logs) or None, "error": "\n".join(errors) or None}
 
 

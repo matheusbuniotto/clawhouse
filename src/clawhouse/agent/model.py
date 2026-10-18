@@ -74,15 +74,19 @@ def openai_compatible_chat_model(
     )
 
 
+def _select_default_model(models: tuple[ModelEntry, ...]) -> ModelEntry:
+    for entry in models:
+        if entry.is_default:
+            return entry
+    if models:
+        return models[0]
+    raise MissingModelConfig
+
+
 def select_model(models: tuple[ModelEntry, ...], model_id: str | None) -> ModelEntry:
     """The requested model, or the default when no id is given."""
     if model_id is None:
-        for entry in models:
-            if entry.is_default:
-                return entry
-        if models:
-            return models[0]
-        raise MissingModelConfig
+        return _select_default_model(models)
     for entry in models:
         if model_id in (entry.id, entry.model):
             return entry

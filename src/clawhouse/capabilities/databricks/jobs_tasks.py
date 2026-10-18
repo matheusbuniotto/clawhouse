@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import PermissionDenied
 from databricks.sdk.service.jobs import (
+    JobSettings,
     RunTask,
     Source,
     SqlTask,
@@ -80,6 +81,25 @@ def _upload_workspace_file(client: WorkspaceClient, path: str, content: bytes) -
     )
 
 
+def _try_fallback_upload(
+    tools: DatabricksTools,
+    path: str,
+    content: bytes,
+    *,
+    primary_client: WorkspaceClient,
+    original_exc: Exception,
+) -> None:
+    fallback = tools._fallback_client()
+    if fallback is None or fallback is primary_client:
+        msg = f"Failed to upload workspace SQL file to {path}: {original_exc}"
+        raise RuntimeError(msg) from original_exc
+    try:
+        _upload_workspace_file(fallback, path, content)
+    except Exception as fb_exc:  # noqa: BLE001
+        msg = f"Failed to upload workspace SQL file to {path}: {fb_exc}"
+        raise RuntimeError(msg) from original_exc
+
+
 def _save_workspace_sql_file(
     tools: DatabricksTools,
     path: str,
@@ -93,17 +113,51 @@ def _save_workspace_sql_file(
         _upload_workspace_file(target_client, path, content)
     except Exception as exc:
         if client is None:
-            fallback = tools._fallback_client()
-            if fallback is not None and fallback is not target_client:
-                try:
-                    _upload_workspace_file(fallback, path, content)
-                except Exception as fb_exc:  # noqa: BLE001
-                    raise RuntimeError(
-                        f"Failed to upload workspace SQL file to {path}: {fb_exc}"
-                    ) from exc
-                else:
-                    return
+            _try_fallback_upload(
+                tools, path, content, primary_client=target_client, original_exc=exc
+            )
+            return
         raise RuntimeError(f"Failed to upload workspace SQL file to {path}: {exc}") from exc
+
+
+def _is_inline_select(path: str) -> bool:
+    return bool(path and not path.endswith(".sql") and "select" in path.lower())
+
+
+def _resolve_sql_text(
+    path: str, query: str | None, agent_name: str | None, instructions: str | None
+) -> str | None:
+    sql_text = query or (path if _is_inline_select(path) else None)
+    if sql_text and agent_name:
+        return build_agentic_query(
+            query=sql_text,
+            agent_name=agent_name,
+            instructions=instructions,
+        )
+    return sql_text
+
+
+def _prepare_sql_task_path(  # noqa: PLR0913
+    tools: DatabricksTools,
+    task_key: str,
+    path: str,
+    *,
+    sql_text: str | None,
+    agent_name: str | None,
+    client: WorkspaceClient | None,
+) -> tuple[str | None, str | None]:
+    if sql_text:
+        effective_path = path
+        if not effective_path or sql_text == effective_path or agent_name:
+            effective_path = f"/Workspace/Shared/clawhouse/{task_key}.sql"
+        try:
+            _save_workspace_sql_file(tools, effective_path, sql_text, client=client)
+        except Exception as exc:  # noqa: BLE001
+            return None, f"Failed to save SQL file to workspace: {exc}"
+        return effective_path, None
+    if not path:
+        return None, "A SQL job requires either a workspace file path or a SQL query."
+    return path, None
 
 
 def _build_sql_task(  # noqa: PLR0913
@@ -120,25 +174,12 @@ def _build_sql_task(  # noqa: PLR0913
     sql_warehouse = warehouse_id or tools.effective_warehouse_id
     if not sql_warehouse:
         return None, "A SQL job needs a SQL warehouse; none is available."
-    effective_path = path
-    sql_text = query or (
-        path if path and not path.endswith(".sql") and "select" in path.lower() else None
+    sql_text = _resolve_sql_text(path, query, agent_name, instructions)
+    effective_path, err = _prepare_sql_task_path(
+        tools, task_key, path, sql_text=sql_text, agent_name=agent_name, client=client
     )
-    if sql_text and agent_name:
-        sql_text = build_agentic_query(
-            query=sql_text,
-            agent_name=agent_name,
-            instructions=instructions,
-        )
-    if sql_text:
-        if not effective_path or sql_text == effective_path or agent_name:
-            effective_path = f"/Workspace/Shared/clawhouse/{task_key}.sql"
-        try:
-            _save_workspace_sql_file(tools, effective_path, sql_text, client=client)
-        except Exception as exc:  # noqa: BLE001
-            return None, f"Failed to save SQL file to workspace: {exc}"
-    elif not effective_path:
-        return None, "A SQL job requires either a workspace file path or a SQL query."
+    if err or not effective_path:
+        return None, err
     task = Task(
         task_key=task_key,
         sql_task=SqlTask(
@@ -192,6 +233,15 @@ def _prepare_edit_settings(
         if schedule:
             settings_dict["schedule"] = schedule.as_dict()
     return settings_dict
+
+
+def _apply_job_settings(client: WorkspaceClient, job_id: int, settings: JobSettings) -> str | None:
+    try:
+        client.jobs.update(job_id=job_id, new_settings=settings)
+    except Exception as exc:  # noqa: BLE001
+        return f"Failed to update job {job_id}: {exc}"
+    else:
+        return None
 
 
 def _format_task_output(task_key: str, task_run_id: int, out: Any) -> dict[str, object]:

@@ -16,7 +16,7 @@ repos:
 
   # 1. Fast formatting & linting with Ruff (auto-fixing what it can)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.9
+    rev: v0.17.1
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
@@ -27,10 +27,21 @@ repos:
     rev: v6.1.0
     hooks:
       - id: complexipy
-        exclude: ^\.agents/skills/
-        args: [--max-complexity-allowed=15]
+        files: ^src/
+        args: [--max-complexity-allowed=10]
 
-  # 3. Static Type Check / Hallucination Gate with Pyright
+  # 3. AST Structural Limits Gate
+  - repo: local
+    hooks:
+      - id: check-ast-limits
+        name: check AST size limits
+        entry: python3 scripts/check_ast_limits.py
+        language: system
+        types: [python]
+        files: ^src/.*\.py$
+        pass_filenames: false
+
+  # 4. Static Type Check / Hallucination Gate with Pyright
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.395
     hooks:

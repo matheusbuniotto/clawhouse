@@ -61,6 +61,37 @@ def resolve_warehouse_id(client: WorkspaceClient, configured_id: str | None) -> 
     return _find_running_or_first(warehouses)
 
 
+def _extract_columns(resp: Any) -> list[str]:
+    manifest = getattr(resp, "manifest", None)
+    schema = getattr(manifest, "schema", None)
+    columns = getattr(schema, "columns", None) or []
+    return [c.name for c in columns if getattr(c, "name", None)]
+
+
+def _extract_rows(resp: Any) -> list[list[Any]]:
+    result = getattr(resp, "result", None)
+    data = getattr(result, "data_array", None) or []
+    return [list(r) for r in data]
+
+
+def _statement_status(resp: Any) -> str:
+    status = getattr(resp, "status", None)
+    if status is None:
+        return "SUCCEEDED"
+    return str(getattr(status.state, "value", status.state))
+
+
+def _format_statement_result(resp: Any, query: str) -> dict[str, object]:
+    rows = _extract_rows(resp)
+    return {
+        "columns": _extract_columns(resp),
+        "rows": rows,
+        "row_count": len(rows),
+        "query": query,
+        "status": _statement_status(resp),
+    }
+
+
 async def dbsql_query(tools: DatabricksTools, query: str, max_rows: int = 100) -> dict[str, object]:
     """Execute a SQL query on a Databricks SQL Warehouse."""
     wh_id = tools.effective_warehouse_id
@@ -77,23 +108,7 @@ async def dbsql_query(tools: DatabricksTools, query: str, max_rows: int = 100) -
                 row_limit=max_rows,
             )
         )
-        columns: list[str] = []
-        if resp.manifest and resp.manifest.schema and resp.manifest.schema.columns:
-            columns = [c.name for c in resp.manifest.schema.columns if c.name]
-        rows: list[list[Any]] = []
-        if resp.result and resp.result.data_array:
-            rows = [list(r) for r in resp.result.data_array]
-        return {
-            "columns": columns,
-            "rows": rows,
-            "row_count": len(rows),
-            "query": effective_sql,
-            "status": (
-                getattr(resp.status.state, "value", str(resp.status.state))
-                if resp.status
-                else "SUCCEEDED"
-            ),
-        }
+        return _format_statement_result(resp, effective_sql)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"SQL execution failed: {exc}", "query": effective_sql}
 

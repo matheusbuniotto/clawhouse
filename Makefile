@@ -33,7 +33,8 @@ format:
 lint:
 	uv run ruff check .
 	uv run ruff format --check .
-	uv run complexipy src --max-complexity-allowed 15
+	uv run complexipy src --max-complexity-allowed 10
+	python3 scripts/check_ast_limits.py
 	uv run pyright
 
 test:
@@ -56,8 +57,8 @@ check:
 	@if command -v prek >/dev/null 2>&1; then \
 		prek run -a; \
 	else \
-		echo "prek is not installed; running ruff, complexipy, and pyright"; \
-		uv run ruff check . && uv run ruff format --check . && uv run complexipy src --max-complexity-allowed 15 && uv run pyright; \
+		echo "prek is not installed; running ruff, complexipy, AST checks, and pyright"; \
+		uv run ruff check . && uv run ruff format --check . && uv run complexipy src --max-complexity-allowed 10 && python3 scripts/check_ast_limits.py && uv run pyright; \
 	fi
 	@echo "==> Running pytest test suite..."
 	uv run pytest

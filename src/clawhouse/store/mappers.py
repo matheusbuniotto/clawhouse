@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import asyncpg
@@ -81,7 +81,7 @@ def _schedule_from_row(row: asyncpg.Record) -> ScheduleEntry:
 
 def cast_querier(conn: object) -> _Querier:
     """asyncpg's pool proxy is a connection; the stubs don't say so."""
-    return conn  # type: ignore[return-value]
+    return cast(_Querier, conn)
 
 
 def _constraint_name(exc: BaseException) -> str | None:
@@ -197,3 +197,9 @@ async def _insert_session(conn: _Querier, session: UUID, owner_id: str) -> None:
         )
         if owner != owner_id:
             raise SessionForbidden(str(session)) from None
+
+
+def _score_memory_row(row: MemoryEntry, owner_id: str, terms: list[str]) -> int:
+    if row.owner_id != owner_id:
+        return 0
+    return sum(row.text.casefold().count(t) for t in terms)

@@ -327,6 +327,38 @@ _UPDATE_SCHEDULE_RUN_SQL = (
 )
 
 
+_MIGRATE_CONSTRAINTS = """
+DO $$
+BEGIN
+    ALTER TABLE clawhouse.runs DROP CONSTRAINT IF EXISTS runs_status_known;
+    ALTER TABLE clawhouse.runs ADD CONSTRAINT runs_status_known
+        CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
+    ALTER TABLE clawhouse.transcript_entries
+        DROP CONSTRAINT IF EXISTS transcript_role_known;
+    ALTER TABLE clawhouse.transcript_entries ADD CONSTRAINT transcript_role_known
+        CHECK (role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice'));
+EXCEPTION
+    WHEN undefined_table OR insufficient_privilege THEN NULL;
+END $$;
+"""
+
+_MIGRATE_COLUMNS = """
+ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS agent_id text;
+ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS model text;
+ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS title text;
+ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS messages text;
+ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_status text;
+ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_error text;
+"""
+
+_CHECK_AGENT_COLUMNS = """
+SELECT count(*) FROM information_schema.columns
+WHERE table_schema = 'clawhouse'
+  AND table_name = 'transcript_entries'
+  AND column_name IN ('agent_id', 'model')
+"""
+
+
 async def migrate(pool: asyncpg.Pool) -> bool:
     """Run idempotent Lakebase schema migrations. Returns whether agent columns are present."""
     try:
@@ -334,48 +366,10 @@ async def migrate(pool: asyncpg.Pool) -> bool:
     except asyncpg.InsufficientPrivilegeError:
         logger.info("Skipping SCHEMA creation: insufficient privilege (tables already exist)")
     with suppress(asyncpg.InsufficientPrivilegeError):
-        await pool.execute(
-            """
-            DO $$
-            BEGIN
-                ALTER TABLE clawhouse.runs DROP CONSTRAINT IF EXISTS runs_status_known;
-                ALTER TABLE clawhouse.runs ADD CONSTRAINT runs_status_known
-                    CHECK (status IN ('running', 'ok', 'error', 'pending_approval'));
-                ALTER TABLE clawhouse.transcript_entries
-                    DROP CONSTRAINT IF EXISTS transcript_role_known;
-                ALTER TABLE clawhouse.transcript_entries ADD CONSTRAINT transcript_role_known
-                    CHECK (role IN ('user', 'assistant', 'tool_call', 'tool_result', 'notice'));
-            EXCEPTION
-                WHEN undefined_table OR insufficient_privilege THEN NULL;
-            END $$;
-            """
-        )
+        await pool.execute(_MIGRATE_CONSTRAINTS)
     with suppress(asyncpg.InsufficientPrivilegeError):
-        await pool.execute(
-            "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS agent_id text"
-        )
-        await pool.execute(
-            "ALTER TABLE clawhouse.transcript_entries ADD COLUMN IF NOT EXISTS model text"
-        )
-    with suppress(asyncpg.InsufficientPrivilegeError):
-        await pool.execute("ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS title text")
-        await pool.execute("ALTER TABLE clawhouse.sessions ADD COLUMN IF NOT EXISTS messages text")
-    with suppress(asyncpg.InsufficientPrivilegeError):
-        await pool.execute(
-            "ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_status text"
-        )
-        await pool.execute(
-            "ALTER TABLE clawhouse.schedules ADD COLUMN IF NOT EXISTS last_error text"
-        )
-    # Without the privilege to add it, keep writing the old shape instead of failing turns.
-    present = await pool.fetchval(
-        """
-        SELECT count(*) FROM information_schema.columns
-        WHERE table_schema = 'clawhouse'
-          AND table_name = 'transcript_entries'
-          AND column_name IN ('agent_id', 'model')
-        """
-    )
+        await pool.execute(_MIGRATE_COLUMNS)
+    present = await pool.fetchval(_CHECK_AGENT_COLUMNS)
     agent_column = present == 2
     if not agent_column:
         logger.warning("transcript_entries.agent_id/model are missing; agent ids are not persisted")

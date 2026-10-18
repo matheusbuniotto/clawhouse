@@ -2,6 +2,7 @@
 
 import re
 import subprocess
+import sys
 import tomllib
 import zipfile
 from pathlib import Path
@@ -89,3 +90,15 @@ def test_every_served_script_has_a_typescript_source() -> None:
     for script in scripts:
         stem = Path(script).stem
         assert stem in sources, f"{script} has no frontend/{stem}.ts source"
+
+
+def test_ast_limits_in_src() -> None:
+    script = ROOT / "scripts" / "check_ast_limits.py"
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"AST checks failed:\n{result.stderr}\n{result.stdout}"

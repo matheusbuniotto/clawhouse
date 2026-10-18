@@ -41,6 +41,48 @@ def resolve_workspace_root(
     return None
 
 
+async def _check_existing(
+    store: SessionStore, owner_id: str, name: str
+) -> CreatedAgentResult | None:
+    existing_agents = await store.list_custom_agents(owner_id)
+    existing = next((a for a in existing_agents if a.name.lower() == name.lower()), None)
+    if existing is None:
+        return None
+    return CreatedAgentResult(
+        id=existing.id,
+        name=existing.name,
+        description=existing.description,
+        signature_emoji=existing.signature_emoji,
+        error=f"Agent '{existing.name}' already exists for this user.",
+    )
+
+
+def _provision_dir(  # noqa: PLR0913
+    root: Path | None,
+    name: str,
+    system_prompt: str,
+    *,
+    emoji: str,
+    soul: str | None,
+    context: str | None,
+) -> tuple[str | None, str | None]:
+    if root is None:
+        return None, None
+    try:
+        paths = provision_agent_workspace(
+            root=root,
+            agent_name=name,
+            agents_text=system_prompt,
+            identity_name=name,
+            signature_emoji=emoji,
+            soul_text=soul,
+            context_text=context,
+        )
+        return paths.directory.as_posix(), None
+    except UnsafeAgentName:
+        return None, f"Invalid agent name '{name}': must be a safe path segment."
+
+
 @dataclass
 class AgentManagementCapability(AbstractCapability[TurnDeps]):
     """Capability exposing in-chat agent creation and folder provisioning."""
@@ -66,45 +108,17 @@ class AgentManagementCapability(AbstractCapability[TurnDeps]):
             context: str | None = None,
         ) -> dict[str, object]:
             """Create a new custom agent and provision its workspace."""
-            # UNWANT-01: Check for existing agent name to prevent duplicates
-            existing_agents = await store.list_custom_agents(owner_id)
-            existing = next((a for a in existing_agents if a.name.lower() == name.lower()), None)
-            if existing is not None:
-                res = CreatedAgentResult(
-                    id=existing.id,
-                    name=existing.name,
-                    description=existing.description,
-                    signature_emoji=existing.signature_emoji,
-                    error=f"Agent '{existing.name}' already exists for this user.",
-                )
-                return asdict(res)
+            if existing := await _check_existing(store, owner_id, name):
+                return asdict(existing)
 
-            provisioned_dir: str | None = None
-            if root is not None:
-                try:
-                    paths = provision_agent_workspace(
-                        root=root,
-                        agent_name=name,
-                        agents_text=system_prompt,
-                        identity_name=name,
-                        signature_emoji=signature_emoji,
-                        soul_text=soul,
-                        context_text=context,
-                    )
-                    provisioned_dir = paths.directory.as_posix()
-                except UnsafeAgentName:
-                    res = CreatedAgentResult(
-                        id="",
-                        name=name,
-                        description=description,
-                        signature_emoji=signature_emoji,
-                        error=f"Invalid agent name '{name}': must be a safe path segment.",
-                    )
-                    return asdict(res)
+            dir_path, err = _provision_dir(
+                root, name, system_prompt, emoji=signature_emoji, soul=soul, context=context
+            )
+            if err is not None:
+                return asdict(CreatedAgentResult("", name, description, signature_emoji, error=err))
 
-            agent_id = str(uuid4())
             agent = CustomAgent(
-                id=agent_id,
+                id=str(uuid4()),
                 owner_id=owner_id,
                 name=name,
                 description=description,
@@ -112,13 +126,14 @@ class AgentManagementCapability(AbstractCapability[TurnDeps]):
                 signature_emoji=signature_emoji,
             )
             created = await store.create_custom_agent(agent)
-            res = CreatedAgentResult(
-                id=created.id,
-                name=created.name,
-                description=created.description,
-                signature_emoji=created.signature_emoji,
-                workspace_directory=provisioned_dir,
+            return asdict(
+                CreatedAgentResult(
+                    id=created.id,
+                    name=created.name,
+                    description=created.description,
+                    signature_emoji=created.signature_emoji,
+                    workspace_directory=dir_path,
+                )
             )
-            return asdict(res)
 
         return FunctionToolset([create_agent])
