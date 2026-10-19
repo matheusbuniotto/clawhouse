@@ -49,12 +49,28 @@ interface FormattedModel {
   icon: string;
 }
 
+export const NO_MODEL_HINT =
+  "No model is connected. Set SERVING_ENDPOINT or CLAWHOUSE_MODELS, or run `make demo` to try Clawhouse with a scripted model and no keys.";
+
+/** The FastAPI `detail` string of an error response, when it has one. */
+async function errorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    return typeof body?.detail === "string" ? body.detail : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatModelOption(id: string, label: string): FormattedModel {
   const idLower = id.toLowerCase();
   const labelLower = label.toLowerCase();
   let provider = "Databricks";
   let icon = "⚡";
-  if (idLower.includes("gpt") || idLower.includes("openai")) {
+  if (idLower === "demo") {
+    provider = "Demo";
+    icon = "🎬";
+  } else if (idLower.includes("gpt") || idLower.includes("openai")) {
     provider = "OpenAI";
     icon = "❇️";
   } else if (idLower.includes("claude") || idLower.includes("anthropic")) {
@@ -132,6 +148,13 @@ interface Entry {
 interface TranscriptBody {
   entries?: Entry[];
   run_state?: string;
+}
+
+interface PendingApproval {
+  id: string;
+  session_id: string;
+  tool_name: string;
+  arguments?: string;
 }
 
 const WAITING_FOR_APPROVAL = "Ação aguardando aprovação acima.";
@@ -919,6 +942,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (!response.ok) return;
     const body = (await response.json()) as { models?: ModelOption[] };
     if (!body || !Array.isArray(body.models)) return;
+    if (body.models.length === 0) setStatus(NO_MODEL_HINT);
     const saved = sessionStorage.getItem(MODEL_KEY);
     modelPicker.replaceChildren();
     for (const option of body.models) {
@@ -1006,12 +1030,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     try {
       const response = await fetch("/api/approvals");
       if (!response.ok) return;
-      const body = (await response.json()) as {
-        pending?: { session_id: string }[];
-      };
+      const body = (await response.json()) as { pending?: PendingApproval[] };
       const mine = (body.pending ?? []).filter(
         (a) => a.session_id === sessionId(),
       );
+      for (const approval of mine) showApproval(approval);
       if (mine.length > 0 && blocked === null) setBlocked(WAITING_FOR_APPROVAL);
     } catch {
       // The approvals screen still lists it.
@@ -1038,7 +1061,32 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     scrollToBottom();
   }
 
+  /** A pending approval found on load or after a resume: Approve/Deny right in the chat. */
+  function showApproval(approval: PendingApproval): void {
+    if (transcript.querySelector(`[data-approval-id="${approval.id}"]`)) return;
+    const card = renderInlineApproval(
+      transcript,
+      approval.id,
+      approval.tool_name,
+      () => void resync(),
+      approval.arguments,
+    );
+    card.dataset.approvalId = approval.id;
+    scrollToBottom();
+  }
+
+  /** Re-read the transcript after a resume so cards, tool rows and replies match the store. */
+  async function resync(): Promise<void> {
+    setBlocked(null);
+    await loadTranscript();
+  }
+
   function onAnswered(result: AnswerResult): void {
+    if (result.status === "pending_approval" && result.pending.length === 0) {
+      // The answer led to a tool that needs approval: show its card.
+      void resync();
+      return;
+    }
     if (result.reply) transcript.append(renderAssistantTurn(result.reply));
     for (const question of result.pending) showQuestion(question);
     setBlocked(result.pending.length > 0 ? WAITING_FOR_ANSWER : null);
@@ -1267,7 +1315,12 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       }
       if (!response.ok) {
         dropDraft();
-        setStatus("The turn could not be started.");
+        if (response.status === 503) {
+          // No model is connected: nothing was saved, so keep the message.
+          bubble.remove();
+          if (!input.value) input.value = text;
+        }
+        setStatus((await errorDetail(response)) ?? "The turn could not be started.");
         finished = true; // Reported above; not a broken stream.
         return;
       }

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from pydantic_ai.models import Model
 
+from clawhouse.agent.demo import demo_chat_model
 from clawhouse.agent.model import (
     databricks_chat_model,
     openai_compatible_chat_model,
@@ -96,6 +97,8 @@ def _routes(app: FastAPI) -> None:
 def _production_model(settings: Settings, env: Mapping[str, str]) -> ModelFor:
     def model_for(caller: Caller, model_id: str | None) -> Model:
         entry = select_model(settings.models, model_id)
+        if entry.provider == "demo":
+            return demo_chat_model()
         if entry.provider == "openai_compatible":
             return openai_compatible_chat_model(
                 model=entry.model,

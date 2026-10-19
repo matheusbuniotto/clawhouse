@@ -877,3 +877,48 @@ test("context meter popover updates on usage", async () => {
   expect(popover.textContent).toContain("Token & Cost Ledger");
   expect(popover.textContent).toContain("Est. Turn Cost");
 });
+
+test("with no model connected, the status line says how to connect one or run the demo", async () => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  const module = await import("./chat");
+  module.mount(document.body, context());
+
+  await vi.waitFor(() =>
+    expect(document.querySelector("#status")?.textContent).toBe(module.NO_MODEL_HINT),
+  );
+  expect(module.NO_MODEL_HINT).toContain("make demo");
+});
+
+test("a 503 turn shows the server's connect-a-model detail and keeps the message", async () => {
+  const detail = "No model is connected. Run `make demo`.";
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") {
+      return { ok: false, status: 503, json: async () => ({ detail }) } as unknown as Response;
+    }
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url === "/api/models") {
+      return jsonResponse({ models: [{ id: "m", label: "M", default: true }] });
+    }
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".empty")).not.toBeNull());
+
+  const input = document.querySelector("#message") as HTMLTextAreaElement;
+  input.value = "hello";
+  document
+    .querySelector("#composer")
+    ?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  await vi.waitFor(() => expect(document.querySelector("#status")?.textContent).toBe(detail));
+  expect(document.querySelector("#log .bubble.user")).toBeNull();
+  expect(input.value).toBe("hello");
+});

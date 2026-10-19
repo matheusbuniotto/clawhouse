@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-Provider = Literal["databricks", "openai_compatible"]
+Provider = Literal["databricks", "openai_compatible", "demo"]
 
 
 class MissingModelConfig(Exception):
