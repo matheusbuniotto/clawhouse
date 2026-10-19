@@ -197,7 +197,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   const input = document.createElement("textarea");
   input.id = "message";
   input.rows = 1;
-  input.placeholder = "Prompt 🦀 main...";
+  input.placeholder = "Prompt main...";
   input.required = true;
 
   const toolbar = el("div", "composer-toolbar");
@@ -483,7 +483,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       agentEmoji.get(currentAgentName) ||
       (currentAgentName === "main" ? "🦀" : "🤖");
     currentAgentEmoji = emoji;
-    input.placeholder = `Prompt ${emoji} ${currentAgentName}...`;
+    input.placeholder = `Prompt ${currentAgentName}...`;
     capsuleAgentLabel.textContent = `${emoji} ${currentAgentName}`;
   }
 
@@ -533,7 +533,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       item.dataset.modelId = opt.id;
 
       const left = el("div", "model-popover-info");
-      const label = el("strong", "model-item-name", `${fmt.icon} ${fmt.name}`);
+      const label = el("strong", "model-item-name", fmt.name);
       left.append(label);
 
       const meta = el("div", "model-popover-meta");
