@@ -65,6 +65,75 @@ test("renders a loaded transcript as markdown and one merged tool row", async ()
   expect(log.querySelector(".tool-output")?.textContent).toBe("a dataframe library");
   expect(log.querySelector(".assistant h1")?.textContent).toBe("Answer");
   expect(log.querySelector(".assistant table")).not.toBeNull();
+  expect(log.querySelectorAll(".tool-group")).toHaveLength(1);
+  expect((log.querySelector(".tool-group") as HTMLDetailsElement).open).toBe(false);
+});
+
+test("an assistant turn splits tool calls into separate groups", async () => {
+  const entries = [
+    { role: "user", content: "look", tool_name: null },
+    { role: "tool_call", content: "{}", tool_name: "lookup" },
+    { role: "tool_result", content: "a", tool_name: "lookup" },
+    { role: "tool_call", content: "{}", tool_name: "query" },
+    { role: "tool_result", content: "b", tool_name: "query" },
+    { role: "assistant", content: "Done.", tool_name: null },
+    { role: "tool_call", content: "{}", tool_name: "jobs_list" },
+    { role: "tool_result", content: "[]", tool_name: "jobs_list" },
+  ];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries });
+    if (url === "/api/models") return jsonResponse({ models: [] });
+    return jsonResponse({});
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".assistant")).not.toBeNull());
+
+  const groups = document.querySelectorAll(".tool-group");
+  expect(groups).toHaveLength(2);
+  expect(groups[0].querySelectorAll(".tool-row")).toHaveLength(2);
+  expect(groups[1].querySelectorAll(".tool-row")).toHaveLength(1);
+  expect(groups[0].querySelector(".tool-group-label")?.textContent).toBe("See all");
+});
+
+test("a pending approval on reload shows outside the closed tool group", async () => {
+  const entries = [
+    { role: "user", content: "create a job", tool_name: null },
+    { role: "tool_call", content: "{}", tool_name: "jobs_create" },
+  ];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries, run_state: "idle" });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url === "/api/approvals") {
+      return jsonResponse({
+        pending: [
+          {
+            id: "appr-9",
+            session_id: SESSION,
+            tool_name: "jobs_create",
+            arguments: "{}",
+          },
+        ],
+      });
+    }
+    return jsonResponse({ models: [] });
+  });
+
+  await import("./chat").then((module) => module.mount(document.body, context()));
+  await vi.waitFor(() => expect(document.querySelector(".approval-action-bar")).not.toBeNull());
+
+  const group = document.querySelector(".tool-group") as HTMLDetailsElement;
+  const card = document.querySelector(".approval-action-bar");
+  expect(group.open).toBe(false);
+  expect(group.contains(card)).toBe(false);
+  expect(group.nextElementSibling).toBe(card);
+  expect(card?.textContent).toContain("jobs_create");
+  expect((document.querySelector("#message") as HTMLTextAreaElement).disabled).toBe(true);
+  expect(document.querySelector("#status")?.textContent).toBe(
+    "Ação aguardando aprovação acima.",
+  );
 });
 
 test("streams a turn into markdown and a shared tool row", async () => {
