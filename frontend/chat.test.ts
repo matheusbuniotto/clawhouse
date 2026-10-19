@@ -868,7 +868,7 @@ test("active agent display shows name in top ribbon and updates on agent query p
   });
 
   const input = root.querySelector("#message") as HTMLTextAreaElement;
-  expect(input.placeholder).toBe("Prompt 📊 analyst...");
+  expect(input.placeholder).toBe("Prompt analyst...");
 });
 
 test("custom model selector syncs with native model select and displays formatted label", async () => {
