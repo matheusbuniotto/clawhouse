@@ -53,6 +53,8 @@ class DatabricksTools:
         store: Any = None,
         session_id: str = "",
         owner_id: str = "",
+        model: Any = None,
+        workspace: Any = None,
     ) -> None:
         self.client = client
         self.warehouse_id = warehouse_id
@@ -63,6 +65,8 @@ class DatabricksTools:
         self.store = store
         self.session_id = session_id
         self.owner_id = owner_id
+        self.model = model
+        self.workspace = workspace
 
     def _resolve_jobs_identity(self) -> JobsIdentity:
         if self._jobs_identity is not None:
@@ -98,11 +102,12 @@ class DatabricksTools:
             return self.warehouse_id
         try:
             wh = self._call(lambda cl: warehouse.resolve_warehouse_id(cl, None))
-            if wh:
-                self.warehouse_id = wh
-                return wh
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to lazily resolve warehouse id: %s", exc)
+            return None
+        if wh:
+            self.warehouse_id = wh
+            return wh
         return None
 
     def _call(self, fn: Callable[[WorkspaceClient], _T]) -> _T:
@@ -155,20 +160,26 @@ class DatabricksTools:
         return await warehouse.system_ai_query(self, prompt, endpoint=endpoint)
 
     async def jobs_list(self, limit: int = 25) -> dict[str, object]:
-        """List Lakeflow jobs in the workspace."""
+        """List Lakeflow jobs and active app schedules."""
         return await jobs_client.jobs_list(self, limit=limit)
 
     async def jobs_run_now(
         self,
-        job_id: int,
+        job_id: int | str = 0,
         parameters: dict[str, str] | None = None,
         *,
+        schedule_id: str | None = None,
         wait: bool = False,
         timeout_seconds: int = 120,
     ) -> dict[str, object]:
-        """Trigger an immediate run of a Lakeflow job, optionally overriding job parameters."""
+        """Trigger an immediate run of a Lakeflow job (`job_id`) or app schedule (`schedule_id`)."""
         return await jobs_client.jobs_run_now(
-            self, job_id, parameters, wait=wait, timeout_seconds=timeout_seconds
+            self,
+            job_id,
+            parameters,
+            schedule_id=schedule_id,
+            wait=wait,
+            timeout_seconds=timeout_seconds,
         )
 
     async def jobs_create(  # noqa: PLR0913
@@ -234,7 +245,7 @@ class DatabricksTools:
         name: str,
         kind: Literal["sql", "sql_agent", "agent"],
         cron_expression: str,
-        slack_webhook_url: str,
+        slack_webhook_url: str = "",
         *,
         query: str = "",
         agent_name: str = "",
@@ -258,9 +269,14 @@ class DatabricksTools:
             pause_status=pause_status,
         )
 
-    async def jobs_delete(self, job_id: int) -> dict[str, object]:
-        """Delete a Lakeflow job from the workspace."""
-        return await jobs_client.jobs_delete(self, job_id)
+    async def jobs_delete(
+        self,
+        job_id: int | str = 0,
+        *,
+        schedule_id: str | None = None,
+    ) -> dict[str, object]:
+        """Delete a Lakeflow job (`job_id`) or cancel an app schedule (`schedule_id`)."""
+        return await jobs_client.jobs_delete(self, job_id, schedule_id=schedule_id)
 
     async def jobs_cancel_run(self, run_id: int) -> dict[str, object]:
         """Request cancellation of an active Lakeflow job run."""

@@ -43,8 +43,8 @@ def _calls_tool(name: str, args: Mapping[str, object]) -> FunctionModel:
         messages: list[ModelMessage], info: AgentInfo
     ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
         del info
-        returned = any(
-            getattr(part, "part_kind", "") == "tool-return" for m in messages for part in m.parts
+        returned = bool(messages) and any(
+            getattr(part, "part_kind", "") == "tool-return" for part in messages[-1].parts
         )
         if returned:
             yield "done"
@@ -994,3 +994,119 @@ async def test_agent_schedule_delivery_blocks_second_post(monkeypatch) -> None:
         now_fn=lambda: schedule.next_run_at,
     )
     assert posted == []
+
+
+async def test_jobs_schedule_agent_without_slack_and_run_now(monkeypatch) -> None:
+    posted: list[str] = []
+    monkeypatch.setattr(fired_mod, "post_slack", lambda _url, text: posted.append(text) or 200)
+    client = _db_client()
+    client.jobs.list.return_value = []
+    store = MemorySessionStore()
+    args = {
+        "name": "ui-probe",
+        "kind": "agent",
+        "cron_expression": "32 17 * * *",
+        "agent_name": "main",
+        "instructions": 'Reply with exactly "fired-jobs ui probe"',
+    }
+    paused = await run_turn(
+        SESSION,
+        "schedule ui-probe",
+        ctx=_ctx(client, store, model=_calls_tool("jobs_schedule", args), settings=_settings()),
+    )
+    resumed = await resume_turn(
+        SESSION, paused.approval_id or "", "approved", ctx=_ctx(client, store, settings=_settings())
+    )
+    assert resumed.status == "ok"
+    scheduled = json.loads(
+        next(e for e in reversed(resumed.transcript) if e.role == "tool_result").content
+    )
+    schedule_id = str(scheduled["schedule_id"])
+    fired = await store.fired_job_by_schedule(schedule_id)
+    assert fired is not None and fired.slack_webhook_url == "" and fired.name == "ui-probe"
+
+    listed = await run_turn(
+        SESSION,
+        "list jobs",
+        ctx=_ctx(client, store, model=_calls_tool("jobs_list", {}), settings=_settings()),
+    )
+    list_payload = json.loads(
+        next(e for e in reversed(listed.transcript) if e.role == "tool_result").content
+    )
+    assert list_payload["schedule_count"] == 1
+
+    run_paused = await run_turn(
+        SESSION,
+        "run test",
+        ctx=_ctx(
+            client,
+            store,
+            model=_calls_tool("jobs_run_now", {"job_id": "ui-probe"}),
+            settings=_settings(),
+        ),
+    )
+    run_resumed = await resume_turn(
+        SESSION,
+        run_paused.approval_id or "",
+        "approved",
+        ctx=_ctx(client, store, settings=_settings()),
+    )
+    run_payload = json.loads(
+        next(e for e in reversed(run_resumed.transcript) if e.role == "tool_result").content
+    )
+    assert run_payload["status"] == "ok"
+    assert run_payload["reply"] == "done"
+    assert posted == []
+
+    del_paused = await run_turn(
+        SESSION,
+        "delete schedule",
+        ctx=_ctx(
+            client,
+            store,
+            model=_calls_tool("jobs_delete", {"schedule_id": schedule_id}),
+            settings=_settings(),
+        ),
+    )
+    del_resumed = await resume_turn(
+        SESSION,
+        del_paused.approval_id or "",
+        "approved",
+        ctx=_ctx(client, store, settings=_settings()),
+    )
+    del_payload = json.loads(
+        next(e for e in reversed(del_resumed.transcript) if e.role == "tool_result").content
+    )
+    assert del_payload["status"] == "cancelled"
+
+
+async def test_api_jobs_displays_fired_agent_schedule_and_runs_it() -> None:
+    client = _db_client()
+    store = MemorySessionStore()
+    args = {
+        "name": "ui-probe",
+        "kind": "agent",
+        "cron_expression": "32 17 * * *",
+        "agent_name": "main",
+        "instructions": 'Reply with exactly "fired-jobs ui probe"',
+    }
+    paused = await run_turn(
+        SESSION,
+        "schedule ui-probe",
+        ctx=_ctx(client, store, model=_calls_tool("jobs_schedule", args), settings=_settings()),
+    )
+    resumed = await resume_turn(
+        SESSION, paused.approval_id or "", "approved", ctx=_ctx(client, store, settings=_settings())
+    )
+    schedule_id = str(_tool_result(resumed)["schedule_id"])
+    app = _app(store, _settings(dev_user=OWNER, dev_token="user-token"), client)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        body = (await http.get("/api/jobs?source=schedule")).json()
+        item = body["jobs"][0]
+        assert item["id"] == f"schedule:{schedule_id}"
+        assert item["name"] == "ui-probe"
+        assert item["agent_id"] == "main"
+        assert item["can_run"] is True
+        ran = await http.post(f"/api/jobs/schedule:{schedule_id}/run")
+        assert ran.status_code == 200
+        assert ran.json()["id"] == f"schedule:{schedule_id}"

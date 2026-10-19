@@ -94,17 +94,23 @@ def default_jobs_factory(token: str | None) -> DatabricksJobs:
     return DatabricksJobs(user_client=user_workspace_client(token), app_client=WorkspaceClient)
 
 
-async def _schedule_agent(store: SessionStore, owner_id: str, schedule: ScheduleEntry) -> str:
-    found = await find_agent(store, owner_id, first_agent_mention(schedule.prompt))
-    return found.agent_id if found else PLATFORM_AGENT_ID
+async def _schedule_item(
+    store: SessionStore, owner_id: str, schedule: ScheduleEntry, now: datetime
+) -> JobItem:
+    fired = await store.fired_job_by_schedule(schedule.id)
+    handle = (fired.agent_name if (fired and fired.agent_name) else None) or first_agent_mention(
+        schedule.prompt
+    )
+    found = await find_agent(store, owner_id, handle)
+    agent_id = found.agent_id if found else PLATFORM_AGENT_ID
+    name = fired.name if (fired and fired.name) else None
+    return schedule_job(schedule, agent_id, now, name=name)
 
 
 async def schedule_items(store: SessionStore, owner_id: str, now: datetime) -> list[JobItem]:
     schedules = await store.list_schedules(owner_id)
     return [
-        schedule_job(s, await _schedule_agent(store, owner_id, s), now)
-        for s in schedules
-        if s.status != "cancelled"
+        await _schedule_item(store, owner_id, s, now) for s in schedules if s.status != "cancelled"
     ]
 
 
@@ -142,7 +148,7 @@ def jobs_routes(
 
     @app.post("/api/jobs/{job_id}/run", response_model=RunOut)
     async def run_job(job_id: str, caller: Any = caller_dep) -> RunOut:
-        return await _run(jobs_for(caller), job_id)
+        return await _run(app, jobs_for(caller), caller.user_id, job_id)
 
     @app.delete("/api/jobs/{job_id}", status_code=204)
     async def delete_job(job_id: str, caller: Any = caller_dep) -> Response:
@@ -150,10 +156,35 @@ def jobs_routes(
         return Response(status_code=204)
 
 
-async def _run(jobs: DatabricksJobs, job_id: str) -> RunOut:
-    """Run-now exists only for Databricks jobs; app schedules never had it."""
+async def _run_schedule(app: FastAPI, owner_id: str, job_id: str) -> RunOut:
+    raw = job_id.removeprefix(SCHEDULE_PREFIX)
+    try:
+        UUID(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+    store: SessionStore = app.state.store
+    schedules = await store.list_schedules(owner_id)
+    target = next((s for s in schedules if s.id == raw and s.status == "active"), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    from clawhouse.agent.turn import run_turn  # noqa: PLC0415
+    from clawhouse.api.routes.schedules import scheduled_turn_context  # noqa: PLC0415
+    from clawhouse.capabilities.schedules import _echo_turn, run_scheduled_turn  # noqa: PLC0415
+
+    ctx = scheduled_turn_context(app, target)
+    run_fn = (
+        (lambda s_id, prompt, c: run_turn(s_id, prompt, ctx=c))
+        if ctx.model is not None
+        else (lambda s_id, prompt, _c: _echo_turn(s_id, prompt))
+    )
+    await run_scheduled_turn(target, store, run_fn, lambda _sch: ctx)
+    return RunOut(id=job_id, run_id=None)
+
+
+async def _run(app: FastAPI, jobs: DatabricksJobs, owner_id: str, job_id: str) -> RunOut:
+    """Start an immediate run for either an app schedule or a Databricks job."""
     if job_id.startswith(SCHEDULE_PREFIX):
-        raise HTTPException(status_code=405, detail="Agendamentos não têm 'rodar agora'.")
+        return await _run_schedule(app, owner_id, job_id)
     numeric = _databricks_id(job_id)
     try:
         run_id = await jobs.run_now(numeric)

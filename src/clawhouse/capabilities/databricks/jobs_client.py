@@ -11,11 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.jobs import (
-    JobSettings,
-    SparkPythonTask,
-    Task,
-)
+from databricks.sdk.service.jobs import JobSettings, SparkPythonTask, Task
 
 from clawhouse.capabilities.databricks.cron_util import build_cron_schedule
 from clawhouse.capabilities.databricks.jobs_tasks import (
@@ -33,7 +29,6 @@ if TYPE_CHECKING:
     from clawhouse.settings import Settings
 
 logger = logging.getLogger("clawhouse.databricks")
-
 _JOBS_PAGE_MAX = 100
 _TASK_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 
@@ -66,9 +61,7 @@ class MissingJobsIdentityError(RuntimeError):
 
 def _workspace_client_cls() -> type[WorkspaceClient]:
     mod = sys.modules.get("clawhouse.capabilities.databricks")
-    if mod and hasattr(mod, "WorkspaceClient"):
-        return mod.WorkspaceClient
-    return WorkspaceClient
+    return mod.WorkspaceClient if (mod and hasattr(mod, "WorkspaceClient")) else WorkspaceClient
 
 
 def jobs_identity(
@@ -80,8 +73,7 @@ def jobs_identity(
     """Resolve acting identity for Lakeflow Jobs execution."""
     factory = client_factory or _workspace_client_cls()
     if settings is not None and settings.jobs_sp_client_id and settings.jobs_sp_client_secret:
-        sp_id = settings.jobs_sp_client_id
-        sp_secret = settings.jobs_sp_client_secret
+        sp_id, sp_secret = settings.jobs_sp_client_id, settings.jobs_sp_client_secret
         kwargs: dict[str, Any] = {
             "client_id": sp_id,
             "client_secret": sp_secret,
@@ -89,68 +81,98 @@ def jobs_identity(
         }
         if settings.workspace_host:
             kwargs["host"] = settings.workspace_host
-        client = factory(**kwargs)
-        return JobsIdentity(kind="service_principal", client=client, label=sp_id)
+        return JobsIdentity(kind="service_principal", client=factory(**kwargs), label=sp_id)
 
     token = user_token.strip() if user_token else ""
     if token:
         kwargs = {"token": token, "auth_type": "pat"}
         if settings is not None and settings.workspace_host:
             kwargs["host"] = settings.workspace_host
-        client = factory(**kwargs)
-        return JobsIdentity(kind="user_obo", client=client, label="user")
+        return JobsIdentity(kind="user_obo", client=factory(**kwargs), label="user")
 
-    raise MissingJobsIdentityError(
+    msg = (
         "No jobs execution identity configured: "
         "neither dedicated Service Principal nor user token is available"
     )
+    raise MissingJobsIdentityError(msg)
+
+
+def _schedule_target(job_id: int | str, schedule_id: str | None) -> str | None:
+    if schedule_id and schedule_id.strip():
+        return schedule_id.strip()
+    if isinstance(job_id, str) and not job_id.strip().removeprefix("databricks:").isdigit():
+        return job_id.strip()
+    return None
+
+
+async def _schedules_for_tools(tools: DatabricksTools) -> list[dict[str, object]]:
+    from clawhouse.capabilities.schedules import list_active_schedules  # noqa: PLC0415
+
+    if tools.store is None or not tools.owner_id:
+        return []
+    return await list_active_schedules(tools.store, tools.owner_id)
 
 
 async def jobs_list(tools: DatabricksTools, limit: int = 25) -> dict[str, object]:
-    """List Lakeflow jobs in the workspace."""
+    """List Lakeflow jobs and active app schedules in the workspace."""
     limit = max(1, min(limit, _JOBS_PAGE_MAX))
+    schedules = await _schedules_for_tools(tools)
     try:
         jobs = tools._call(lambda cl: list(itertools.islice(cl.jobs.list(limit=limit), limit)))
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Failed to list jobs: {exc}"}
-    return {
-        "jobs": [
-            {
-                "job_id": job.job_id,
-                "name": job.settings.name if job.settings else None,
-                "creator": job.creator_user_name,
+        if schedules:
+            err = f"Failed to list jobs: {exc}"
+            return {
+                "jobs": [],
+                "job_count": 0,
+                "schedules": schedules,
+                "schedule_count": len(schedules),
+                "databricks_error": err,
             }
-            for job in jobs
-        ],
-        "job_count": len(jobs),
-    }
+        return {"error": f"Failed to list jobs: {exc}"}
+    rows = [
+        {"job_id": j.job_id, "name": j.settings and j.settings.name, "creator": j.creator_user_name}
+        for j in jobs
+    ]
+    res: dict[str, object] = {"jobs": rows, "job_count": len(jobs)}
+    if schedules:
+        res["schedules"] = schedules
+        res["schedule_count"] = len(schedules)
+    return res
 
 
-async def jobs_run_now(
+async def jobs_run_now(  # noqa: PLR0913
     tools: DatabricksTools,
-    job_id: int,
+    job_id: int | str = 0,
     parameters: dict[str, str] | None = None,
     *,
+    schedule_id: str | None = None,
     wait: bool = False,
     timeout_seconds: int = 120,
 ) -> dict[str, object]:
-    """Trigger an immediate run of a Lakeflow job, optionally overriding job parameters."""
+    """Trigger an immediate run of a Lakeflow job or an app schedule."""
+    target = _schedule_target(job_id, schedule_id)
+    if target is not None:
+        from clawhouse.capabilities.schedules import trigger_schedule_now  # noqa: PLC0415
+
+        return await trigger_schedule_now(tools, target)
+    numeric_id = int(str(job_id).strip().removeprefix("databricks:") or 0)
     try:
         identity = tools._resolve_jobs_identity()
     except MissingJobsIdentityError as exc:
         return {"error": str(exc)}
 
     try:
-        wait_handle = identity.client.jobs.run_now(job_id=job_id, job_parameters=parameters)
+        wait_handle = identity.client.jobs.run_now(job_id=numeric_id, job_parameters=parameters)
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Failed to run job {job_id}: {exc}"}
+        return {"error": f"Failed to run job {numeric_id}: {exc}"}
     identity_meta = {"kind": identity.kind, "label": identity.label}
     if wait:
         res = await jobs_wait_run(tools, wait_handle.run_id, timeout_seconds=timeout_seconds)
         if "error" not in res:
             res["identity"] = identity_meta
         return res
-    return {"run_id": wait_handle.run_id, "job_id": job_id, "identity": identity_meta}
+    return {"run_id": wait_handle.run_id, "job_id": numeric_id, "identity": identity_meta}
 
 
 def _build_create_task(  # noqa: PLR0913
@@ -169,11 +191,8 @@ def _build_create_task(  # noqa: PLR0913
     task_key = _TASK_KEY_UNSAFE.sub("_", name)
     effective_agent = agent_name or (name if task_type == "agentic" else None)
     if task_type == "python":
-        task = Task(
-            task_key=task_key,
-            spark_python_task=SparkPythonTask(python_file=path, parameters=parameters),
-        )
-        return task, effective_agent, None
+        py_task = SparkPythonTask(python_file=path, parameters=parameters)
+        return Task(task_key=task_key, spark_python_task=py_task), effective_agent, None
     task, error = _build_sql_task(
         tools,
         task_key,
@@ -198,11 +217,8 @@ def _format_created_job(  # noqa: PLR0913
     effective_agent: str | None,
     scheduled: bool,
 ) -> dict[str, object]:
-    result: dict[str, object] = {
-        "job_id": job_id,
-        "name": name,
-        "identity": {"kind": identity.kind, "label": identity.label},
-    }
+    id_meta = {"kind": identity.kind, "label": identity.label}
+    result: dict[str, object] = {"job_id": job_id, "name": name, "identity": id_meta}
     if task_type == "agentic" or effective_agent:
         result["task_type"] = task_type
         result["agent_name"] = effective_agent
@@ -218,11 +234,9 @@ def _submit_created_job(
     if schedule is not None:
         kwargs["schedule"] = schedule
     try:
-        created = identity.client.jobs.create(**kwargs)
+        return identity.client.jobs.create(**kwargs).job_id, None
     except Exception as exc:  # noqa: BLE001
         return None, f"Failed to create job {name}: {exc}"
-    else:
-        return created.job_id, None
 
 
 async def jobs_create(  # noqa: PLR0913
@@ -265,14 +279,8 @@ async def jobs_create(  # noqa: PLR0913
     job_id, err = _submit_created_job(identity, name, task, schedule)
     if err or job_id is None:
         return {"error": err or "Failed to create job."}
-
     return _format_created_job(
-        job_id,
-        name,
-        identity,
-        task_type,
-        effective_agent=agent,
-        scheduled=bool(schedule),
+        job_id, name, identity, task_type, effective_agent=agent, scheduled=bool(schedule)
     )
 
 
@@ -318,7 +326,6 @@ async def jobs_edit(  # noqa: PLR0913
     if not settings_dict and not query:
         msg = "No settings to update"
         return {"job_id": job_id, "updated": False, "message": msg, "identity": identity_meta}
-
     if settings_dict:
         err = _apply_job_settings(identity.client, job_id, JobSettings.from_dict(settings_dict))
         if err:
@@ -326,18 +333,25 @@ async def jobs_edit(  # noqa: PLR0913
     return {"job_id": job_id, "updated": True, "identity": identity_meta}
 
 
-async def jobs_delete(tools: DatabricksTools, job_id: int) -> dict[str, object]:
-    """Delete a Lakeflow job from the workspace."""
+async def jobs_delete(
+    tools: DatabricksTools, job_id: int | str = 0, *, schedule_id: str | None = None
+) -> dict[str, object]:
+    """Delete a Lakeflow job from the workspace or cancel an app schedule."""
+    target = _schedule_target(job_id, schedule_id)
+    if target is not None:
+        from clawhouse.capabilities.schedules import delete_schedule_from_tool  # noqa: PLC0415
+
+        return await delete_schedule_from_tool(tools, target)
+    numeric_id = int(str(job_id).strip().removeprefix("databricks:") or 0)
     try:
         identity = tools._resolve_jobs_identity()
     except MissingJobsIdentityError as exc:
         return {"error": str(exc)}
-
     try:
-        identity.client.jobs.delete(job_id=job_id)
+        identity.client.jobs.delete(job_id=numeric_id)
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"Failed to delete job {job_id}: {exc}"}
-    return {"job_id": job_id, "deleted": True}
+        return {"error": f"Failed to delete job {numeric_id}: {exc}"}
+    return {"job_id": numeric_id, "deleted": True}
 
 
 async def jobs_cancel_run(tools: DatabricksTools, run_id: int) -> dict[str, object]:
@@ -346,16 +360,12 @@ async def jobs_cancel_run(tools: DatabricksTools, run_id: int) -> dict[str, obje
         identity = tools._resolve_jobs_identity()
     except MissingJobsIdentityError as exc:
         return {"error": str(exc)}
-
     try:
         identity.client.jobs.cancel_run(run_id=run_id)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to cancel run {run_id}: {exc}"}
-    return {
-        "run_id": run_id,
-        "cancel_requested": True,
-        "identity": {"kind": identity.kind, "label": identity.label},
-    }
+    id_meta = {"kind": identity.kind, "label": identity.label}
+    return {"run_id": run_id, "cancel_requested": True, "identity": id_meta}
 
 
 def _task_run_dict(task: Any) -> dict[str, object]:
@@ -368,12 +378,6 @@ def _task_run_dict(task: Any) -> dict[str, object]:
     }
 
 
-def _run_duration(run: Any) -> int | None:
-    if run.start_time and run.end_time:
-        return run.end_time - run.start_time
-    return None
-
-
 async def jobs_get_run(tools: DatabricksTools, run_id: int) -> dict[str, object]:
     """Get the state of a Lakeflow job run."""
     try:
@@ -381,13 +385,14 @@ async def jobs_get_run(tools: DatabricksTools, run_id: int) -> dict[str, object]
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to get run {run_id}: {exc}"}
     state = getattr(run, "state", None)
+    duration = run.end_time - run.start_time if (run.start_time and run.end_time) else None
     return {
         "run_id": run.run_id,
         "job_id": run.job_id,
         "life_cycle_state": _enum_value(getattr(state, "life_cycle_state", None)),
         "result_state": _enum_value(getattr(state, "result_state", None)),
         "state_message": getattr(state, "state_message", None),
-        "duration_ms": _run_duration(run),
+        "duration_ms": duration,
         "url": run.run_page_url,
         "tasks": [_task_run_dict(task) for task in getattr(run, "tasks", None) or []],
     }

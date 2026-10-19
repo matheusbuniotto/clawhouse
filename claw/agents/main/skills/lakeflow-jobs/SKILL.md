@@ -9,24 +9,24 @@ Work with Lakeflow Jobs through these tools. Never guess a job id or run id: fin
 
 | Tool | Effect | Approval |
 | --- | --- | --- |
-| `jobs_list(limit)` | Lists jobs (id, name, creator). Max 100, no paging. | no |
+| `jobs_list(limit)` | Lists Lakeflow jobs and active app schedules (`schedules`). Max 100, no paging. | no |
 | `jobs_get_run(run_id)` | State of one run, plus each task's state and task `run_id`. | no |
 | `jobs_get_run_output(run_id)` | Execution output, logs, and query results of a run or task. | no |
 | `jobs_wait_run(run_id, timeout)` | Polls and awaits run completion, returning final state + output. | no |
-| `jobs_run_now(job_id, ...)` | Starts a run. Pass `wait=True` to await completion. | **yes** |
+| `jobs_run_now(job_id, ..., schedule_id)` | Starts a Lakeflow job run (`job_id`) or triggers an immediate test run of an app schedule (`schedule_id` or schedule name). Pass `wait=True` to await Lakeflow completion. | **yes** |
 | `jobs_create(name, task_type, ...)` | Creates a SQL, Python, or Agentic job (with optional schedule). | **yes** |
 | `jobs_edit(job_id, ...)` | Updates job name, schedule, query, or settings. | **yes** |
-| `jobs_delete(job_id)` | Deletes a job from the workspace. | **yes** |
+| `jobs_delete(job_id, ..., schedule_id)` | Deletes a Lakeflow job (`job_id`) or cancels an app schedule (`schedule_id` or schedule name). | **yes** |
 | `jobs_cancel_run(run_id)` | Requests cancellation of an active run. | **yes** |
 | `system_ai_format_delivery(content, ...)` | Formats reports for Slack mrkdwn or Sheets JSON. | no |
 | `delivery_send_webhook(url, payload)` | Sends formatted payload to external Slack / Sheets webhook. | **yes** |
 
 ## Workflow
 
-1. **Find the job.** Call `jobs_list` and match by name. If several jobs match or none do, say so and ask. Do not pick one silently.
+1. **Find the job or schedule.** Call `jobs_list` and match by name in `jobs` or `schedules`. If several match or none do, say so and ask. Do not pick one silently.
 2. **Look before you act.** For "why did it fail" or "is it done", call `jobs_get_run` and read the `tasks` states. Use `jobs_get_run_output` to read the task logs and agent analysis.
 3. **Say what you are about to do, then call the mutating tool.** The turn pauses until the user approves. State the job, the parameters, and the effect in one sentence so the approval card makes sense.
-4. **Await completion or report.** Use `jobs_run_now(..., wait=True)` or `jobs_wait_run(run_id)` to await terminal state and retrieve the output in one turn.
+4. **Await completion or report.** Use `jobs_run_now(..., wait=True)` or `jobs_wait_run(run_id)` to await terminal state and retrieve the output in one turn. For scheduled agent runs (`kind="agent"`), call `jobs_run_now(schedule_id=...)` (or pass the schedule ID / name in `job_id`) to run a test turn immediately and return its reply.
 5. **Delivery**: Format output with `system_ai_format_delivery(destination="slack" | "sheets")` and deliver via `delivery_send_webhook`.
 6. **If the call is denied or returns `error`,** report that plainly. Do not retry a mutating call on your own.
 
@@ -39,13 +39,13 @@ Work with Lakeflow Jobs through these tools. Never guess a job id or run id: fin
 
 ## Fired jobs (`jobs_schedule`)
 
-Use `jobs_schedule` when the user wants a recurring result in Slack. Kinds are `sql`, `sql_agent`, and `agent`. These kinds do not use ai_query.
+Use `jobs_schedule` when the user wants a recurring SQL job or scheduled agent run. Kinds are `sql`, `sql_agent`, and `agent`. These kinds do not use ai_query.
 
-- `sql`: the Lakeflow task is the user's SQL. On success, Slack gets the rows.
+- `sql`: the Lakeflow task is the user's SQL. On success, Slack gets the rows (when a webhook URL is provided).
 - `sql_agent`: the same raw SQL, then a Clawhouse agent (`agent_name`) analyzes the result.
 - `agent`: no Databricks task. An app schedule runs that agent with `instructions`.
 
-Pass `cron_expression`, `slack_webhook_url` (https), and `query` for the SQL kinds. The call pauses for approval.
+Pass `cron_expression`, optional `slack_webhook_url` (https; omit or leave empty `""` when the user does not provide a Slack webhook URL — do not ask for one unless requested), and `query` for the SQL kinds. The call pauses for approval. To run a test of a scheduled agent run immediately, call `jobs_run_now(schedule_id=...)`.
 
 ## Creating a Job
 

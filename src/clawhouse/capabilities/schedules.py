@@ -130,9 +130,14 @@ async def run_scheduled_turn(
     ctx = make_turn_ctx(schedule)
     fired = await store.fired_job_by_schedule(schedule.id)
     if fired is not None:
-        ctx = replace(ctx, headless=True, fired_job=True)
+        ctx = replace(
+            ctx,
+            headless=True,
+            fired_job=True,
+            default_agent=fired.agent_name or ctx.default_agent,
+        )
     next_run = calculate_next_run(schedule.cron_expression, from_time=now)
-    slot = schedule.next_run_at
+    slot = schedule.next_run_at if now >= schedule.next_run_at else now
     try:
         result = await run_turn_fn(schedule.session_id, schedule.prompt, ctx)
     except Exception as exc:
@@ -159,6 +164,136 @@ async def run_scheduled_turn(
 
             await deliver_schedule_reply(store, fired, slot, result.reply)
         return result
+
+
+def _schedule_row(sch: ScheduleEntry, fired: object) -> dict[str, object]:
+    return {
+        "schedule_id": sch.id,
+        "name": getattr(fired, "name", None) or sch.prompt,
+        "kind": getattr(fired, "kind", None) or "agent",
+        "agent_name": getattr(fired, "agent_name", None),
+        "cron_expression": sch.cron_expression,
+        "status": sch.status,
+        "next_run_at": sch.next_run_at.isoformat(),
+        "last_run_at": sch.last_run_at.isoformat() if sch.last_run_at else None,
+        "last_status": sch.last_status,
+    }
+
+
+async def list_active_schedules(store: SessionStore, owner_id: str) -> list[dict[str, object]]:
+    """Format active schedules for the jobs_list tool."""
+    active = [s for s in await store.list_schedules(owner_id) if s.status != "cancelled"]
+    return [_schedule_row(s, await store.fired_job_by_schedule(s.id)) for s in active]
+
+
+async def find_user_schedule(
+    store: SessionStore, owner_id: str, target: str
+) -> tuple[ScheduleEntry, object] | None:
+    """Find an active schedule by schedule ID, fired job ID, or fired job name."""
+    cleaned = target.strip().removeprefix("schedule:")
+    if not cleaned:
+        return None
+    for sch in await store.list_schedules(owner_id):
+        if sch.status == "cancelled":
+            continue
+        fired = await store.fired_job_by_schedule(sch.id)
+        if sch.id == cleaned or (fired is not None and cleaned in (fired.id, fired.name)):
+            return sch, fired
+    return None
+
+
+async def _echo_turn(session_id: str, prompt: str) -> TurnResult:
+    from clawhouse.store.shapes import TurnResult as _TurnResult  # noqa: PLC0415
+
+    return _TurnResult(
+        session_id=session_id,
+        status="ok",
+        reply=prompt,
+        error=None,
+        transcript=(),
+    )
+
+
+async def _run_schedule_from_tool(
+    tools: object, store: SessionStore, sch: ScheduleEntry, *, fired: object, now: datetime
+) -> TurnResult | None:
+    from clawhouse.agent.turn import TurnContext, run_turn  # noqa: PLC0415
+
+    model = getattr(tools, "model", None)
+    if model is None:
+        return await run_scheduled_turn(
+            sch,
+            store,
+            lambda s_id, prompt, _ctx: _echo_turn(s_id, prompt),
+            lambda s: TurnContext(owner_id=s.owner_id, store=store, model=None, now=lambda: now),  # type: ignore[arg-type]
+            now_fn=lambda: now,
+        )
+    owner_id = str(getattr(tools, "owner_id", sch.owner_id))
+    agent_name = getattr(fired, "agent_name", None) if fired is not None else None
+    temp = await store.create_session(owner_id)
+    try:
+        return await run_scheduled_turn(
+            sch,
+            store,
+            lambda _s_id, prompt, ctx: run_turn(temp.id, prompt, ctx=ctx),
+            lambda s: TurnContext(
+                owner_id=s.owner_id,
+                store=store,
+                model=model,
+                now=lambda: now,
+                workspace=getattr(tools, "workspace", None),
+                user_token=str(getattr(tools, "user_token", "")),
+                headless=True,
+                fired_job=True,
+                default_agent=agent_name,
+            ),
+            now_fn=lambda: now,
+        )
+    finally:
+        with suppress(Exception):
+            await store.delete_session(temp.id, owner_id)
+
+
+async def trigger_schedule_now(tools: object, target: str) -> dict[str, object]:
+    """Run an app schedule immediately from chat tools (`jobs_run_now`)."""
+    store: SessionStore | None = getattr(tools, "store", None)
+    if store is None:
+        return {"error": "no session store"}
+    owner_id = str(getattr(tools, "owner_id", ""))
+    matched = await find_user_schedule(store, owner_id, target)
+    if matched is None:
+        return {"error": f"Schedule not found: {target}"}
+    sch, fired = matched
+    now = datetime.now(UTC)
+    result = await _run_schedule_from_tool(tools, store, sch, fired=fired, now=now)
+    status = "error" if (result and result.status == "error") else "ok"
+    name = getattr(fired, "name", None) if fired is not None else None
+    return {
+        "schedule_id": sch.id,
+        "name": name or sch.prompt,
+        "status": status,
+        "reply": result.reply if result else "",
+    }
+
+
+async def delete_schedule_from_tool(tools: object, target: str) -> dict[str, object]:
+    """Cancel an app schedule from chat tools (`jobs_delete`)."""
+    store: SessionStore | None = getattr(tools, "store", None)
+    if store is None:
+        return {"error": "no session store"}
+    owner_id = str(getattr(tools, "owner_id", ""))
+    matched = await find_user_schedule(store, owner_id, target)
+    if matched is None:
+        return {"error": f"Schedule not found: {target}"}
+    sch, fired = matched
+    await store.cancel_schedule(sch.id, owner_id)
+    name = getattr(fired, "name", None) if fired is not None else None
+    return {
+        "schedule_id": sch.id,
+        "name": name or sch.prompt,
+        "status": "cancelled",
+        "deleted": True,
+    }
 
 
 async def _execute_due_turn(

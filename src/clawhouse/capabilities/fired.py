@@ -59,7 +59,7 @@ class HookOutcome:
 
 
 def validate_fired_request(  # noqa: PLR0917
-    kind: str, query: str, agent_name: str, instructions: str, slack_webhook_url: str
+    kind: str, query: str, agent_name: str, instructions: str, slack_webhook_url: str = ""
 ) -> str | None:
     error = ""
     if kind not in ("sql", "sql_agent", "agent"):
@@ -70,7 +70,7 @@ def validate_fired_request(  # noqa: PLR0917
         error = "agent_name is required"
     elif kind == "agent" and not instructions.strip():
         error = "instructions are required"
-    elif not slack_webhook_url.startswith("https://"):
+    elif slack_webhook_url and not slack_webhook_url.startswith("https://"):
         error = "slack_webhook_url must start with https://"
     return error or None
 
@@ -208,7 +208,7 @@ async def schedule_fired(  # noqa: PLR0913
     name: str,
     kind: str,
     cron_expression: str,
-    slack_webhook_url: str,
+    slack_webhook_url: str = "",
     query: str = "",
     agent_name: str = "",
     instructions: str = "",

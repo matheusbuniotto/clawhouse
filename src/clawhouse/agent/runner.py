@@ -157,6 +157,8 @@ def _capabilities_for_turn(
             store=claimed.ctx.store,
             session_id=claimed.session_id,
             owner_id=claimed.ctx.owner_id,
+            model=claimed.ctx.model,
+            workspace=workspace,
         )
 
     return [

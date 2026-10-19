@@ -68,6 +68,8 @@ async def post_or_release(  # noqa: PLR0913, PLR0917
     text: str,
     poster: Callable[[str, str], int] = post_slack,
 ) -> HookOutcome:
+    if not job.slack_webhook_url:
+        return HookOutcome(200, {"delivered": True})
     code = poster(job.slack_webhook_url, text)
     if 200 <= code <= 299:
         return HookOutcome(200, {"delivered": True})
@@ -243,5 +245,6 @@ async def deliver_schedule_reply(
     )
     if not claimed:
         return False
-    fired_mod.post_slack(job.slack_webhook_url, reply_slack_text(reply, None))
+    if job.slack_webhook_url:
+        fired_mod.post_slack(job.slack_webhook_url, reply_slack_text(reply, None))
     return True
