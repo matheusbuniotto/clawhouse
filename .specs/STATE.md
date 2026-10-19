@@ -18,10 +18,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: native-model-messages
-**Where**: Completed and squashed into main (PR #107 closed issue #79)
-**In progress**: Idle / ready for next sub-issue in Epic #77 (Issue #83 [6/14])
-**Next step**: Plan feature for Issue #83
-**Blockers**: none
+**Feature**: fired-jobs
+**Where**: C1–C32 committed in `0590223`; verification PASS, profile light
+**In progress**: none
+**Next step**: none for this feature
+**Blockers**: go-live token for Sheets and `dbsql_query`; admin rights for notification destination `clawhouse-job-hook`
 **Uncommitted**: none
 **Branch**: main

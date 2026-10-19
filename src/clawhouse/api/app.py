@@ -33,6 +33,7 @@ from clawhouse.api.routes.assets import (
     _cache_headers,
     _page_routes,
 )
+from clawhouse.api.routes.job_hooks import _job_hook_routes
 from clawhouse.api.routes.memory import _memory_routes
 from clawhouse.api.routes.schedules import (
     _schedule_routes,
@@ -88,6 +89,7 @@ def _routes(app: FastAPI) -> None:
     _status_routes(app)
     _agent_routes(app)
     _schedule_routes(app)
+    _job_hook_routes(app)
     jobs_routes(app, _require_caller, lambda caller: _caller_token(app.state.settings, caller))
     _composer_routes(app)
     _memory_routes(app)

@@ -39,6 +39,8 @@ class Settings:
     mlflow_experiment: str | None = None
     jobs_sp_client_id: str | None = None
     jobs_sp_client_secret: str | None = None
+    job_hook_password: str = ""
+    app_base_url: str = ""
 
 
 def telemetry_enabled_from_env(env: Mapping[str, str]) -> bool:
@@ -77,6 +79,8 @@ def settings_from_env(env: Mapping[str, str]) -> Settings:
         mlflow_experiment=env.get("MLFLOW_EXPERIMENT_NAME") or env.get("MLFLOW_EXPERIMENT") or None,
         jobs_sp_client_id=env.get("CLAWHOUSE_JOBS_SP_CLIENT_ID") or None,
         jobs_sp_client_secret=env.get("CLAWHOUSE_JOBS_SP_CLIENT_SECRET") or None,
+        job_hook_password=env.get("CLAWHOUSE_JOB_HOOK_PASSWORD") or "",
+        app_base_url=env.get("CLAWHOUSE_APP_URL") or "",
     )
 
 

@@ -243,7 +243,7 @@ async def test_api_lists_schedules_and_databricks_jobs_together() -> None:
     assert first["cron_human"] == "todo dia às 5h"
     assert first["next_run_at"].startswith("2099-01-01T08:00")
     assert first["last_run"]["session_id"] == SID
-    assert first["can_run"] is False and first["can_delete"] is True
+    assert first["can_run"] is True and first["can_delete"] is True
     assert [j["id"] for j in body["jobs"][1:]] == ["databricks:1", "databricks:2"]
 
 
@@ -251,7 +251,7 @@ async def test_api_run_only_for_databricks_and_delete_only_for_schedules() -> No
     store = MemorySessionStore()
     saved = await _schedule(store, "resumo")
     async with _client(store, _fallback(_Jobs(APP_JOBS, ACLS))) as client:
-        assert (await client.post(f"/api/jobs/schedule:{saved.id}/run")).status_code == 405
+        assert (await client.post(f"/api/jobs/schedule:{saved.id}/run")).status_code == 200
         assert (await client.post("/api/jobs/databricks:2/run")).status_code == 403
         ran = await client.post("/api/jobs/databricks:1/run")
         assert ran.status_code == 200 and ran.json()["run_id"] == 901

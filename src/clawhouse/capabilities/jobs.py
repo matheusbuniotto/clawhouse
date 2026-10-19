@@ -163,10 +163,20 @@ def _shorten(text: str) -> str:
     return line if len(line) <= NAME_MAX else line[: NAME_MAX - 1] + "…"
 
 
-def schedule_job(schedule: ScheduleEntry, agent_id: str, now: datetime) -> JobItem:
+def schedule_job(
+    schedule: ScheduleEntry,
+    agent_id: str,
+    now: datetime,
+    *,
+    name: str | None = None,
+) -> JobItem:
     """One app schedule as a Jobs row. Schedules link back to the session they post to."""
     last = (
-        LastRun(status="done", started_at=schedule.last_run_at, session_id=schedule.session_id)
+        LastRun(
+            status=schedule.last_status or "done",
+            started_at=schedule.last_run_at,
+            session_id=schedule.session_id,
+        )
         if schedule.last_run_at
         else None
     )
@@ -176,13 +186,13 @@ def schedule_job(schedule: ScheduleEntry, agent_id: str, now: datetime) -> JobIt
     return JobItem(
         id=SCHEDULE_PREFIX + schedule.id,
         source="schedule",
-        name=_shorten(schedule.prompt),
+        name=_shorten(name or schedule.prompt),
         agent_id=agent_id,
         cron=schedule.cron_expression,
         cron_human=humanize_cron(schedule.cron_expression),
         next_run_at=next_run,
         last_run=last,
-        can_run=False,
+        can_run=True,
         can_delete=True,
         session_id=schedule.session_id,
     )

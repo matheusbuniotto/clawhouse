@@ -143,6 +143,8 @@ class TurnContext:
     default_agent: str | None = None
     # No one is watching (scheduled job): questions take their default instead of pausing.
     headless: bool = False
+    # A fired job has nobody to approve a mutating tool, so those calls are denied.
+    fired_job: bool = False
 
 
 @dataclass(frozen=True, slots=True)
