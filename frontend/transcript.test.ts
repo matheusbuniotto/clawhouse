@@ -139,6 +139,36 @@ test("a tool call becomes a collapsible row with a running chip and summary", ()
   expect(row.querySelector(".tool-body")?.contains(row.querySelector(".tool-input"))).toBe(true);
 });
 
+test("consecutive tool calls share one closed See all group", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });
+  appendToolActivity(host, { event: "tool_result", name: "lookup", content: "1" });
+  appendToolActivity(host, { event: "tool_call", name: "query", arguments: "{}" });
+  appendToolActivity(host, { event: "tool_result", name: "query", content: "2" });
+
+  expect(host.querySelectorAll(".tool-group")).toHaveLength(1);
+  const group = host.querySelector(".tool-group") as HTMLDetailsElement;
+  expect(group.open).toBe(false);
+  expect(group.querySelectorAll(".tool-row")).toHaveLength(2);
+  expect(group.querySelector(".tool-group-label")?.textContent).toBe("See all");
+  expect(group.querySelector(".tool-group-count")?.textContent).toBe("2");
+
+  group.open = true;
+  group.dispatchEvent(new Event("toggle"));
+  expect(group.querySelector(".tool-group-label")?.textContent).toBe("Hide all");
+  expect(group.querySelector(".tool-group-count")?.textContent).toBe("2");
+});
+
+test("a break between tool calls starts another group", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });
+  host.append(document.createElement("p"));
+  appendToolActivity(host, { event: "tool_call", name: "query", arguments: "{}" });
+
+  expect(host.querySelectorAll(".tool-group")).toHaveLength(2);
+  expect(host.querySelectorAll(".tool-row")).toHaveLength(2);
+});
+
 test("a tool result completes the same row with an OK chip and output", () => {
   const host = document.createElement("div");
   appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });
@@ -314,9 +344,14 @@ test("renders inline approval card and handles approval resolution", async () =>
 
   renderInlineApproval(container, "appr-123", "jobs_create", onResolved);
 
+  const group = container.querySelector(".tool-group") as HTMLDetailsElement;
+  const card = container.querySelector(".approval-action-bar");
+  expect(group.open).toBe(false);
+  expect(group.contains(card)).toBe(false);
+  expect(group.nextElementSibling).toBe(card);
   expect(toolRow?.dataset.state).toBe("pending");
   expect(toolRow?.querySelector(".tool-status")?.textContent).toBe("Approval Needed");
-  expect(container.querySelector(".approval-action-bar")).not.toBeNull();
+  expect(card).not.toBeNull();
   expect(container.querySelector(".approval-msg")?.textContent).toContain(
     "Approval required to execute jobs_create",
   );

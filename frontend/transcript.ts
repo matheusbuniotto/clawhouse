@@ -100,8 +100,8 @@ const STATUS_LABEL: Record<ActivityState, string> = {
 };
 
 /**
- * Render an inline approval card with Approve/Deny actions directly inside
- * the active tool activity row or container.
+ * Approve/Deny for a paused tool call. The card sits after the tool group so
+ * it stays visible while that group is collapsed.
  */
 export function renderInlineApproval(
   container: HTMLElement,
@@ -110,7 +110,7 @@ export function renderInlineApproval(
   onResolved: (reply?: string) => void,
   toolArguments?: string,
 ): HTMLElement {
-  const running = lastRunningTool(container);
+  const running = runningToolNamed(container, toolName);
   if (running) {
     running.dataset.state = "pending";
     running.open = true;
@@ -122,6 +122,7 @@ export function renderInlineApproval(
   }
 
   const card = el("div", "approval-action-bar");
+  card.dataset.approvalId = approvalId;
   const preview = writePreview(toolName, toolArguments);
   const msg = el(
     "span",
@@ -187,14 +188,7 @@ export function renderInlineApproval(
   if (preview) card.append(preview.note, preview.body);
   card.append(btns);
 
-  if (running) {
-    const body = running.querySelector(".tool-body");
-    if (body) {
-      body.append(card);
-      return card;
-    }
-  }
-  container.append(card);
+  placeApprovalCard(container, running, card);
   return card;
 }
 
@@ -312,8 +306,8 @@ function sheetResultLink(output: string): HTMLAnchorElement | null {
 
 /**
  * One activity row per call: a `tool_call` opens it running, a following
- * `tool_result` completes the same row. Rows are `<details>` so input and
- * output stay collapsed until the reader expands them.
+ * `tool_result` completes the same row. Consecutive rows share one closed
+ * group until something else is appended to the transcript.
  */
 export function appendToolActivity(container: HTMLElement, frame: ToolFrame): HTMLElement {
   const running = lastRunningTool(container);
@@ -321,10 +315,67 @@ export function appendToolActivity(container: HTMLElement, frame: ToolFrame): HT
     completeToolRow(running, "ok", frame.content ?? "");
     return running;
   }
+  const group = ensureToolGroup(container);
   const row = createToolRow(frame.name ?? "tool", frame.arguments);
-  container.append(row);
+  group.append(row);
+  syncGroupLabel(group);
   if (frame.event === "tool_result") completeToolRow(row, "ok", frame.content ?? "");
   return row;
+}
+
+function ensureToolGroup(container: HTMLElement): HTMLDetailsElement {
+  const last = container.lastElementChild;
+  if (last instanceof HTMLDetailsElement && last.classList.contains("tool-group")) return last;
+  const group = el("details", "tool-group");
+  const summary = el("summary", "tool-group-toggle");
+  summary.append(el("span", "tool-group-label", "See all"));
+  summary.append(el("span", "tool-group-count", "0"));
+  group.append(summary);
+  group.addEventListener("toggle", () => syncGroupLabel(group));
+  container.append(group);
+  return group;
+}
+
+function syncGroupLabel(group: HTMLDetailsElement): void {
+  const label = group.querySelector(".tool-group-label");
+  const count = group.querySelector(".tool-group-count");
+  if (label) label.textContent = group.open ? "Hide all" : "See all";
+  if (count) count.textContent = String(toolRowCount(group));
+}
+
+function toolRowCount(group: HTMLElement): number {
+  let count = 0;
+  for (const child of group.children) {
+    if (child.classList.contains("tool-row")) count += 1;
+  }
+  return count;
+}
+
+function runningToolNamed(container: HTMLElement, toolName: string): HTMLDetailsElement | null {
+  const rows = container.querySelectorAll<HTMLDetailsElement>('.tool-row[data-state="running"]');
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (rows[index].querySelector(".tool-name")?.textContent === toolName) return rows[index];
+  }
+  return null;
+}
+
+function placeApprovalCard(
+  container: HTMLElement,
+  running: HTMLDetailsElement | null,
+  card: HTMLElement,
+): void {
+  const group = running?.closest(".tool-group");
+  if (!group) {
+    container.append(card);
+    return;
+  }
+  let anchor: Element = group;
+  let next = group.nextElementSibling;
+  while (next?.classList.contains("approval-action-bar")) {
+    anchor = next;
+    next = next.nextElementSibling;
+  }
+  anchor.insertAdjacentElement("afterend", card);
 }
 
 /** Flip every still-running row to error, e.g. when the turn dies mid-call. */

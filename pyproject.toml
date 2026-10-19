@@ -7,6 +7,8 @@ name = "clawhouse"
 version = "0.1.0"
 description = "Clawhouse"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "asyncpg>=0.32.0",

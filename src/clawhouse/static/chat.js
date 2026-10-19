@@ -834,6 +834,20 @@ export function mount(root, ctx) {
         };
         setTimeout(() => void tick(), POLL_MS);
     }
+    function approvalAlreadyShown(root, approvalId) {
+        for (const card of root.querySelectorAll(".approval-action-bar")) {
+            if (card.dataset.approvalId === approvalId)
+                return true;
+        }
+        return false;
+    }
+    function onApprovalResolved(reply) {
+        if (reply) {
+            transcript.append(renderAssistantTurn(reply));
+            scrollToBottom();
+        }
+        setBlocked(null);
+    }
     async function loadPendingApprovals() {
         try {
             const response = await fetch("/api/approvals");
@@ -841,8 +855,19 @@ export function mount(root, ctx) {
                 return;
             const body = (await response.json());
             const mine = (body.pending ?? []).filter((a) => a.session_id === sessionId());
-            for (const approval of mine)
-                showApproval(approval);
+            let rendered = false;
+            for (const item of mine) {
+                if (!item.id || approvalAlreadyShown(transcript, item.id))
+                    continue;
+                transcript.querySelector(".empty")?.remove();
+                renderInlineApproval(transcript, item.id, item.tool_name ?? "tool", (reply) => {
+                    onApprovalResolved(reply);
+                    void resync();
+                }, item.arguments);
+                rendered = true;
+            }
+            if (rendered)
+                scrollToBottom();
             if (mine.length > 0 && blocked === null)
                 setBlocked(WAITING_FOR_APPROVAL);
         }
@@ -875,9 +900,9 @@ export function mount(root, ctx) {
     }
     /** A pending approval found on load or after a resume: Approve/Deny right in the chat. */
     function showApproval(approval) {
-        if (transcript.querySelector(`[data-approval-id="${approval.id}"]`))
+        if (!approval.id || transcript.querySelector(`[data-approval-id="${approval.id}"]`))
             return;
-        const card = renderInlineApproval(transcript, approval.id, approval.tool_name, () => void resync(), approval.arguments);
+        const card = renderInlineApproval(transcript, approval.id, approval.tool_name ?? "tool", () => void resync(), approval.arguments);
         card.dataset.approvalId = approval.id;
         scrollToBottom();
     }
@@ -978,13 +1003,7 @@ export function mount(root, ctx) {
             if (draft?.classList.contains("thinking")) {
                 dropDraft();
             }
-            renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", (reply) => {
-                if (reply) {
-                    transcript.append(renderAssistantTurn(reply));
-                    scrollToBottom();
-                }
-                setBlocked(null);
-            }, payload.arguments);
+            renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", onApprovalResolved, payload.arguments);
             scrollToBottom();
             return;
         }

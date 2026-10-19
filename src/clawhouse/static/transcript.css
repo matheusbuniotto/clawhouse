@@ -260,6 +260,67 @@
   font-size: var(--font-size-sm);
 }
 
+/* Consecutive tool calls share one closed group. The summary is See all / Hide all. */
+.tool-group {
+  margin: 0 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.tool-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.tool-group-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.tool-group-toggle::after {
+  content: "";
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--duration) var(--ease);
+}
+
+.tool-group[open] > .tool-group-toggle::after {
+  transform: rotate(45deg);
+}
+
+.tool-group-label {
+  color: var(--text-strong);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.tool-group-count {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-group > .tool-row {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+}
+
+.tool-group + .approval-action-bar {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
 /* Tool activity: one collapsible row per call, with a state chip. */
 .tool-row {
   margin: 0 0 10px;

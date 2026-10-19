@@ -1,5 +1,7 @@
 # Clawhouse 🦀
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 > Databricks-native agent runtime and chat app built on **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
 
 ---
@@ -135,3 +137,9 @@ npx jscpd@5 src --threshold 3 --min-lines 5 --min-tokens 50
 uv run pytest
 npm test
 ```
+
+---
+
+## License
+
+Clawhouse is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Matheus Buniotto.
