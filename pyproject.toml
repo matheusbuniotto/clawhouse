@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "clawhouse"
 version = "0.1.0"
-description = "Clawhouse"
+description = "Clawhouse for Databricks: an OpenClaw-style AI assistant that runs as a Databricks App and acts as the signed-in user through Unity Catalog."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
