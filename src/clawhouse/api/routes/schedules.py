@@ -14,10 +14,12 @@ from clawhouse.settings import Settings, request_token
 from clawhouse.store.shapes import ScheduleEntry
 
 
-def scheduled_turn_context(app: FastAPI, sch: ScheduleEntry) -> TurnContext:
+def scheduled_turn_context(
+    app: FastAPI, sch: ScheduleEntry, *, access_token: str = ""
+) -> TurnContext:
     """A schedule runs with nobody watching: questions take their default (`headless`)."""
     settings: Settings = app.state.settings
-    caller = Caller(user_id=sch.owner_id, access_token=settings.dev_token or "")
+    caller = Caller(user_id=sch.owner_id, access_token=access_token or settings.dev_token or "")
     model = app.state.model_for(caller, None)
     token = request_token(
         forwarded=caller.access_token,

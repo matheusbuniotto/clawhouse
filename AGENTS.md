@@ -1,4 +1,4 @@
-# Clawhouse — DatabricksClaw MVP
+# Clawhouse for Databricks — MVP
 
 Databricks-native port of OpenClaw ideas as a Databricks App: one chat surface, one Python agent runtime, Databricks identity and storage throughout.
 

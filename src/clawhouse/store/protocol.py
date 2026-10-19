@@ -7,6 +7,8 @@ from clawhouse.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
     CustomAgent,
+    FiredDelivery,
+    FiredJob,
     MemoryEntry,
     ScheduleEntry,
     SearchHit,
@@ -105,6 +107,20 @@ class SessionStore(Protocol):
         last_status: str | None = None,
         last_error: str | None = None,
     ) -> ScheduleEntry | None: ...
+
+    async def insert_fired_job(self, job: FiredJob) -> FiredJob: ...
+
+    async def fired_job_by_databricks_id(self, job_id: int) -> FiredJob | None: ...
+
+    async def fired_job_by_schedule(self, schedule_id: str) -> FiredJob | None: ...
+
+    async def try_insert_delivery(self, delivery: FiredDelivery) -> bool: ...
+
+    async def delete_delivery_run(self, job_id: int, run_id: int, event_type: str) -> None: ...
+
+    async def delivery_for_run(
+        self, job_id: int, run_id: int, event_type: str
+    ) -> FiredDelivery | None: ...
 
     async def save_memory(
         self,

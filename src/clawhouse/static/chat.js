@@ -129,7 +129,7 @@ export function mount(root, ctx) {
     const input = document.createElement("textarea");
     input.id = "message";
     input.rows = 1;
-    input.placeholder = "Prompt 🦀 main...";
+    input.placeholder = "Prompt main...";
     input.required = true;
     const toolbar = el("div", "composer-toolbar");
     // Left Toolbar: Action button (+)
@@ -153,10 +153,9 @@ export function mount(root, ctx) {
     modelCustomTrigger.setAttribute("aria-haspopup", "listbox");
     modelCustomTrigger.setAttribute("aria-expanded", "false");
     modelCustomTrigger.title = "Choose model endpoint";
-    const modelTriggerIcon = el("span", "model-trigger-icon", "⚡");
     const modelTriggerName = el("span", "model-trigger-name", "Model");
     const modelTriggerChevron = el("span", "model-trigger-chevron", "▾");
-    modelCustomTrigger.append(modelTriggerIcon, modelTriggerName, modelTriggerChevron);
+    modelCustomTrigger.append(modelTriggerName, modelTriggerChevron);
     const modelCustomPopover = el("div", "model-custom-popover");
     modelCustomPopover.id = "model-custom-popover";
     modelCustomPopover.hidden = true;
@@ -355,7 +354,7 @@ export function mount(root, ctx) {
         const emoji = agentEmoji.get(currentAgentName) ||
             (currentAgentName === "main" ? "🦀" : "🤖");
         currentAgentEmoji = emoji;
-        input.placeholder = `Prompt ${emoji} ${currentAgentName}...`;
+        input.placeholder = `Prompt ${currentAgentName}...`;
         capsuleAgentLabel.textContent = `${emoji} ${currentAgentName}`;
     }
     function updateDraftStatus() {
@@ -388,7 +387,6 @@ export function mount(root, ctx) {
             const fmt = formatModelOption(opt.id, opt.label);
             const isSelected = opt.id === activeId;
             if (isSelected) {
-                modelTriggerIcon.textContent = fmt.icon;
                 modelTriggerName.textContent = fmt.name;
                 modelTriggerName.title = opt.label;
             }
@@ -396,7 +394,7 @@ export function mount(root, ctx) {
             item.type = "button";
             item.dataset.modelId = opt.id;
             const left = el("div", "model-popover-info");
-            const label = el("strong", "model-item-name", `${fmt.icon} ${fmt.name}`);
+            const label = el("strong", "model-item-name", fmt.name);
             left.append(label);
             const meta = el("div", "model-popover-meta");
             meta.append(el("span", "model-badge-tag", fmt.provider));
@@ -413,7 +411,6 @@ export function mount(root, ctx) {
             item.addEventListener("click", () => {
                 modelPicker.value = opt.id;
                 sessionStorage.setItem(MODEL_KEY, opt.id);
-                modelTriggerIcon.textContent = fmt.icon;
                 modelTriggerName.textContent = fmt.name;
                 modelCustomPopover.hidden = true;
                 modelCustomTrigger.setAttribute("aria-expanded", "false");
@@ -1376,7 +1373,6 @@ export function mount(root, ctx) {
         const selectedOption = modelPicker.options[modelPicker.selectedIndex];
         if (selectedOption) {
             const fmt = formatModelOption(modelPicker.value, selectedOption.textContent || "");
-            modelTriggerIcon.textContent = fmt.icon;
             modelTriggerName.textContent = fmt.name;
         }
         // The new model's window is unknown until its first turn reports usage.

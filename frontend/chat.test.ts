@@ -94,7 +94,7 @@ test("an assistant turn splits tool calls into separate groups", async () => {
   expect(groups).toHaveLength(2);
   expect(groups[0].querySelectorAll(".tool-row")).toHaveLength(2);
   expect(groups[1].querySelectorAll(".tool-row")).toHaveLength(1);
-  expect(groups[0].querySelector(".tool-group-label")?.textContent).toBe("See all");
+  expect(groups[0].querySelector(".tool-group-label")?.textContent).toBe("Expand tool calls");
 });
 
 test("a pending approval on reload shows outside the closed tool group", async () => {
@@ -868,7 +868,7 @@ test("active agent display shows name in top ribbon and updates on agent query p
   });
 
   const input = root.querySelector("#message") as HTMLTextAreaElement;
-  expect(input.placeholder).toBe("Prompt 📊 analyst...");
+  expect(input.placeholder).toBe("Prompt analyst...");
 });
 
 test("custom model selector syncs with native model select and displays formatted label", async () => {

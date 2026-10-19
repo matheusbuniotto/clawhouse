@@ -1,8 +1,11 @@
-# Clawhouse 🦀
+# Clawhouse for Databricks 🦀
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-> Databricks-native agent runtime and chat app built on **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
+> **OpenClaw-style AI assistant for your Lakehouse.** Runs as a Databricks App, acts as *you* through Unity Catalog, and asks before it touches anything. Built on **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
+
+> [!NOTE]
+> Clawhouse for Databricks is an independent open-source project. It is **not affiliated** with clawhouse.com / Clawhouse LLC (a managed OpenClaw hosting service), OpenClaw, or Databricks.
 
 ---
 

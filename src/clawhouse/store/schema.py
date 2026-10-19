@@ -5,6 +5,8 @@ from contextlib import suppress
 
 import asyncpg
 
+from clawhouse.store.fired_schema import FIRED_DDL
+
 logger = logging.getLogger(__name__)
 
 _CONNECT_ATTEMPTS = 5
@@ -14,7 +16,8 @@ _STALE_RUN_MINUTES = 10
 
 # The app service principal owns this schema. It can create objects, and it
 # cannot create tables in `public` on Postgres 15+.
-SCHEMA = """
+SCHEMA = (
+    """
 CREATE SCHEMA IF NOT EXISTS clawhouse;
 
 CREATE TABLE IF NOT EXISTS clawhouse.sessions (
@@ -129,6 +132,8 @@ CREATE INDEX IF NOT EXISTS schedules_due_idx
     ON clawhouse.schedules (status, next_run_at)
     WHERE status = 'active';
 """
+    + FIRED_DDL
+)
 
 _INSERT_ENTRY = (
     "INSERT INTO clawhouse.transcript_entries "
@@ -318,6 +323,7 @@ _CLAIM_DUE_SCHEDULES_SQL = (
     "FROM clawhouse.schedules WHERE status = 'active' AND next_run_at <= $1 "
     "ORDER BY next_run_at ASC FOR UPDATE SKIP LOCKED"
 )
+
 _UPDATE_SCHEDULE_RUN_SQL = (
     "UPDATE clawhouse.schedules "
     "SET last_run_at = $2, next_run_at = $3, last_status = $4, last_error = $5 "
