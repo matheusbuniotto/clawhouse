@@ -1,5 +1,7 @@
 # Clawhouse for Databricks 🦀
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 > **OpenClaw-style AI assistant for your Lakehouse.** Runs as a Databricks App, acts as *you* through Unity Catalog, and asks before it touches anything. Built on **Pydantic AI**, **Lakebase Postgres**, and **Model Serving**.
 
 > [!NOTE]
@@ -114,3 +116,9 @@ npx jscpd@5 src --threshold 3 --min-lines 5 --min-tokens 50
 uv run pytest
 npm test
 ```
+
+---
+
+## License
+
+Clawhouse is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Matheus Buniotto.
