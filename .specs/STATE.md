@@ -19,9 +19,9 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 ## Handoff
 
 **Feature**: fired-jobs
-**Where**: C1–C32 marked done; implementation on `main`, verification not written
-**In progress**: independent verification of `.specs/features/fired-jobs`
-**Next step**: fresh verifier writes `verification.md`; `validate_verification.py fired-jobs` must exit 0
+**Where**: C1–C32 committed in `0590223`; verification PASS, profile light
+**In progress**: none
+**Next step**: none for this feature
 **Blockers**: go-live token for Sheets and `dbsql_query`; admin rights for notification destination `clawhouse-job-hook`
-**Uncommitted**: none after the feature commit
+**Uncommitted**: none
 **Branch**: main
