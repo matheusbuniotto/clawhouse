@@ -113,6 +113,9 @@ class DatabricksCapability(AbstractCapability[Any]):
     warehouse_id: str | None = None
     user_token: str = ""
     settings: Settings | None = None
+    store: Any = None
+    session_id: str = ""
+    owner_id: str = ""
     id: str | None = "databricks"
 
     def _resolve_jobs_identity(self) -> JobsIdentity:
@@ -137,6 +140,9 @@ class DatabricksCapability(AbstractCapability[Any]):
                 jobs_identity_resolver=self._resolve_jobs_identity,
                 user_token=self.user_token,
                 settings=self.settings,
+                store=self.store,
+                session_id=self.session_id,
+                owner_id=self.owner_id,
             )
             return FunctionToolset(impl.all_tools())
         except Exception as exc:  # noqa: BLE001
@@ -152,6 +158,9 @@ class DatabricksCapability(AbstractCapability[Any]):
                     jobs_identity_resolver=self._resolve_jobs_identity,
                     user_token=self.user_token,
                     settings=self.settings,
+                    store=self.store,
+                    session_id=self.session_id,
+                    owner_id=self.owner_id,
                 )
                 return FunctionToolset(impl.all_tools())
             except Exception as inner_exc:  # noqa: BLE001

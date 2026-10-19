@@ -150,8 +150,14 @@ def _capabilities_for_turn(
     workspace = _agent_workspace(claimed)
     skills = skills_capability(workspace.skills if workspace else None)
     db_cap = claimed.ctx.databricks_capability
-    if db_cap is not None and claimed.ctx.user_token:
-        db_cap = replace(db_cap, user_token=claimed.ctx.user_token)
+    if db_cap is not None:
+        db_cap = replace(
+            db_cap,
+            user_token=claimed.ctx.user_token or db_cap.user_token,
+            store=claimed.ctx.store,
+            session_id=claimed.session_id,
+            owner_id=claimed.ctx.owner_id,
+        )
 
     return [
         AgentManagementCapability(
@@ -171,7 +177,9 @@ def _capabilities_for_turn(
         *([mcp] if mcp is not None else []),
         *([skills] if skills is not None else []),
         MemoryCapability(claimed.ctx.store, claimed.ctx.owner_id),
-        _sensitive_tool_guard(frozenset(claimed.ctx.sensitive_tools)),
+        _sensitive_tool_guard(
+            frozenset(claimed.ctx.sensitive_tools), fired_job=claimed.ctx.fired_job
+        ),
         ProcessHistory(foreign_tool_filter),
         tiered_compaction(target_fraction=0.8),
         ReportContextUsage(),

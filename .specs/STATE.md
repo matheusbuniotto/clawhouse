@@ -18,10 +18,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: native-model-messages
-**Where**: Completed and squashed into main (PR #107 closed issue #79)
-**In progress**: Idle / ready for next sub-issue in Epic #77 (Issue #83 [6/14])
-**Next step**: Plan feature for Issue #83
-**Blockers**: none
-**Uncommitted**: none
+**Feature**: fired-jobs
+**Where**: C1–C32 marked done; implementation on `main`, verification not written
+**In progress**: independent verification of `.specs/features/fired-jobs`
+**Next step**: fresh verifier writes `verification.md`; `validate_verification.py fired-jobs` must exit 0
+**Blockers**: go-live token for Sheets and `dbsql_query`; admin rights for notification destination `clawhouse-job-hook`
+**Uncommitted**: none after the feature commit
 **Branch**: main

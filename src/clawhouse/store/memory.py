@@ -1,5 +1,3 @@
-"""In-memory SessionStore implementation for tests and local development."""
-
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -7,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
+from clawhouse.store.fired_rows import FiredMemory
 from clawhouse.store.mappers import (
     _collect_session_activities,
     _memory_summary,
@@ -25,6 +24,8 @@ from clawhouse.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
     CustomAgent,
+    FiredDelivery,
+    FiredJob,
     MemoryEntry,
     ScheduleEntry,
     SearchHit,
@@ -48,7 +49,7 @@ class _MemorySession:
     messages: bytes | None = None
 
 
-class MemorySessionStore:
+class MemorySessionStore(FiredMemory):
     """In-process stand-in. `running` is the partial unique index."""
 
     def __init__(self, *, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
@@ -57,6 +58,8 @@ class MemorySessionStore:
         self._profiles: dict[str, UserProfile] = {}
         self._custom_agents: dict[str, list[CustomAgent]] = {}
         self._schedules: dict[str, ScheduleEntry] = {}
+        self._fired_jobs: dict[str, FiredJob] = {}
+        self._deliveries: dict[str, FiredDelivery] = {}
         self._memories: list[MemoryEntry] = []
         self._now = now
         self._lock = asyncio.Lock()
@@ -393,6 +396,3 @@ class MemorySessionStore:
         ]
         scored.sort(key=lambda item: (item[0], item[1].created_at), reverse=True)
         return tuple(r for _, r in scored[:limit])
-
-    async def close(self) -> None:
-        return None

@@ -50,6 +50,9 @@ class DatabricksTools:
         jobs_identity_resolver: Callable[[], JobsIdentity] | None = None,
         user_token: str = "",
         settings: Settings | None = None,
+        store: Any = None,
+        session_id: str = "",
+        owner_id: str = "",
     ) -> None:
         self.client = client
         self.warehouse_id = warehouse_id
@@ -57,6 +60,9 @@ class DatabricksTools:
         self._jobs_identity_resolver = jobs_identity_resolver
         self.user_token = user_token
         self.settings = settings
+        self.store = store
+        self.session_id = session_id
+        self.owner_id = owner_id
 
     def _resolve_jobs_identity(self) -> JobsIdentity:
         if self._jobs_identity is not None:
@@ -223,6 +229,35 @@ class DatabricksTools:
             instructions=instructions,
         )
 
+    async def jobs_schedule(  # noqa: PLR0913
+        self,
+        name: str,
+        kind: Literal["sql", "sql_agent", "agent"],
+        cron_expression: str,
+        slack_webhook_url: str,
+        *,
+        query: str = "",
+        agent_name: str = "",
+        instructions: str = "",
+        timezone_id: str = "UTC",
+        pause_status: Literal["PAUSED", "UNPAUSED"] = "UNPAUSED",
+    ) -> dict[str, object]:
+        """Schedule a fired job: raw SQL, SQL into a Clawhouse agent, or an agent run."""
+        from clawhouse.capabilities.fired import schedule_fired  # noqa: PLC0415
+
+        return await schedule_fired(
+            self,
+            name=name,
+            kind=kind,
+            cron_expression=cron_expression,
+            slack_webhook_url=slack_webhook_url,
+            query=query,
+            agent_name=agent_name,
+            instructions=instructions,
+            timezone_id=timezone_id,
+            pause_status=pause_status,
+        )
+
     async def jobs_delete(self, job_id: int) -> dict[str, object]:
         """Delete a Lakeflow job from the workspace."""
         return await jobs_client.jobs_delete(self, job_id)
@@ -311,4 +346,5 @@ class DatabricksTools:
             self.jobs_create,
             self.jobs_edit,
             self.jobs_delete,
+            self.jobs_schedule,
         ]

@@ -7,7 +7,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -128,7 +128,11 @@ async def run_scheduled_turn(
     """Run one due schedule and advance its next_run_at timestamp."""
     now = now_fn() if now_fn else datetime.now(UTC)
     ctx = make_turn_ctx(schedule)
+    fired = await store.fired_job_by_schedule(schedule.id)
+    if fired is not None:
+        ctx = replace(ctx, headless=True, fired_job=True)
     next_run = calculate_next_run(schedule.cron_expression, from_time=now)
+    slot = schedule.next_run_at
     try:
         result = await run_turn_fn(schedule.session_id, schedule.prompt, ctx)
     except Exception as exc:
@@ -150,6 +154,10 @@ async def run_scheduled_turn(
             last_status=status,
             last_error=error_msg,
         )
+        if fired is not None and result is not None and result.reply:
+            from clawhouse.capabilities.fired_hook import deliver_schedule_reply  # noqa: PLC0415
+
+            await deliver_schedule_reply(store, fired, slot, result.reply)
         return result
 
 

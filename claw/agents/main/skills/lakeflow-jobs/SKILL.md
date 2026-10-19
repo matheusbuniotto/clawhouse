@@ -37,6 +37,16 @@ Work with Lakeflow Jobs through these tools. Never guess a job id or run id: fin
 - `state_message` holds the failure reason. Quote it.
 - Call `jobs_get_run_output(run_id)` on completed runs to retrieve output logs, error traces, and SQL/agent outputs.
 
+## Fired jobs (`jobs_schedule`)
+
+Use `jobs_schedule` when the user wants a recurring result in Slack. Kinds are `sql`, `sql_agent`, and `agent`. These kinds do not use ai_query.
+
+- `sql`: the Lakeflow task is the user's SQL. On success, Slack gets the rows.
+- `sql_agent`: the same raw SQL, then a Clawhouse agent (`agent_name`) analyzes the result.
+- `agent`: no Databricks task. An app schedule runs that agent with `instructions`.
+
+Pass `cron_expression`, `slack_webhook_url` (https), and `query` for the SQL kinds. The call pauses for approval.
+
 ## Creating a Job
 
 - **Agentic Job (`task_type="agentic"`)**: Executes a query, feeds the result into Databricks Foundation Model (`ai_query`) with the delegated agent persona, and produces the output analysis. Provide `query`, `agent_name` (e.g. `TaxiAnalyst`), and optional `instructions`.

@@ -99,6 +99,35 @@ class SearchHit:
     created_at: datetime
 
 
+FiredKind = Literal["sql", "sql_agent", "agent"]
+
+
+@dataclass(frozen=True, slots=True)
+class FiredJob:
+    id: str
+    session_id: str
+    owner_id: str
+    kind: FiredKind
+    name: str
+    slack_webhook_url: str
+    instructions: str
+    agent_name: str | None = None
+    databricks_job_id: int | None = None
+    schedule_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FiredDelivery:
+    id: str
+    fired_job_id: str
+    databricks_job_id: int | None = None
+    run_id: int | None = None
+    event_type: str | None = None
+    schedule_id: str | None = None
+    next_run_at: datetime | None = None
+    sheet_status: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class ScheduleEntry:
     id: str

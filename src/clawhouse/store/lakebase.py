@@ -10,6 +10,7 @@ import asyncpg
 from clawhouse.store import mappers as _map
 from clawhouse.store import protocol as _proto
 from clawhouse.store import schema as _sql
+from clawhouse.store.fired_rows import FiredLakebase
 from clawhouse.store.shapes import (
     ApprovalEntry,
     ApprovalStatus,
@@ -26,7 +27,7 @@ from clawhouse.store.shapes import (
 logger = logging.getLogger(__name__)
 
 
-class LakebaseSessionStore:
+class LakebaseSessionStore(FiredLakebase):
     """Lakebase (Postgres) sessions, transcripts, and the running-run lock."""
 
     def __init__(self, pool: asyncpg.Pool) -> None:
