@@ -267,8 +267,10 @@ function ensureToolGroup(container) {
         return last;
     const group = el("details", "tool-group");
     const summary = el("summary", "tool-group-toggle");
-    summary.append(el("span", "tool-group-label", "See all"));
-    summary.append(el("span", "tool-group-count", "0"));
+    const icon = el("span", "tool-group-icon");
+    const label = el("span", "tool-group-label", "Expand tool calls");
+    const count = el("span", "tool-group-count", "0 calls");
+    summary.append(icon, label, count);
     group.append(summary);
     group.addEventListener("toggle", () => syncGroupLabel(group));
     container.append(group);
@@ -277,10 +279,11 @@ function ensureToolGroup(container) {
 function syncGroupLabel(group) {
     const label = group.querySelector(".tool-group-label");
     const count = group.querySelector(".tool-group-count");
+    const numRows = toolRowCount(group);
     if (label)
-        label.textContent = group.open ? "Hide all" : "See all";
+        label.textContent = group.open ? "Hide tool calls" : "Expand tool calls";
     if (count)
-        count.textContent = String(toolRowCount(group));
+        count.textContent = `${numRows} ${numRows === 1 ? "call" : "calls"}`;
 }
 function toolRowCount(group) {
     let count = 0;
