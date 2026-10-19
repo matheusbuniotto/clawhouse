@@ -139,7 +139,7 @@ test("a tool call becomes a collapsible row with a running chip and summary", ()
   expect(row.querySelector(".tool-body")?.contains(row.querySelector(".tool-input"))).toBe(true);
 });
 
-test("consecutive tool calls share one closed See all group", () => {
+test("consecutive tool calls share one closed tool group", () => {
   const host = document.createElement("div");
   appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });
   appendToolActivity(host, { event: "tool_result", name: "lookup", content: "1" });
@@ -150,13 +150,13 @@ test("consecutive tool calls share one closed See all group", () => {
   const group = host.querySelector(".tool-group") as HTMLDetailsElement;
   expect(group.open).toBe(false);
   expect(group.querySelectorAll(".tool-row")).toHaveLength(2);
-  expect(group.querySelector(".tool-group-label")?.textContent).toBe("See all");
-  expect(group.querySelector(".tool-group-count")?.textContent).toBe("2");
+  expect(group.querySelector(".tool-group-label")?.textContent).toBe("Expand tool calls");
+  expect(group.querySelector(".tool-group-count")?.textContent).toBe("2 calls");
 
   group.open = true;
   group.dispatchEvent(new Event("toggle"));
-  expect(group.querySelector(".tool-group-label")?.textContent).toBe("Hide all");
-  expect(group.querySelector(".tool-group-count")?.textContent).toBe("2");
+  expect(group.querySelector(".tool-group-label")?.textContent).toBe("Hide tool calls");
+  expect(group.querySelector(".tool-group-count")?.textContent).toBe("2 calls");
 });
 
 test("a break between tool calls starts another group", () => {

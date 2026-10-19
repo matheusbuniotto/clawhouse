@@ -94,7 +94,7 @@ test("an assistant turn splits tool calls into separate groups", async () => {
   expect(groups).toHaveLength(2);
   expect(groups[0].querySelectorAll(".tool-row")).toHaveLength(2);
   expect(groups[1].querySelectorAll(".tool-row")).toHaveLength(1);
-  expect(groups[0].querySelector(".tool-group-label")?.textContent).toBe("See all");
+  expect(groups[0].querySelector(".tool-group-label")?.textContent).toBe("Expand tool calls");
 });
 
 test("a pending approval on reload shows outside the closed tool group", async () => {
