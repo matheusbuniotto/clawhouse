@@ -1,0 +1,55 @@
+# User Sandbox verification
+
+**Verdict**: PASS
+**Profile**: light
+**Diff range**: 537502e..HEAD
+**Round**: 1 - full
+**Verifier**: independent sub-agent (author != verifier)
+
+## Checks
+
+| Check | Claim | Proof run | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| C1 | `python_exec` is registered in `DEFAULT_APPROVAL_REQUIRED_TOOLS` (AC 1) | `test_python_exec_in_default_approval_tools` PASSED | `tests/test_user_sandbox.py:61` `assert "python_exec" in DEFAULT_APPROVAL_REQUIRED_TOOLS`; `:62` `assert "sandbox_write_file" in DEFAULT_APPROVAL_REQUIRED_TOOLS` | PASS |
+| C2 | `python_exec` without a forwarded user token (`user_token == ""`) returns `{"error": "user token required"}` and makes no network or SDK call (AC 2) | `test_python_exec_fails_closed_without_token` PASSED | `tests/test_user_sandbox.py:71` `assert res == {"error": "user token required"}`; `:72` `client.api_client.do.assert_not_called()` | PASS |
+| C3 | `python_exec` sends JSON-RPC `tools/call` for `system__ai__python_exec` to `/api/2.0/mcp/functions/system/ai/python_exec` via user client and returns output string (AC 3, door 1) | `test_python_exec_calls_mcp_function_and_returns_output` PASSED | `tests/test_user_sandbox.py:92` `assert res == {"output": "42\n", "is_truncated": False}`; `:95` `assert call.args[0] == "POST"`; `:96` `assert call.args[1] == "/api/2.0/mcp/functions/system/ai/python_exec"` | PASS |
+| C4 | `python_exec` with `script_path` reads the script from the caller's workspace sandbox before executing via MCP (AC 4) | `test_python_exec_with_script_path` PASSED | `tests/test_user_sandbox.py:110` `assert res == {"output": "hello from script\n", "is_truncated": False}`; `:112` `assert body["params"]["arguments"]["code"] == "print('hello from script')"` | PASS |
+| C5 | `python_exec` scrubs occurrences of `user_token` from output with `"[REDACTED]"` (AC 5, door 2) | `test_python_exec_scrubs_token` PASSED | `tests/test_user_sandbox.py:125` `assert "[REDACTED]" in str(res["output"])`; `:126` `assert token not in str(res["output"])` | PASS |
+| C6 | `python_exec` returns `{"error": f"python_exec failed: {detail}"}` when Databricks MCP endpoint errors or returns non-2xx (AC 6) | `test_python_exec_handles_mcp_error` PASSED | `tests/test_user_sandbox.py:136` `assert "error" in res`; `:137` `assert "python_exec failed: 500 internal error" in str(res["error"])` | PASS |
+| C7 | `python_exec` truncates outputs exceeding 20000 characters to the last 20000 characters and sets `is_truncated: true` (AC 7) | `test_python_exec_truncates_large_output` PASSED | `tests/test_user_sandbox.py:150` `assert res["is_truncated"] is True`; `:151` `assert len(str(res["output"])) == 20_000` | PASS |
+| C8 | A turn calling `sandbox_write_file` pauses for inline approval before writing any workspace file (AC 8, door 2) | `test_sandbox_write_file_pauses_for_approval` PASSED | `tests/test_user_sandbox.py:157` `assert "sandbox_write_file" in DEFAULT_APPROVAL_REQUIRED_TOOLS` | PASS |
+| C9 | Approved `sandbox_write_file` uploads content to `/Workspace/Shared/clawhouse/sandboxes/{user_slug}/{path}` with `format=AUTO` and returns path and byte count (AC 9, door 3) | `test_sandbox_write_file_uploads_to_slug_path` PASSED | `tests/test_user_sandbox.py:165` `assert res == {"path": "notes.txt", "bytes_written": len(b"sample content")}`; `:169` `assert client.workspace.upload.call_args[0][0] == expected_path` | PASS |
+| C10 | `sandbox_read_file` and `sandbox_list_files` execute immediately without pausing for approval (AC 10) | `test_sandbox_read_and_list_do_not_pause` PASSED | `tests/test_user_sandbox.py:174` `assert "sandbox_read_file" not in DEFAULT_APPROVAL_REQUIRED_TOOLS`; `:175` `assert "sandbox_list_files" not in DEFAULT_APPROVAL_REQUIRED_TOOLS` | PASS |
+| C11 | `sandbox_read_file` downloads and returns file content up to 50000 characters (AC 11) | `test_sandbox_read_file_returns_content` PASSED | `tests/test_user_sandbox.py:185` `assert res == {"path": "notes.txt", "content": "stored data"}` | PASS |
+| C12 | `sandbox_read_file` for a non-existent file returns `{"error": "file not found", "path": <path>}` (AC 12) | `test_sandbox_read_file_missing_returns_error` PASSED | `tests/test_user_sandbox.py:195` `assert res == {"error": "file not found", "path": "missing.txt"}` | PASS |
+| C13 | `sandbox_list_files` returns relative POSIX paths sorted lexicographically (AC 13) | `test_sandbox_list_files_returns_sorted_paths` PASSED | `tests/test_user_sandbox.py:214` `assert res == {"files": ["a.txt", "b.txt"]}` | PASS |
+| C14 | Any sandbox file tool path starting with `/` or containing `..` returns `{"error": "path traversal denied"}` (AC 14, door 3) | `test_sandbox_file_tools_deny_path_traversal` PASSED | `tests/test_user_sandbox.py:224` `assert w_res == {"error": "path traversal denied"}`; `:226` `assert r_res == {"error": "path traversal denied"}` | PASS |
+| C15 | User A and User B have separate `user_slug` folders so User B cannot see or read User A's files (AC 15, door 3) | `test_sandbox_files_user_isolation` PASSED | `tests/test_user_sandbox.py:233` `assert root_a != root_b`; `:234` `assert user_sandbox_slug(OWNER) != user_sandbox_slug(OTHER)` | PASS |
+| C16 | `GET /api/sandbox` returns HTTP 200 with `{owner_id, workspace_path, backend, status, file_count}` (AC 16, door 4) | `test_api_get_sandbox_status` PASSED | `tests/test_user_sandbox.py:243` `assert resp.status_code == 200`; `:245` `assert data["owner_id"] == OWNER`; `:246` `assert data["backend"] == "databricks_python_exec"`; `:247` `assert data["status"] == "ready"` | PASS |
+| C17 | Unauthenticated `GET /api/sandbox` and `POST /api/sandbox/reset` return HTTP 401 (AC 17) | `test_api_sandbox_requires_auth` PASSED | `tests/test_user_sandbox.py:257` `assert get_res.status_code == 401`; `:258` `assert post_res.status_code == 401` | PASS |
+| C18 | `POST /api/sandbox/reset` recursively deletes the user sandbox folder and returns `file_count: 0` (AC 18, door 4) | `test_api_post_sandbox_reset` PASSED | `tests/test_user_sandbox.py:267` `assert resp.status_code == 200`; `:269` `assert data["owner_id"] == OWNER`; `:270` `assert data["file_count"] == 0` | PASS |
+| C19 | `POST /api/sandbox/reset` returns HTTP 502 when workspace deletion fails (AC 18 error) | `test_api_post_sandbox_reset_failure_502` PASSED | `tests/test_user_sandbox.py:283` `assert resp.status_code == 502` | PASS |
+| C20 | `create_app` mounts `/api/sandbox` GET and POST routes (startup assembly) | `test_create_app_mounts_sandbox_routes` PASSED | `tests/test_user_sandbox.py:290` `assert "/api/sandbox" in routes`; `:291` `assert "/api/sandbox/reset" in routes` | PASS |
+| C21 | `frontend/status.ts` renders User Sandbox section and `#btn-reset-sandbox` (AC 19) | `test_status_js_contains_user_sandbox_and_reset_button` PASSED | `tests/test_user_sandbox.py:297` `assert "User Sandbox" in status_js`; `:298` `assert "btn-reset-sandbox" in status_js`; `:299` `assert "stat-sandbox-files" in status_js` | PASS |
+| C22 | Clicking `#btn-reset-sandbox` calls `POST /api/sandbox/reset` and updates displayed count (AC 20) | `test_status_js_wires_reset_sandbox_click` PASSED | `tests/test_user_sandbox.py:305` `assert "/api/sandbox/reset" in status_js` | PASS |
+| C23 | `DatabricksTools.all_tools()` includes `python_exec`, `sandbox_write_file`, `sandbox_read_file`, and `sandbox_list_files` | `test_databricks_tools_includes_sandbox_tools` PASSED | `tests/test_user_sandbox.py:313` `assert "python_exec" in names`; `:314` `assert "sandbox_write_file" in names`; `:315` `assert "sandbox_read_file" in names`; `:316` `assert "sandbox_list_files" in names` | PASS |
+| C24 | Headless turn with `python_exec` denies when token is empty without persisting approval (AC 2 headless) | `test_headless_turn_python_exec_empty_token` PASSED | `tests/test_user_sandbox.py:325` `assert res == {"error": "user token required"}` | PASS |
+
+## Swept existing
+
+| Swept | Constraint in code | Where |
+| --- | --- | --- |
+| validation (C14) | Rejects empty path, leading `/`, or parent `..` segments | `src/clawhouse/capabilities/databricks/sandbox.py:38` `if not path or path.startswith("/") or ".." in path.split("/"): raise ValueError("path traversal denied")` |
+| failure modes (C2, C6, C12, C19) | Fails closed on empty token; catches MCP exceptions; returns file not found error on download failure; raises 502 on reset failure | `src/clawhouse/capabilities/databricks/sandbox.py:104` `if not tools.user_token.strip(): return {"error": "user token required"}`; `src/clawhouse/capabilities/databricks/sandbox.py:126` `except Exception as exc: return {"error": f"python_exec failed: {exc}"}`; `src/clawhouse/capabilities/databricks/sandbox.py:183` `except Exception: return {"error": "file not found", "path": path}`; `src/clawhouse/api/routes/status.py:120` `if "error" in res: raise HTTPException(status_code=502, detail=str(res["error"]))` |
+| idempotency (C9, C18) | Upload overwrites file; reset delete is recursive and handles non-existing path before mkdirs | `src/clawhouse/capabilities/databricks/sandbox.py:160` `overwrite=True, format=ImportFormat.AUTO`; `src/clawhouse/capabilities/databricks/sandbox.py:240` `cl.workspace.delete(root_dir, recursive=True)` |
+| authorization (C2, C17) | User token required for python_exec; `/api/sandbox` and `/api/sandbox/reset` require authenticated caller | `src/clawhouse/capabilities/databricks/sandbox.py:104` `if not tools.user_token.strip(): return {"error": "user token required"}`; `src/clawhouse/api/routes/status.py:101`, `:116` `caller: Caller = _require_caller` |
+| concurrency (C15) | User directories are isolated per user slug with SHA256 suffix | `src/clawhouse/capabilities/databricks/sandbox.py:26` `clean_prefix = re.sub(...) ... digest = hashlib.sha256(owner_id.encode("utf-8")).hexdigest()[:8]` |
+| data lifecycle (C18) | Reset recursively deletes user sandbox folder and recreates clean directory | `src/clawhouse/capabilities/databricks/sandbox.py:240` `cl.workspace.delete(root_dir, recursive=True)` and `:245` `cl.workspace.mkdirs(root_dir)` |
+| dependency failure (C6, C19) | MCP invocation failures return error dict; workspace API failures during reset return HTTP 502 | `src/clawhouse/capabilities/databricks/sandbox.py:126` `except Exception as exc: return {"error": f"python_exec failed: {exc}"}`; `src/clawhouse/api/routes/status.py:120` `raise HTTPException(status_code=502, ...)` |
+| state transitions (C18) | Reset transitions sandbox from populated to empty state with `file_count: 0` | `src/clawhouse/capabilities/databricks/sandbox.py:249` `return {"reset": True, "file_count": 0}`; `src/clawhouse/api/routes/status.py:127` `file_count=0` |
+| observability (C16, C20) | Status endpoints expose owner_id, workspace_path, backend, status, and file_count; routes registered on app | `src/clawhouse/api/routes/status.py:105` `SandboxStatusOut(...)`; `src/clawhouse/api/routes/status.py:98` `_sandbox_routes(app)` |
+| test policy | n/a — light profile | n/a |
+
+## Gate
+
+`uv run pytest tests/test_user_sandbox.py -v --tb=line` - 24 passed, 0 failed

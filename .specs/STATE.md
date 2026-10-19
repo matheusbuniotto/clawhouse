@@ -20,9 +20,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 ## Handoff
 
 **Feature**: user-sandbox
-**Where**: `.specs/features/user-sandbox/plan.md` drafted and validated; awaiting human review before `checks.md`
-**In progress**: plan review
-**Next step**: derive `.specs/features/user-sandbox/checks.md` and build once plan is approved
+**Where**: `.specs/features/user-sandbox/verification.md`
+**In progress**: none — complete
+**Verdict**: PASS (24/24 checks proven)
+**Next step**: ship / merge
 **Blockers**: none
-**Uncommitted**: `docs/adr/0010-user-sandbox-vm.md`, `.specs/features/user-sandbox/plan.md`, `.specs/STATE.md`
-**Branch**: main
+**Uncommitted**: none
+**Branch**: feat/demo-mode
