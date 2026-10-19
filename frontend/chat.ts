@@ -134,6 +134,13 @@ interface TranscriptBody {
   run_state?: string;
 }
 
+interface PendingApproval {
+  id?: string;
+  session_id: string;
+  tool_name?: string;
+  arguments?: string;
+}
+
 const WAITING_FOR_APPROVAL = "Ação aguardando aprovação acima.";
 const STILL_RUNNING = "O agente ainda está trabalhando nesta sessão…";
 const POLL_MS = 1500;
@@ -1002,16 +1009,41 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     setTimeout(() => void tick(), POLL_MS);
   }
 
+  function approvalAlreadyShown(root: ParentNode, approvalId: string): boolean {
+    for (const card of root.querySelectorAll<HTMLElement>(".approval-action-bar")) {
+      if (card.dataset.approvalId === approvalId) return true;
+    }
+    return false;
+  }
+
+  function onApprovalResolved(reply?: string): void {
+    if (reply) {
+      transcript.append(renderAssistantTurn(reply));
+      scrollToBottom();
+    }
+    setBlocked(null);
+  }
+
   async function loadPendingApprovals(): Promise<void> {
     try {
       const response = await fetch("/api/approvals");
       if (!response.ok) return;
-      const body = (await response.json()) as {
-        pending?: { session_id: string }[];
-      };
-      const mine = (body.pending ?? []).filter(
-        (a) => a.session_id === sessionId(),
-      );
+      const body = (await response.json()) as { pending?: PendingApproval[] };
+      const mine = (body.pending ?? []).filter((a) => a.session_id === sessionId());
+      let rendered = false;
+      for (const item of mine) {
+        if (!item.id || approvalAlreadyShown(transcript, item.id)) continue;
+        transcript.querySelector(".empty")?.remove();
+        renderInlineApproval(
+          transcript,
+          item.id,
+          item.tool_name ?? "tool",
+          onApprovalResolved,
+          item.arguments,
+        );
+        rendered = true;
+      }
+      if (rendered) scrollToBottom();
       if (mine.length > 0 && blocked === null) setBlocked(WAITING_FOR_APPROVAL);
     } catch {
       // The approvals screen still lists it.
@@ -1150,13 +1182,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         transcript,
         payload.approval_id ?? "",
         payload.name ?? "tool",
-        (reply) => {
-          if (reply) {
-            transcript.append(renderAssistantTurn(reply));
-            scrollToBottom();
-          }
-          setBlocked(null);
-        },
+        onApprovalResolved,
         payload.arguments,
       );
       scrollToBottom();
