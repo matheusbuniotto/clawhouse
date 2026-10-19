@@ -1,9 +1,16 @@
-.PHONY: all help check lint format test frontend-install frontend-check sync deploy logs status
+.PHONY: all help check lint format test frontend-install frontend-check sync deploy logs status demo
 
 APP_NAME ?= clawhouse
+DEMO_PORT ?= 8000
+# Where `make sync` uploads the app source. Resolution order:
+#   1. WORKSPACE_PATH, if you set it
+#   2. the deployed app's current source path (`databricks apps get`)
+#   3. /Workspace/Users/$(DATABRICKS_USER)/$(APP_NAME), where DATABRICKS_USER
+#      defaults to the CLI's signed-in user (`databricks current-user me`)
 WORKSPACE_PATH ?= $(shell databricks apps get $(APP_NAME) -o json 2>/dev/null | jq -r '.default_source_code_path // empty' 2>/dev/null)
 ifeq ($(strip $(WORKSPACE_PATH)),)
-WORKSPACE_PATH := /Workspace/Users/matheus.buniotto@gmail.com/clawhouse
+DATABRICKS_USER ?= $(shell databricks current-user me -o json 2>/dev/null | jq -r '.userName // empty' 2>/dev/null)
+WORKSPACE_PATH = /Workspace/Users/$(DATABRICKS_USER)/$(APP_NAME)
 endif
 
 # Default target runs the quality checks
@@ -19,6 +26,9 @@ help:
 	@echo "  make test       - Run test suite with uv run pytest"
 	@echo "  make frontend-install - npm ci for the frontend toolchain"
 	@echo "  make frontend-check   - Type-check (tsc) and run component tests (vitest)"
+	@echo ""
+	@echo "Try it:"
+	@echo "  make demo       - Run the chat with a scripted model: no keys, no Databricks (http://localhost:$(DEMO_PORT)/chat)"
 	@echo ""
 	@echo "Deployment targets:"
 	@echo "  make deploy     - Run quality checks, sync code, and deploy to Databricks Apps"
@@ -64,7 +74,21 @@ check:
 	uv run pytest
 	@$(MAKE) frontend-check
 
+demo:
+	@echo "==> Clawhouse demo mode: scripted model, in-memory store, no keys needed."
+	@echo "==> Open http://localhost:$(DEMO_PORT)/chat and send any message."
+	CLAWHOUSE_DEMO=1 \
+	CLAWHOUSE_STORE=memory \
+	CLAWHOUSE_DEV_USER=demo@example.com \
+	CLAWHOUSE_TELEMETRY=0 \
+	CLAWHOUSE_MLFLOW_TRACING=false \
+	MLFLOW_DISABLE_AGENT_HINT=1 \
+	uv run uvicorn clawhouse.api.app:app --port $(DEMO_PORT)
+
 sync:
+	@if [ -z "$(DATABRICKS_USER)" ] && [ "$(WORKSPACE_PATH)" = "/Workspace/Users//$(APP_NAME)" ]; then \
+		echo "Set WORKSPACE_PATH or DATABRICKS_USER (or sign in with the databricks CLI)."; exit 1; \
+	fi
 	@echo "==> Syncing files to Databricks workspace $(WORKSPACE_PATH)..."
 	databricks sync . $(WORKSPACE_PATH) \
 		--exclude ".git/**" \

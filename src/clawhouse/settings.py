@@ -7,11 +7,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TypeGuard
 
+from clawhouse.agent.demo import DEMO_APPROVAL_TOOL, demo_model_entry
 from clawhouse.agent.model import ModelEntry
 from clawhouse.capabilities.mcp import DuplicateMCPServerName, MCPServerConfig
 
 MODELS_ENV = "CLAWHOUSE_MODELS"
 MCP_SERVERS_ENV = "CLAWHOUSE_MCP_SERVERS"
+DEMO_ENV = "CLAWHOUSE_DEMO"
 DEFAULT_MODEL_ID = "databricks"
 
 
@@ -41,6 +43,7 @@ class Settings:
     jobs_sp_client_secret: str | None = None
     job_hook_password: str = ""
     app_base_url: str = ""
+    demo: bool = False
 
 
 def telemetry_enabled_from_env(env: Mapping[str, str]) -> bool:
@@ -61,7 +64,24 @@ def mlflow_enabled_from_env(env: Mapping[str, str]) -> bool:
     )
 
 
+def demo_enabled_from_env(env: Mapping[str, str]) -> bool:
+    """`CLAWHOUSE_DEMO=1` runs every turn on the scripted, keyless demo model."""
+    return env.get(DEMO_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def settings_from_env(env: Mapping[str, str]) -> Settings:
+    settings = _settings_from_env(env)
+    if not demo_enabled_from_env(env):
+        return settings
+    return replace(
+        settings,
+        demo=True,
+        models=(demo_model_entry(),),
+        sensitive_tools=(*settings.sensitive_tools, DEMO_APPROVAL_TOOL),
+    )
+
+
+def _settings_from_env(env: Mapping[str, str]) -> Settings:
     return Settings(
         dev_user=env.get("CLAWHOUSE_DEV_USER") or None,
         dev_token=env.get("DATABRICKS_TOKEN") or None,

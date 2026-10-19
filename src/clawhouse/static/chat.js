@@ -5,12 +5,27 @@ import { appendToolActivity, markRunningToolsError, renderAgentHeader, renderAss
 const SESSION_KEY = "clawhouse.session";
 const MODEL_KEY = "clawhouse.model";
 const WAITING_FOR_ANSWER = "Esperando sua resposta na pergunta acima.";
+export const NO_MODEL_HINT = "No model is connected. Set SERVING_ENDPOINT or CLAWHOUSE_MODELS, or run `make demo` to try Clawhouse with a scripted model and no keys.";
+/** The FastAPI `detail` string of an error response, when it has one. */
+async function errorDetail(response) {
+    try {
+        const body = (await response.json());
+        return typeof body?.detail === "string" ? body.detail : null;
+    }
+    catch {
+        return null;
+    }
+}
 function formatModelOption(id, label) {
     const idLower = id.toLowerCase();
     const labelLower = label.toLowerCase();
     let provider = "Databricks";
     let icon = "⚡";
-    if (idLower.includes("gpt") || idLower.includes("openai")) {
+    if (idLower === "demo") {
+        provider = "Demo";
+        icon = "🎬";
+    }
+    else if (idLower.includes("gpt") || idLower.includes("openai")) {
         provider = "OpenAI";
         icon = "❇️";
     }
@@ -728,6 +743,8 @@ export function mount(root, ctx) {
         const body = (await response.json());
         if (!body || !Array.isArray(body.models))
             return;
+        if (body.models.length === 0)
+            setStatus(NO_MODEL_HINT);
         const saved = sessionStorage.getItem(MODEL_KEY);
         modelPicker.replaceChildren();
         for (const option of body.models) {
@@ -840,7 +857,10 @@ export function mount(root, ctx) {
                 if (!item.id || approvalAlreadyShown(transcript, item.id))
                     continue;
                 transcript.querySelector(".empty")?.remove();
-                renderInlineApproval(transcript, item.id, item.tool_name ?? "tool", onApprovalResolved, item.arguments);
+                renderInlineApproval(transcript, item.id, item.tool_name ?? "tool", (reply) => {
+                    onApprovalResolved(reply);
+                    void resync();
+                }, item.arguments);
                 rendered = true;
             }
             if (rendered)
@@ -875,7 +895,25 @@ export function mount(root, ctx) {
         transcript.append(renderQuestionCard(question, onAnswered));
         scrollToBottom();
     }
+    /** A pending approval found on load or after a resume: Approve/Deny right in the chat. */
+    function showApproval(approval) {
+        if (!approval.id || transcript.querySelector(`[data-approval-id="${approval.id}"]`))
+            return;
+        const card = renderInlineApproval(transcript, approval.id, approval.tool_name ?? "tool", () => void resync(), approval.arguments);
+        card.dataset.approvalId = approval.id;
+        scrollToBottom();
+    }
+    /** Re-read the transcript after a resume so cards, tool rows and replies match the store. */
+    async function resync() {
+        setBlocked(null);
+        await loadTranscript();
+    }
     function onAnswered(result) {
+        if (result.status === "pending_approval" && result.pending.length === 0) {
+            // The answer led to a tool that needs approval: show its card.
+            void resync();
+            return;
+        }
         if (result.reply)
             transcript.append(renderAssistantTurn(result.reply));
         for (const question of result.pending)
@@ -1074,7 +1112,13 @@ export function mount(root, ctx) {
             }
             if (!response.ok) {
                 dropDraft();
-                setStatus("The turn could not be started.");
+                if (response.status === 503) {
+                    // No model is connected: nothing was saved, so keep the message.
+                    bubble.remove();
+                    if (!input.value)
+                        input.value = text;
+                }
+                setStatus((await errorDetail(response)) ?? "The turn could not be started.");
                 finished = true; // Reported above; not a broken stream.
                 return;
             }

@@ -51,14 +51,25 @@ variables:
     description: Secret key holding the extra-provider API key.
     default: openrouter-api-key
   sql_warehouse_id:
-    description: Databricks SQL Warehouse ID for SQL queries and SQL job tasks.
-    default: "95a46431cf830347"
+    description: >-
+      Databricks SQL Warehouse ID for SQL queries and SQL job tasks. Required:
+      pass --var sql_warehouse_id=<id> or export BUNDLE_VAR_sql_warehouse_id.
+  extra_models:
+    description: >-
+      JSON list of extra OpenAI-compatible models (CLAWHOUSE_MODELS), for example
+      an OpenRouter model that reads OPENROUTER_API_KEY. Empty list = Databricks
+      serving endpoint only. Override with BUNDLE_VAR_extra_models.
+    default: "[]"
+  mlflow_experiment:
+    description: >-
+      MLflow experiment for traces. Defaults to the deploying user's home folder.
+    default: /Users/${workspace.current_user.userName}/clawhouse-traces
 
 resources:
   apps:
     clawhouse:
       name: clawhouse
-      description: Databricks-native agent chat surface with a model picker.
+      description: Clawhouse for Databricks, an OpenClaw-style agent chat with a model picker.
       source_code_path: .
       user_api_scopes:
         - model-serving
@@ -82,7 +93,7 @@ resources:
           - name: OPENROUTER_API_KEY
             value_from: openrouter-api-key
           - name: CLAWHOUSE_MODELS
-            value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
+            value: ${var.extra_models}
           - name: DATABRICKS_WAREHOUSE_ID
             value: ${var.sql_warehouse_id}
           - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
@@ -92,7 +103,7 @@ resources:
           - name: MLFLOW_TRACKING_URI
             value: "databricks"
           - name: MLFLOW_EXPERIMENT_NAME
-            value: "/Users/matheus.buniotto@gmail.com/clawhouse-traces"
+            value: ${var.mlflow_experiment}
       resources:
         - name: serving-endpoint
           serving_endpoint:

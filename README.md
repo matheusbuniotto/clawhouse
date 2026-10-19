@@ -9,7 +9,17 @@
 
 ---
 
-## Quickstart
+## Try it in 60 seconds (no keys, no Databricks)
+
+```bash
+git clone https://github.com/matheusbuniotto/clawhouse.git && cd clawhouse
+uv sync
+make demo
+```
+
+Open **`http://localhost:8000/chat`** and send any message. Demo mode (`CLAWHOUSE_DEMO=1`) swaps the model for a scripted one, so you see the full turn loop with no account: streamed replies, a live progress card, a question card, and an approval card before a tool with side effects runs. Sessions live in memory and disappear when you stop the server.
+
+## Run locally with a real model
 
 ```bash
 uv sync
@@ -20,7 +30,7 @@ uv run uvicorn clawhouse.api.app:app --reload
 
 Open **`http://localhost:8000/chat`**.
 
-> Provide `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and `SERVING_ENDPOINT` (or `CLAWHOUSE_MODELS`) to run live turns locally.
+> Provide `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and `SERVING_ENDPOINT` for Databricks Model Serving, or `CLAWHOUSE_MODELS` for any OpenAI-compatible endpoint. If no model is connected, the chat tells you how to connect one (or to run `make demo`).
 
 ---
 
@@ -64,15 +74,16 @@ src/clawhouse/
 | `CLAWHOUSE_MCP_SERVERS` | JSON list of HTTPS MCP servers (`name`, `url`, `timeout_seconds`) |
 | `CLAWHOUSE_SENSITIVE_TOOLS` | Comma-separated list or JSON array of tool names requiring interactive approval |
 | `CLAWHOUSE_DEV_USER` | Local dev identity fallback when `X-Forwarded-Email` is absent |
+| `CLAWHOUSE_DEMO` | `1` runs every turn on a scripted, keyless demo model (used by `make demo`) |
 
 Example `CLAWHOUSE_MODELS`:
 
 ```bash
 export CLAWHOUSE_MODELS='[
   {
-    "id": "openai-gpt-6-luna",
-    "label": "GPT-6 Luna (OpenRouter)",
-    "model": "openai/gpt-6-luna",
+    "id": "openrouter-model",
+    "label": "My model (OpenRouter)",
+    "model": "<provider>/<model>",
     "base_url": "https://openrouter.ai/api/v1",
     "api_key_env": "OPENROUTER_API_KEY",
     "default": true
@@ -91,11 +102,24 @@ Direct sync and deploy to Databricks Apps:
 make deploy
 ```
 
+`make sync` uploads the source to the deployed app's current source path. For a first deploy it uses `/Workspace/Users/$DATABRICKS_USER/clawhouse`; `DATABRICKS_USER` defaults to the Databricks CLI's signed-in user. Set `WORKSPACE_PATH` to pick any other folder:
+
+```bash
+DATABRICKS_USER=you@example.com make deploy
+# or
+WORKSPACE_PATH=/Workspace/Users/you@example.com/clawhouse make deploy
+```
+
 Or deploy via Databricks Asset Bundles (DAB):
 
 ```bash
+export BUNDLE_VAR_sql_warehouse_id=<warehouse-id>          # required
+# optional: extra OpenAI-compatible models (reads OPENROUTER_API_KEY from the app secret)
+export BUNDLE_VAR_extra_models='[{"id":"openrouter-model","label":"My model (OpenRouter)","model":"<provider>/<model>","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
 databricks bundle deploy --profile <PROFILE>
 ```
+
+Bundle variables (`databricks.yml`): `serving_endpoint`, `postgres_branch`, `postgres_database`, `provider_secret_scope`, `provider_secret_key`, `sql_warehouse_id` (required), `extra_models` (default `[]`), and `mlflow_experiment` (default `/Users/<you>/clawhouse-traces`). Set any of them with `--var name=value` or `BUNDLE_VAR_<name>`.
 
 ---
 

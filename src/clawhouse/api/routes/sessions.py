@@ -45,6 +45,12 @@ from clawhouse.store.store import (
     SessionStore,
 )
 
+NO_MODEL_DETAIL = (
+    "No model is connected. Set SERVING_ENDPOINT (Databricks Model Serving) or "
+    "CLAWHOUSE_MODELS (any OpenAI-compatible endpoint), or run `make demo` to try "
+    "Clawhouse with a scripted model and no keys."
+)
+
 
 def _caller(request: Request) -> Caller:
     settings: Settings = request.app.state.settings
@@ -135,7 +141,7 @@ def _model_for_caller(request: Request, caller: Caller, model_id: str | None) ->
     except MissingModelConfig as exc:
         raise HTTPException(
             status_code=503,
-            detail="The model endpoint is not configured.",
+            detail=NO_MODEL_DETAIL,
         ) from exc
 
 
