@@ -1110,3 +1110,57 @@ async def test_api_jobs_displays_fired_agent_schedule_and_runs_it() -> None:
         ran = await http.post(f"/api/jobs/schedule:{schedule_id}/run")
         assert ran.status_code == 200
         assert ran.json()["id"] == f"schedule:{schedule_id}"
+
+
+async def test_scheduled_agent_run_now_has_databricks_sql_tools() -> None:
+    client = _db_client()
+    stmt_resp = MagicMock()
+    stmt_resp.manifest.schema.columns = [MagicMock(name="cnt")]
+    stmt_resp.result.data_array = [["3333"]]
+    stmt_resp.status.state = "SUCCEEDED"
+    client.statement_execution.execute_statement.return_value = stmt_resp
+    store = MemorySessionStore()
+    sch = await create_schedule_entry(
+        store,
+        session_id=SESSION,
+        owner_id=OWNER,
+        cron_expression="0 9 * * 1",
+        prompt="Analyze samples.bakehouse.sales_transactions",
+        now=NOW,
+    )
+    await store.insert_fired_job(
+        FiredJob(
+            id=str(uuid4()),
+            session_id=SESSION,
+            owner_id=OWNER,
+            kind="agent",
+            name="bakery-analysis",
+            slack_webhook_url="",
+            instructions="Analyze samples.bakehouse.sales_transactions",
+            agent_name="main",
+            schedule_id=sch.id,
+        )
+    )
+    sql_model = _calls_tool(
+        "dbsql_query", {"query": "SELECT count(*) AS cnt FROM samples.bakehouse.sales_transactions"}
+    )
+    run_paused = await run_turn(
+        SESSION,
+        "run test",
+        ctx=_ctx(
+            client,
+            store,
+            model=_calls_tool("jobs_run_now", {"schedule_id": sch.id}),
+            settings=_settings(),
+        ),
+    )
+    run_resumed = await resume_turn(
+        SESSION,
+        run_paused.approval_id or "",
+        "approved",
+        ctx=_ctx(client, store, model=sql_model, settings=_settings()),
+    )
+    payload = _tool_result(run_resumed)
+    assert payload["status"] == "ok"
+    assert payload["reply"] == "done"
+    assert client.statement_execution.execute_statement.call_count == 1

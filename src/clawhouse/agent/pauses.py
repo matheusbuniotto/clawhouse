@@ -46,18 +46,22 @@ DEFAULT_APPROVAL_REQUIRED_TOOLS = frozenset(
 )
 
 
+def _approval_or_block(*, fired_job: bool) -> GuardrailResult:
+    if fired_job:
+        return GuardrailResult.block(message="headless fired job: tool not approved")
+    return GuardrailResult.approve()
+
+
 def _sensitive_decision(
     call: ToolCallInfo, sensitive: frozenset[str], *, fired_job: bool
 ) -> GuardrailResult:
-    if call.name in sensitive and fired_job:
-        return GuardrailResult.block(message="headless fired job: tool not approved")
     if call.name in sensitive:
-        return GuardrailResult.approve()
+        return _approval_or_block(fired_job=fired_job)
     if call.name != "dbsql_query":
         return GuardrailResult.allow()
     args = call.args if isinstance(call.args, Mapping) else {}
     if not is_readonly_query(str(args.get("query", ""))):
-        return GuardrailResult.approve()
+        return _approval_or_block(fired_job=fired_job)
     return GuardrailResult.allow()
 
 

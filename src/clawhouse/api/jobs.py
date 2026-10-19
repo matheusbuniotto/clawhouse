@@ -148,7 +148,13 @@ def jobs_routes(
 
     @app.post("/api/jobs/{job_id}/run", response_model=RunOut)
     async def run_job(job_id: str, caller: Any = caller_dep) -> RunOut:
-        return await _run(app, jobs_for(caller), caller.user_id, job_id)
+        return await _run(
+            app,
+            jobs_for(caller),
+            caller.user_id,
+            job_id,
+            access_token=getattr(caller, "access_token", ""),
+        )
 
     @app.delete("/api/jobs/{job_id}", status_code=204)
     async def delete_job(job_id: str, caller: Any = caller_dep) -> Response:
@@ -156,7 +162,9 @@ def jobs_routes(
         return Response(status_code=204)
 
 
-async def _run_schedule(app: FastAPI, owner_id: str, job_id: str) -> RunOut:
+async def _run_schedule(
+    app: FastAPI, owner_id: str, job_id: str, *, access_token: str = ""
+) -> RunOut:
     raw = job_id.removeprefix(SCHEDULE_PREFIX)
     try:
         UUID(raw)
@@ -171,7 +179,7 @@ async def _run_schedule(app: FastAPI, owner_id: str, job_id: str) -> RunOut:
     from clawhouse.api.routes.schedules import scheduled_turn_context  # noqa: PLC0415
     from clawhouse.capabilities.schedules import _echo_turn, run_scheduled_turn  # noqa: PLC0415
 
-    ctx = scheduled_turn_context(app, target)
+    ctx = scheduled_turn_context(app, target, access_token=access_token)
     run_fn = (
         (lambda s_id, prompt, c: run_turn(s_id, prompt, ctx=c))
         if ctx.model is not None
@@ -181,10 +189,17 @@ async def _run_schedule(app: FastAPI, owner_id: str, job_id: str) -> RunOut:
     return RunOut(id=job_id, run_id=None)
 
 
-async def _run(app: FastAPI, jobs: DatabricksJobs, owner_id: str, job_id: str) -> RunOut:
+async def _run(
+    app: FastAPI,
+    jobs: DatabricksJobs,
+    owner_id: str,
+    job_id: str,
+    *,
+    access_token: str = "",
+) -> RunOut:
     """Start an immediate run for either an app schedule or a Databricks job."""
     if job_id.startswith(SCHEDULE_PREFIX):
-        return await _run_schedule(app, owner_id, job_id)
+        return await _run_schedule(app, owner_id, job_id, access_token=access_token)
     numeric = _databricks_id(job_id)
     try:
         run_id = await jobs.run_now(numeric)

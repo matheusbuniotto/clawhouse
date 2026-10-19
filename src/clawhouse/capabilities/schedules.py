@@ -214,6 +214,54 @@ async def _echo_turn(session_id: str, prompt: str) -> TurnResult:
     )
 
 
+def _databricks_cap_from_tools(tools: object, user_token: str) -> object:
+    from clawhouse.capabilities.databricks.capability import (  # noqa: PLC0415
+        DatabricksCapability,
+        default_workspace_client,
+    )
+
+    client = getattr(tools, "client", None)
+    settings = getattr(tools, "settings", None)
+    warehouse_id = getattr(tools, "warehouse_id", None)
+    if client is None and settings is None and not user_token:
+        return None
+    factory = (lambda _tok: client) if client is not None else default_workspace_client
+    return DatabricksCapability(
+        client_factory=factory,
+        warehouse_id=warehouse_id,
+        user_token=user_token,
+        settings=settings,
+    )
+
+
+def _tool_turn_context(
+    tools: object,
+    store: SessionStore,
+    sch: ScheduleEntry,
+    *,
+    agent_name: str | None,
+    now: datetime,
+) -> TurnContext:
+    from clawhouse.agent.turn import TurnContext as _TurnContext  # noqa: PLC0415
+
+    user_token = str(getattr(tools, "user_token", ""))
+    settings = getattr(tools, "settings", None)
+    return _TurnContext(
+        owner_id=sch.owner_id,
+        store=store,
+        model=getattr(tools, "model", None),  # type: ignore[arg-type]
+        now=lambda: now,
+        workspace=getattr(tools, "workspace", None),
+        mcp_servers=settings.mcp_servers if settings else (),
+        user_token=user_token,
+        sensitive_tools=settings.sensitive_tools if settings else (),
+        databricks_capability=_databricks_cap_from_tools(tools, user_token),  # type: ignore[arg-type]
+        headless=True,
+        fired_job=True,
+        default_agent=agent_name,
+    )
+
+
 async def _run_schedule_from_tool(
     tools: object, store: SessionStore, sch: ScheduleEntry, *, fired: object, now: datetime
 ) -> TurnResult | None:
@@ -236,17 +284,7 @@ async def _run_schedule_from_tool(
             sch,
             store,
             lambda _s_id, prompt, ctx: run_turn(temp.id, prompt, ctx=ctx),
-            lambda s: TurnContext(
-                owner_id=s.owner_id,
-                store=store,
-                model=model,
-                now=lambda: now,
-                workspace=getattr(tools, "workspace", None),
-                user_token=str(getattr(tools, "user_token", "")),
-                headless=True,
-                fired_job=True,
-                default_agent=agent_name,
-            ),
+            lambda s: _tool_turn_context(tools, store, s, agent_name=agent_name, now=now),
             now_fn=lambda: now,
         )
     finally:
