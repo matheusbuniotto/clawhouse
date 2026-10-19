@@ -312,7 +312,6 @@
 .tool-group > .tool-row {
   margin: 0;
   border: none;
-  border-radius: 0;
   border-top: 1px solid var(--border);
   background: transparent;
 }
