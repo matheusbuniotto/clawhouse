@@ -21,6 +21,7 @@ __all__ = [
     "HatchStatusOut",
     "ModelOptionOut",
     "QuestionOut",
+    "SandboxStatusOut",
     "ScheduleIn",
     "ScheduleOut",
     "SessionOut",
@@ -120,11 +121,20 @@ class ConnectionSnapshotOut(BaseModel):
     store_type: str
 
 
+class SandboxStatusOut(BaseModel):
+    owner_id: str
+    workspace_path: str
+    backend: str = "databricks_python_exec"
+    status: str = "ready"
+    file_count: int = 0
+
+
 class StatusOut(BaseModel):
     auth: AuthSnapshotOut
     connection: ConnectionSnapshotOut
     sessions: list[SessionOut]
     log_tail_url: str
+    sandbox: SandboxStatusOut | None = None
 
 
 class EntryOut(BaseModel):

@@ -23,6 +23,15 @@ from clawhouse.capabilities.databricks.jobs_client import (
     MissingJobsIdentityError,
     jobs_identity,
 )
+from clawhouse.capabilities.databricks.sandbox import (
+    python_exec,
+    sandbox_list_files,
+    sandbox_read_file,
+    sandbox_reset,
+    sandbox_write_file,
+    user_sandbox_root,
+    user_sandbox_slug,
+)
 from clawhouse.capabilities.databricks.sql_util import (
     build_agentic_query,
     enforce_query_limit,
@@ -47,9 +56,16 @@ __all__ = [
     "is_readonly_query",
     "jobs_identity",
     "os",
+    "python_exec",
     "resolve_warehouse_id",
+    "sandbox_list_files",
+    "sandbox_read_file",
+    "sandbox_reset",
+    "sandbox_write_file",
     "strip_sql_comments",
     "system_ai_format_delivery",
     "time",
     "to_quartz_cron",
+    "user_sandbox_root",
+    "user_sandbox_slug",
 ]

@@ -15,13 +15,14 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 | ADR-0007 | First-hatch customization via user workspace | User-specific instructions without redeploying backend | active | 2026-10-10 |
 | ADR-0008 | OpenTelemetry runtime telemetry with Logfire / OTLP fallback | First-party Pydantic AI instrumentation + zero heavy extra dependencies | active | 2026-10-16 |
 | ADR-0009 | User-code execution and estate reads use only the forwarded user token, fail closed | Ambient SP fallback is limited to platform-resource management | active | 2026-10-17 |
+| ADR-0010 | Databricks-native user sandbox via `system.ai.python_exec` and per-user Workspace files | Zero external VM infra; OBO-governed serverless Python execution + persistent Workspace file tree | active | 2026-10-19 |
 
 ## Handoff
 
-**Feature**: fired-jobs
-**Where**: C1–C32 committed in `0590223`; verification PASS, profile light
-**In progress**: none
-**Next step**: none for this feature
-**Blockers**: go-live token for Sheets and `dbsql_query`; admin rights for notification destination `clawhouse-job-hook`
-**Uncommitted**: none
+**Feature**: user-sandbox
+**Where**: `.specs/features/user-sandbox/plan.md` drafted and validated; awaiting human review before `checks.md`
+**In progress**: plan review
+**Next step**: derive `.specs/features/user-sandbox/checks.md` and build once plan is approved
+**Blockers**: none
+**Uncommitted**: `docs/adr/0010-user-sandbox-vm.md`, `.specs/features/user-sandbox/plan.md`, `.specs/STATE.md`
 **Branch**: main

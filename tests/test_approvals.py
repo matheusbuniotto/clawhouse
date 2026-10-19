@@ -655,6 +655,8 @@ def test_default_approval_required_tools_contents() -> None:
         "update_google_sheet",
         "run_python_analysis",
         "jobs_schedule",
+        "python_exec",
+        "sandbox_write_file",
     }
     assert expected == DEFAULT_APPROVAL_REQUIRED_TOOLS
 

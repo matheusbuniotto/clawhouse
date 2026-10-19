@@ -15,6 +15,7 @@ from clawhouse.capabilities.databricks import (
     jobs_client,
     jobs_tasks,
     python_analysis,
+    sandbox,
     warehouse,
 )
 from clawhouse.capabilities.databricks.jobs_client import (
@@ -338,6 +339,24 @@ class DatabricksTools:
             self, code, execution_id=execution_id, timeout_seconds=timeout_seconds
         )
 
+    async def python_exec(
+        self, code: str = "", *, script_path: str | None = None
+    ) -> dict[str, object]:
+        """Execute Python code in Databricks system.ai.python_exec native sandbox."""
+        return await sandbox.python_exec(self, code=code, script_path=script_path)
+
+    async def sandbox_write_file(self, path: str, content: str) -> dict[str, object]:
+        """Write or overwrite a file in the caller's workspace sandbox."""
+        return await sandbox.sandbox_write_file(self, path=path, content=content)
+
+    async def sandbox_read_file(self, path: str) -> dict[str, object]:
+        """Read a file from the caller's workspace sandbox."""
+        return await sandbox.sandbox_read_file(self, path=path)
+
+    async def sandbox_list_files(self, path: str = "") -> dict[str, object]:
+        """List files in the caller's workspace sandbox recursively."""
+        return await sandbox.sandbox_list_files(self, path=path)
+
     def all_tools(self) -> list[Callable[..., Any]]:
         return [
             self.uc_list_catalogs,
@@ -349,6 +368,10 @@ class DatabricksTools:
             self.uc_column_lineage,
             self.job_run_failure,
             self.run_python_analysis,
+            self.python_exec,
+            self.sandbox_write_file,
+            self.sandbox_read_file,
+            self.sandbox_list_files,
             self.dbsql_query,
             self.system_ai_query,
             self.system_ai_format_delivery,

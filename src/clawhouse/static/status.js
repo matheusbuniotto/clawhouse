@@ -32,6 +32,43 @@ export function mount(root) {
     const schedulesList = el("ul", "schedules-list");
     schedulesList.id = "schedules-list";
     schedules.append(schedulesList);
+    const sandboxSection = el("section", "status-section");
+    sandboxSection.append(el("h2", "", "User Sandbox"));
+    const sandboxCard = el("div", "status-card");
+    const sandboxGrid = el("dl", "status-grid");
+    const sandboxFields = [
+        ["Status", "stat-sandbox-status"],
+        ["Backend", "stat-sandbox-backend"],
+        ["Workspace path", "stat-sandbox-path"],
+        ["Files", "stat-sandbox-files"],
+    ];
+    for (const [label, id] of sandboxFields) {
+        sandboxGrid.append(el("dt", "", label));
+        const value = el("dd", "", "Loading…");
+        value.id = id;
+        values.set(id, value);
+        sandboxGrid.append(value);
+    }
+    sandboxCard.append(sandboxGrid);
+    const sandboxActions = el("p", "sandbox-actions-row");
+    const resetBtn = el("button", "btn-link", "Reset sandbox");
+    resetBtn.id = "btn-reset-sandbox";
+    resetBtn.type = "button";
+    resetBtn.addEventListener("click", async () => {
+        resetBtn.setAttribute("disabled", "true");
+        try {
+            const resp = await fetch("/api/sandbox/reset", { method: "POST" });
+            if (resp.ok) {
+                set("stat-sandbox-files", "0 files");
+            }
+        }
+        finally {
+            resetBtn.removeAttribute("disabled");
+        }
+    });
+    sandboxActions.append(resetBtn);
+    sandboxCard.append(sandboxActions);
+    sandboxSection.append(sandboxCard);
     const diagnostics = el("section", "status-section");
     diagnostics.append(el("h2", "", "Diagnostics & Logs"));
     const logCard = el("div", "status-card");
@@ -47,7 +84,7 @@ export function mount(root) {
     const statusLine = el("p", "status");
     statusLine.id = "status";
     statusLine.setAttribute("role", "status");
-    root.append(connection, runs, schedules, diagnostics, statusLine);
+    root.append(connection, sandboxSection, runs, schedules, diagnostics, statusLine);
     function set(id, text) {
         const node = values.get(id);
         if (node)
@@ -140,6 +177,12 @@ export function mount(root) {
             }
             const data = (await resp.json());
             renderAuthAndConnection(data.auth, data.connection);
+            if (data.sandbox) {
+                set("stat-sandbox-status", data.sandbox.status);
+                set("stat-sandbox-backend", data.sandbox.backend);
+                set("stat-sandbox-path", data.sandbox.workspace_path);
+                set("stat-sandbox-files", `${data.sandbox.file_count} files`);
+            }
             renderSessions(data.sessions);
             if (data.log_tail_url)
                 logTailLink.href = data.log_tail_url;
