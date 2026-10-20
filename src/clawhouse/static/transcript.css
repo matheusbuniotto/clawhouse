@@ -584,6 +584,22 @@
   border: 1px solid var(--warn);
   border-radius: var(--radius-sm);
   background: var(--warn-subtle);
+  transition: border-color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+}
+
+.approval-action-bar.resolving {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.approval-action-bar.resolved-ok {
+  border-color: var(--ok);
+  background: var(--ok-subtle);
+}
+
+.approval-action-bar.resolved-error {
+  border-color: var(--error);
+  background: var(--error-subtle);
 }
 
 .approval-msg {

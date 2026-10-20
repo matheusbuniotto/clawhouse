@@ -38,6 +38,8 @@ from clawhouse.capabilities.databricks import DatabricksCapability
 from clawhouse.settings import Settings, request_token
 from clawhouse.store.shapes import RunState, SessionSummary, TranscriptEntry
 from clawhouse.store.store import (
+    ApprovalAlreadyResolved,
+    ApprovalForbidden,
     ApprovalPending,
     RunInProgress,
     SessionForbidden,
@@ -145,26 +147,36 @@ def _model_for_caller(request: Request, caller: Caller, model_id: str | None) ->
         ) from exc
 
 
+def _turn_error_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, (SessionForbidden, ApprovalForbidden)):
+        return JSONResponse(status_code=403, content={"error": "You do not own this session."})
+    if isinstance(exc, ApprovalPending):
+        return JSONResponse(
+            status_code=409,
+            content={"error": "A tool call is pending approval for this session."},
+        )
+    if isinstance(exc, RunInProgress):
+        return JSONResponse(status_code=409, content={"error": BUSY_TURN})
+    if isinstance(exc, ApprovalAlreadyResolved):
+        return JSONResponse(status_code=409, content={"error": "Approval already resolved."})
+    return JSONResponse(status_code=422, content={"error": "Session id must be a UUID."})
+
+
 async def _first_item(
     iterator: AsyncGenerator[TurnNotice | TurnResult, None],
 ) -> TurnNotice | TurnResult | JSONResponse:
     try:
         return await anext(iterator)
-    except ApprovalPending:
+    except (
+        ApprovalPending,
+        RunInProgress,
+        SessionForbidden,
+        ApprovalForbidden,
+        ApprovalAlreadyResolved,
+        InvalidSessionId,
+    ) as exc:
         await iterator.aclose()
-        return JSONResponse(
-            status_code=409,
-            content={"error": "A tool call is pending approval for this session."},
-        )
-    except RunInProgress:
-        await iterator.aclose()
-        return JSONResponse(status_code=409, content={"error": BUSY_TURN})
-    except SessionForbidden:
-        await iterator.aclose()
-        return JSONResponse(status_code=403, content={"error": "You do not own this session."})
-    except InvalidSessionId:
-        await iterator.aclose()
-        return JSONResponse(status_code=422, content={"error": "Session id must be a UUID."})
+        return _turn_error_response(exc)
 
 
 def _build_turn_context(

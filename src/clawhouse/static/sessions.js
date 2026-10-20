@@ -29,18 +29,29 @@ export function mount(root) {
     const searchError = el("p", "sessions-error", "Search failed");
     searchError.hidden = true;
     toolbar.append(searchError);
+    let searchTimer = null;
+    let searchAbort = null;
     search.addEventListener("input", () => {
         const query = search.value.trim();
+        if (searchTimer)
+            clearTimeout(searchTimer);
+        if (searchAbort) {
+            searchAbort.abort();
+            searchAbort = null;
+        }
         if (query.length < 2) {
             searchError.hidden = true;
             updateFilter();
             return;
         }
-        void searchSessions(query);
+        searchTimer = setTimeout(() => {
+            void searchSessions(query);
+        }, 40);
     });
     async function searchSessions(query) {
+        searchAbort = new AbortController();
         try {
-            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { signal: searchAbort.signal });
             if (!response.ok)
                 throw new Error(String(response.status));
             const body = (await response.json());
@@ -58,7 +69,10 @@ export function mount(root) {
                 list.append(row);
             }
         }
-        catch {
+        catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+                return;
+            }
             searchError.hidden = false;
         }
     }

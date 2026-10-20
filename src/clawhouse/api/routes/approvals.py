@@ -3,15 +3,17 @@
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from clawhouse.agent.turn import (
     BUSY_TURN,
     Answer,
     canonical_session_id,
+    iter_resume_turn,
     resume_turn,
 )
 from clawhouse.api.identity import Caller
-from clawhouse.api.routes.sessions import _build_turn_context, _require_caller
+from clawhouse.api.routes.sessions import _build_turn_context, _first_item, _require_caller
 from clawhouse.api.schemas import (
     AnswerIn,
     AnswerOut,
@@ -20,6 +22,7 @@ from clawhouse.api.schemas import (
     ApprovalsListOut,
     QuestionOut,
 )
+from clawhouse.api.sse import SSE_HEADERS, _frames
 from clawhouse.capabilities.interaction import ASK_USER, InvalidAnswer, Question, check_answer
 from clawhouse.store.shapes import ApprovalEntry
 from clawhouse.store.store import (
@@ -151,6 +154,88 @@ async def _resolve_and_resume(
     )
 
 
+async def _stream_resolve(
+    request: Request,
+    approval_id: str,
+    decision: Literal["approved", "denied"],
+    caller: Caller,
+) -> Response:
+    store: SessionStore = request.app.state.store
+    try:
+        approval = await store.get_approval(approval_id)
+    except ApprovalNotFound as exc:
+        raise HTTPException(status_code=404, detail="Approval not found.") from exc
+
+    if approval.status != "pending":
+        raise HTTPException(status_code=409, detail="Approval already resolved.")
+    if approval.tool_name == ASK_USER:
+        raise HTTPException(status_code=409, detail="Questions are answered on their card.")
+
+    ctx = _build_turn_context(request, caller)
+    iterator = iter_resume_turn(
+        session_id=approval.session_id,
+        approval_id=approval_id,
+        decision=decision,
+        ctx=ctx,
+    )
+    first = await _first_item(iterator)
+    if isinstance(first, JSONResponse):
+        return first
+    return StreamingResponse(
+        _frames(iterator, first),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+async def _stream_answer(
+    request: Request,
+    question_id: str,
+    selected: list[str],
+    caller: Caller,
+) -> Response:
+    store: SessionStore = request.app.state.store
+    try:
+        entry = await store.get_approval(question_id)
+    except ApprovalNotFound as exc:
+        raise HTTPException(status_code=404, detail="Question not found.") from exc
+    if entry.tool_name != ASK_USER:
+        raise HTTPException(status_code=404, detail="Question not found.")
+    if entry.status != "pending":
+        raise HTTPException(status_code=409, detail="Question already answered.")
+    try:
+        picked = check_answer(Question.from_arguments(entry.arguments), selected)
+    except InvalidAnswer as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    ctx = _build_turn_context(request, caller)
+    iterator = iter_resume_turn(
+        session_id=entry.session_id,
+        approval_id=question_id,
+        decision=Answer(selected=picked),
+        ctx=ctx,
+    )
+    first = await _first_item(iterator)
+    if isinstance(first, JSONResponse):
+        return first
+    return StreamingResponse(
+        _frames(iterator, first),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+async def _handle_approval_decision(
+    request: Request,
+    approval_id: str,
+    decision: Literal["approved", "denied"],
+    caller: Caller,
+) -> Response | ApprovalActionOut:
+    if "text/event-stream" in request.headers.get("accept", ""):
+        return await _stream_resolve(request, approval_id, decision, caller)
+    return await _resolve_and_resume(request, approval_id, decision, caller)
+
+
 def _approval_routes(app: FastAPI) -> None:
     @app.get("/api/approvals")
     async def list_approvals(
@@ -163,21 +248,21 @@ def _approval_routes(app: FastAPI) -> None:
         history = [a for a in out if a.status != "pending"]
         return ApprovalsListOut(approvals=out, pending=pending, history=history)
 
-    @app.post("/api/approvals/{approval_id}/approve")
+    @app.post("/api/approvals/{approval_id}/approve", response_model=None)
     async def approve_tool(
         approval_id: str,
         request: Request,
         caller: Caller = _require_caller,
-    ) -> ApprovalActionOut:
-        return await _resolve_and_resume(request, approval_id, "approved", caller)
+    ) -> Response | ApprovalActionOut:
+        return await _handle_approval_decision(request, approval_id, "approved", caller)
 
-    @app.post("/api/approvals/{approval_id}/deny")
+    @app.post("/api/approvals/{approval_id}/deny", response_model=None)
     async def deny_tool(
         approval_id: str,
         request: Request,
         caller: Caller = _require_caller,
-    ) -> ApprovalActionOut:
-        return await _resolve_and_resume(request, approval_id, "denied", caller)
+    ) -> Response | ApprovalActionOut:
+        return await _handle_approval_decision(request, approval_id, "denied", caller)
 
 
 def _question_routes(app: FastAPI) -> None:
@@ -190,11 +275,13 @@ def _question_routes(app: FastAPI) -> None:
         canonical = canonical_session_id(session_id)
         return await _pending_questions(request.app.state.store, caller.user_id, canonical)
 
-    @app.post("/api/questions/{question_id}/answer")
+    @app.post("/api/questions/{question_id}/answer", response_model=None)
     async def answer_question(
         question_id: str,
         body: AnswerIn,
         request: Request,
         caller: Caller = _require_caller,
-    ) -> AnswerOut:
+    ) -> Response | AnswerOut:
+        if "text/event-stream" in request.headers.get("accept", ""):
+            return await _stream_answer(request, question_id, body.selected, caller)
         return await _answer_and_resume(request, question_id, body.selected, caller)

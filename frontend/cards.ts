@@ -64,6 +64,7 @@ function shell(question: QuestionCard): {
 export function renderQuestionCard(
   question: QuestionCard,
   onAnswered: (result: AnswerResult) => void,
+  onStream?: (response: Response) => Promise<boolean | void>,
 ): HTMLElement {
   const { card, options } = shell(question);
   card.dataset.state = "pending";
@@ -76,13 +77,18 @@ export function renderQuestionCard(
 
   async function send(selected: string[]): Promise<void> {
     for (const button of buttons) button.disabled = true;
+    markChosen(card, selected);
     note.textContent = "Enviando…";
     try {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (onStream) {
+        headers["Accept"] = "text/event-stream";
+      }
       const response = await fetch(
         `/api/questions/${encodeURIComponent(question.id)}/answer`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           body: JSON.stringify({ selected }),
         },
       );
@@ -91,14 +97,21 @@ export function renderQuestionCard(
         for (const button of buttons) button.disabled = false;
         return;
       }
-      const data = (await response.json()) as Partial<AnswerResult>;
-      markChosen(card, selected);
       note.textContent = "";
-      onAnswered({
-        status: data.status ?? "ok",
-        reply: data.reply ?? "",
-        pending: data.pending ?? [],
-      });
+      const contentType =
+        (typeof response.headers?.get === "function"
+          ? response.headers.get("content-type")
+          : "") ?? "";
+      if (contentType.includes("text/event-stream") && onStream) {
+        await onStream(response);
+      } else {
+        const data = (await response.json()) as Partial<AnswerResult>;
+        onAnswered({
+          status: data.status ?? "ok",
+          reply: data.reply ?? "",
+          pending: data.pending ?? [],
+        });
+      }
     } catch {
       note.textContent = "Erro de rede ao enviar a resposta.";
       for (const button of buttons) button.disabled = false;

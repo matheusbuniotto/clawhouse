@@ -36,7 +36,7 @@ function shell(question) {
  * toggles options and sends on "Enviar". The answer goes back as the tool
  * result, never as a user message.
  */
-export function renderQuestionCard(question, onAnswered) {
+export function renderQuestionCard(question, onAnswered, onStream) {
     const { card, options } = shell(question);
     card.dataset.state = "pending";
     const note = el("p", "question-note");
@@ -46,11 +46,16 @@ export function renderQuestionCard(question, onAnswered) {
     async function send(selected) {
         for (const button of buttons)
             button.disabled = true;
+        markChosen(card, selected);
         note.textContent = "Enviando…";
         try {
+            const headers = { "content-type": "application/json" };
+            if (onStream) {
+                headers["Accept"] = "text/event-stream";
+            }
             const response = await fetch(`/api/questions/${encodeURIComponent(question.id)}/answer`, {
                 method: "POST",
-                headers: { "content-type": "application/json" },
+                headers,
                 body: JSON.stringify({ selected }),
             });
             if (!response.ok) {
@@ -59,14 +64,21 @@ export function renderQuestionCard(question, onAnswered) {
                     button.disabled = false;
                 return;
             }
-            const data = (await response.json());
-            markChosen(card, selected);
             note.textContent = "";
-            onAnswered({
-                status: data.status ?? "ok",
-                reply: data.reply ?? "",
-                pending: data.pending ?? [],
-            });
+            const contentType = (typeof response.headers?.get === "function"
+                ? response.headers.get("content-type")
+                : "") ?? "";
+            if (contentType.includes("text/event-stream") && onStream) {
+                await onStream(response);
+            }
+            else {
+                const data = (await response.json());
+                onAnswered({
+                    status: data.status ?? "ok",
+                    reply: data.reply ?? "",
+                    pending: data.pending ?? [],
+                });
+            }
         }
         catch {
             note.textContent = "Erro de rede ao enviar a resposta.";

@@ -301,17 +301,28 @@ export function mountShell(root = document) {
             sessionList.append(container);
         }
     }
+    let lastSessionKey = "";
     async function loadSessions() {
         try {
             const response = await fetch("/api/sessions");
             if (!response.ok) {
+                lastSessionKey = "";
                 renderSessions([]);
                 return;
             }
             const body = (await response.json());
-            renderSessions(body.sessions ?? []);
+            const sessions = body.sessions ?? [];
+            const sessionKey = sessions
+                .map((s) => `${s.id}:${s.title}:${s.run_state}:${s.created_at}`)
+                .join(";");
+            if (sessionKey === lastSessionKey) {
+                return;
+            }
+            lastSessionKey = sessionKey;
+            renderSessions(sessions);
         }
         catch {
+            lastSessionKey = "";
             renderSessions([]);
         }
     }

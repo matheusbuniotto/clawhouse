@@ -38,6 +38,8 @@ export function mount(root) {
             approveBtn.addEventListener("click", async () => {
                 approveBtn.disabled = true;
                 denyBtn.disabled = true;
+                approveBtn.textContent = "Approving…";
+                card.classList.add("resolving");
                 statusLine.textContent = `Approving ${item.tool_name}…`;
                 const res = await fetch(`/api/approvals/${item.id}/approve`, { method: "POST" });
                 if (res.ok) {
@@ -46,6 +48,8 @@ export function mount(root) {
                 }
                 else {
                     statusLine.textContent = "Failed to approve tool call.";
+                    card.classList.remove("resolving");
+                    approveBtn.textContent = "Approve";
                     approveBtn.disabled = false;
                     denyBtn.disabled = false;
                 }
@@ -53,6 +57,8 @@ export function mount(root) {
             denyBtn.addEventListener("click", async () => {
                 approveBtn.disabled = true;
                 denyBtn.disabled = true;
+                denyBtn.textContent = "Denying…";
+                card.classList.add("resolving");
                 statusLine.textContent = `Denying ${item.tool_name}…`;
                 const res = await fetch(`/api/approvals/${item.id}/deny`, { method: "POST" });
                 if (res.ok) {
@@ -61,6 +67,8 @@ export function mount(root) {
                 }
                 else {
                     statusLine.textContent = "Failed to deny tool call.";
+                    card.classList.remove("resolving");
+                    denyBtn.textContent = "Deny";
                     approveBtn.disabled = false;
                     denyBtn.disabled = false;
                 }

@@ -557,6 +557,7 @@ export function mount(root, ctx) {
             setStatus("The transcript could not be cleared.");
             return;
         }
+        lastRenderedEntries = [];
         transcript.replaceChildren(renderNotice("Transcript cleared."));
         void loadTitle();
     }
@@ -630,7 +631,28 @@ export function mount(root, ctx) {
             content: entry.content,
         });
     }
+    let lastRenderedEntries = [];
+    function entriesIdentical(a, b) {
+        if (a.length !== b.length)
+            return false;
+        for (let i = a.length - 1; i >= 0; i--) {
+            const ea = a[i];
+            const eb = b[i];
+            if (ea.role !== eb.role ||
+                ea.content !== eb.content ||
+                ea.tool_name !== eb.tool_name ||
+                ea.agent_id !== eb.agent_id ||
+                ea.model !== eb.model) {
+                return false;
+            }
+        }
+        return true;
+    }
     function renderTranscript(entries) {
+        if (!liveTurn && lastRenderedEntries.length > 0 && entriesIdentical(lastRenderedEntries, entries)) {
+            return;
+        }
+        lastRenderedEntries = [...entries];
         // A message sent before the first load landed stays on screen, after the history.
         const live = liveTurn ? [...transcript.childNodes] : [];
         if (liveTurn) {
@@ -793,8 +815,7 @@ export function mount(root, ctx) {
             followRunningTurn();
             return;
         }
-        await loadPendingQuestions();
-        await loadPendingApprovals();
+        await Promise.all([loadPendingQuestions(), loadPendingApprovals()]);
     }
     /** After a reload mid-turn: keep the composer closed and poll until the turn settles. */
     function followRunningTurn() {
@@ -816,8 +837,7 @@ export function mount(root, ctx) {
                         renderTranscript(body.entries ?? []);
                         setBusy(false);
                         setStatus("");
-                        await loadPendingQuestions();
-                        await loadPendingApprovals();
+                        await Promise.all([loadPendingQuestions(), loadPendingApprovals()]);
                         return;
                     }
                     renderTranscript(body.entries ?? []);
@@ -837,6 +857,27 @@ export function mount(root, ctx) {
                 return true;
         }
         return false;
+    }
+    async function handleStreamResume(response) {
+        setBusy(true);
+        setStatus("");
+        showThinking();
+        try {
+            await readSse(response);
+        }
+        catch {
+            dropDraft();
+            setStatus("The resumed turn could not be completed.");
+        }
+        finally {
+            controller = null;
+            setBusy(false);
+            setBlocked(null);
+            if (blocked !== null)
+                setStatus(blocked);
+            else
+                input.focus();
+        }
     }
     function onApprovalResolved(reply) {
         if (reply) {
@@ -860,7 +901,7 @@ export function mount(root, ctx) {
                 renderInlineApproval(transcript, item.id, item.tool_name ?? "tool", (reply) => {
                     onApprovalResolved(reply);
                     void resync();
-                }, item.arguments);
+                }, item.arguments, handleStreamResume);
                 rendered = true;
             }
             if (rendered)
@@ -892,14 +933,14 @@ export function mount(root, ctx) {
     function showQuestion(question) {
         if (draft?.classList.contains("thinking"))
             dropDraft();
-        transcript.append(renderQuestionCard(question, onAnswered));
+        transcript.append(renderQuestionCard(question, onAnswered, handleStreamResume));
         scrollToBottom();
     }
     /** A pending approval found on load or after a resume: Approve/Deny right in the chat. */
     function showApproval(approval) {
         if (!approval.id || transcript.querySelector(`[data-approval-id="${approval.id}"]`))
             return;
-        const card = renderInlineApproval(transcript, approval.id, approval.tool_name ?? "tool", () => void resync(), approval.arguments);
+        const card = renderInlineApproval(transcript, approval.id, approval.tool_name ?? "tool", () => void resync(), approval.arguments, handleStreamResume);
         card.dataset.approvalId = approval.id;
         scrollToBottom();
     }
@@ -1000,7 +1041,7 @@ export function mount(root, ctx) {
             if (draft?.classList.contains("thinking")) {
                 dropDraft();
             }
-            renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", onApprovalResolved, payload.arguments);
+            renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", onApprovalResolved, payload.arguments, handleStreamResume);
             scrollToBottom();
             return;
         }
@@ -1076,6 +1117,7 @@ export function mount(root, ctx) {
         }
         questionAsked = false;
         liveTurn = text;
+        lastRenderedEntries = [];
         setBusy(true);
         setStatus("");
         controller = new AbortController();
@@ -1102,8 +1144,7 @@ export function mount(root, ctx) {
             if (response.status === 409) {
                 // Nothing was saved: take the message back so it is not lost.
                 bubble.remove();
-                if (!input.value)
-                    input.value = text;
+                input.value = text;
                 dropDraft();
                 const body = (await response.json());
                 setStatus(body.error ?? "A turn is already running for this session.");
@@ -1390,7 +1431,7 @@ export function mount(root, ctx) {
             const hatchData = (await hatchRes.json());
             const sessionsData = (await sessionsRes.json());
             const hasSessions = (sessionsData.sessions?.length ?? 0) > 0;
-            if (!hatchData.hatched && !hasSessions && !input.value) {
+            if (!hatchData.hatched && !hasSessions && !input.value && !liveTurn) {
                 input.value = "Wake up, my friend!";
                 grow();
             }
@@ -1401,6 +1442,6 @@ export function mount(root, ctx) {
     }
     void loadModels();
     void loadTitle();
-    void loadAgents().then(loadTranscript);
+    void Promise.all([loadAgents(), loadTranscript()]);
     void checkHatchDraft();
 }
