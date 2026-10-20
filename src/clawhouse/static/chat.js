@@ -225,6 +225,7 @@ export function mount(root, ctx) {
     let draft = null;
     let blocked = null;
     let running = false;
+    let currentExecutingTool = null;
     let liveTurn = null;
     let polling = false;
     let questionAsked = false;
@@ -357,10 +358,53 @@ export function mount(root, ctx) {
         input.placeholder = `Prompt ${currentAgentName}...`;
         capsuleAgentLabel.textContent = `${emoji} ${currentAgentName}`;
     }
-    function updateDraftStatus() {
+    function syncComposerState() {
+        if (blocked !== null) {
+            form.dataset.blocked = "true";
+            capsuleDraftBadge.classList.remove("is-running", "has-draft");
+            capsulePulse.classList.add("paused");
+            capsulePulse.classList.remove("active");
+            if (blocked === WAITING_FOR_APPROVAL) {
+                capsuleDraftBadge.classList.add("needs-approval");
+                capsuleDraftBadge.classList.remove("needs-answer");
+                capsuleDraftText.textContent = "Action waiting for approval";
+                input.placeholder = "Action waiting for approval above…";
+            }
+            else if (blocked === WAITING_FOR_ANSWER) {
+                capsuleDraftBadge.classList.add("needs-answer");
+                capsuleDraftBadge.classList.remove("needs-approval");
+                capsuleDraftText.textContent = "Waiting for answer";
+                input.placeholder = "Please answer the question above…";
+            }
+            else {
+                capsuleDraftText.textContent = blocked;
+            }
+            return;
+        }
+        form.dataset.blocked = "";
+        capsuleDraftBadge.classList.remove("needs-approval", "needs-answer");
+        if (running) {
+            form.dataset.busy = "true";
+            capsuleDraftBadge.classList.add("is-running");
+            capsuleDraftBadge.classList.remove("has-draft");
+            capsulePulse.classList.add("active");
+            capsulePulse.classList.remove("paused");
+            if (currentExecutingTool) {
+                capsuleDraftText.textContent = `Running ${currentExecutingTool}…`;
+                input.placeholder = `${currentExecutingTool} running…`;
+            }
+            else {
+                capsuleDraftText.textContent = "Agent is working…";
+                input.placeholder = `${currentAgentName} is working…`;
+            }
+            return;
+        }
+        form.dataset.busy = "";
+        capsuleDraftBadge.classList.remove("is-running");
+        capsulePulse.classList.remove("active", "paused");
+        updatePlaceholder();
         const val = input.value.trim();
-        const hasText = val.length > 0;
-        if (hasText) {
+        if (val.length > 0) {
             const wordCount = val.split(/\s+/).filter(Boolean).length;
             capsuleDraftBadge.classList.add("has-draft");
             capsuleDraftText.textContent = `Typing · not sent (${wordCount} words)`;
@@ -369,6 +413,9 @@ export function mount(root, ctx) {
             capsuleDraftBadge.classList.remove("has-draft");
             capsuleDraftText.textContent = "Ready";
         }
+    }
+    function updateDraftStatus() {
+        syncComposerState();
     }
     function selectAgent(name, emoji) {
         currentAgentName = name;
@@ -480,10 +527,19 @@ export function mount(root, ctx) {
         if (distanceFromBottom > 40) {
             userScrolledUp = true;
             scrollBottomBtn.hidden = false;
+            if (blocked === WAITING_FOR_APPROVAL) {
+                scrollBottomBtn.classList.add("has-approval");
+                scrollBottomBtn.title = "Action waiting for approval below";
+            }
+            else {
+                scrollBottomBtn.classList.remove("has-approval");
+                scrollBottomBtn.title = "Scroll to bottom";
+            }
         }
         else if (distanceFromBottom <= 40) {
             userScrolledUp = false;
             scrollBottomBtn.hidden = true;
+            scrollBottomBtn.classList.remove("has-approval");
         }
     }
     transcript.addEventListener("scroll", () => {
@@ -509,10 +565,16 @@ export function mount(root, ctx) {
         transcript.scrollTop = transcript.scrollHeight;
         userScrolledUp = false;
         scrollBottomBtn.hidden = true;
+        scrollBottomBtn.classList.remove("has-approval");
     });
     function scrollToBottom(force = false) {
         if (force || !userScrolledUp) {
             transcript.scrollTop = transcript.scrollHeight;
+            if (force) {
+                userScrolledUp = false;
+                scrollBottomBtn.hidden = true;
+                scrollBottomBtn.classList.remove("has-approval");
+            }
         }
     }
     const DRAFT_PREFIX = "clawhouse.draft.";
@@ -786,6 +848,8 @@ export function mount(root, ctx) {
         flushTokenRender();
         const text = reply || draftText;
         dropDraft();
+        if (!text.trim())
+            return;
         transcript.append(renderAssistantTurn(text));
     }
     function grow() {
@@ -798,9 +862,18 @@ export function mount(root, ctx) {
         sendButton.disabled = busy || blocked !== null;
         modelPicker.disabled = busy;
         abortButton.hidden = !busy;
+        syncComposerState();
     }
     function setStatus(text) {
         statusLine.textContent = text;
+        if (!text) {
+            statusLine.removeAttribute("data-kind");
+            return;
+        }
+        const isError = text.toLowerCase().includes("failed") ||
+            text.toLowerCase().includes("error") ||
+            text.toLowerCase().includes("could not");
+        statusLine.dataset.kind = isError ? "error" : "info";
     }
     /** A pending question or approval holds the session: no new message until it is resolved. */
     function setBlocked(reason) {
@@ -809,6 +882,7 @@ export function mount(root, ctx) {
         sendButton.disabled = running || reason !== null;
         form.dataset.blocked = reason === null ? "" : "true";
         setStatus(reason ?? "");
+        syncComposerState();
     }
     async function loadModels() {
         const response = await fetch("/api/models");
@@ -913,7 +987,7 @@ export function mount(root, ctx) {
     async function handleStreamResume(response) {
         setBusy(true);
         setStatus("");
-        showThinking();
+        showThinking("Executing approved tool…");
         try {
             await readSse(response);
         }
@@ -923,6 +997,7 @@ export function mount(root, ctx) {
         }
         finally {
             controller = null;
+            currentExecutingTool = null;
             setBusy(false);
             setBlocked(null);
             if (blocked !== null)
@@ -932,10 +1007,11 @@ export function mount(root, ctx) {
         }
     }
     function onApprovalResolved(reply) {
-        if (reply) {
+        if (reply && reply.trim()) {
             transcript.append(renderAssistantTurn(reply));
             scrollToBottom();
         }
+        currentExecutingTool = null;
         setBlocked(null);
     }
     async function loadPendingApprovals() {
@@ -1082,12 +1158,14 @@ export function mount(root, ctx) {
             if (draft?.classList.contains("thinking")) {
                 dropDraft();
             }
+            currentExecutingTool = payload.name ?? "tool";
             appendToolActivity(transcript, {
                 event: "tool_call",
                 name: payload.name ?? "tool",
                 arguments: payload.arguments ?? "",
             });
             showThinking(`Executing ${payload.name ?? "tool"}`);
+            syncComposerState();
             scrollToBottom();
             return;
         }
@@ -1096,18 +1174,23 @@ export function mount(root, ctx) {
             if (draft?.classList.contains("thinking")) {
                 dropDraft();
             }
+            currentExecutingTool = null;
             renderInlineApproval(transcript, payload.approval_id ?? "", payload.name ?? "tool", onApprovalResolved, payload.arguments, handleStreamResume);
-            scrollToBottom();
+            setBlocked(WAITING_FOR_APPROVAL);
+            syncComposerState();
+            scrollToBottom(true);
             return;
         }
         if (frame.event === "tool_result") {
             flushTokenRender();
+            currentExecutingTool = null;
             appendToolActivity(transcript, {
                 event: "tool_result",
                 name: payload.name ?? "tool",
                 content: payload.content ?? "",
             });
             showThinking("Thinking");
+            syncComposerState();
             scrollToBottom();
             return;
         }
@@ -1122,6 +1205,7 @@ export function mount(root, ctx) {
         }
         if (frame.event === "done") {
             flushTokenRender();
+            currentExecutingTool = null;
             commitReply(payload.reply ?? "");
             if (payload.status === "pending_approval" && questionAsked) {
                 setBlocked(WAITING_FOR_ANSWER);
@@ -1131,15 +1215,19 @@ export function mount(root, ctx) {
             }
             else {
                 setStatus("");
+                setBlocked(null);
             }
+            syncComposerState();
             return;
         }
         if (frame.event === "error") {
             flushTokenRender();
+            currentExecutingTool = null;
             const failure = payload.error ?? "The turn failed before a reply was completed.";
             markRunningToolsError(transcript, failure);
             dropDraft();
             setStatus(failure);
+            syncComposerState();
         }
     }
     async function readSse(response) {
@@ -1234,6 +1322,7 @@ export function mount(root, ctx) {
             }
             controller = null;
             liveTurn = null;
+            currentExecutingTool = null;
             setBusy(false);
             if (!sessionTitle)
                 void loadTitle();

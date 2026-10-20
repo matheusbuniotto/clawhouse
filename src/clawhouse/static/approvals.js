@@ -41,13 +41,22 @@ export function mount(root) {
                 approveBtn.textContent = "Approving…";
                 card.classList.add("resolving");
                 statusLine.textContent = `Approving ${item.tool_name}…`;
-                const res = await fetch(`/api/approvals/${item.id}/approve`, { method: "POST" });
-                if (res.ok) {
-                    statusLine.textContent = `Approved ${item.tool_name}.`;
-                    await load();
+                try {
+                    const res = await fetch(`/api/approvals/${item.id}/approve`, { method: "POST" });
+                    if (res.ok) {
+                        statusLine.textContent = `Approved ${item.tool_name}.`;
+                        await load();
+                    }
+                    else {
+                        statusLine.textContent = "Failed to approve tool call.";
+                        card.classList.remove("resolving");
+                        approveBtn.textContent = "Approve";
+                        approveBtn.disabled = false;
+                        denyBtn.disabled = false;
+                    }
                 }
-                else {
-                    statusLine.textContent = "Failed to approve tool call.";
+                catch {
+                    statusLine.textContent = "Network error while approving tool call.";
                     card.classList.remove("resolving");
                     approveBtn.textContent = "Approve";
                     approveBtn.disabled = false;
@@ -60,13 +69,22 @@ export function mount(root) {
                 denyBtn.textContent = "Denying…";
                 card.classList.add("resolving");
                 statusLine.textContent = `Denying ${item.tool_name}…`;
-                const res = await fetch(`/api/approvals/${item.id}/deny`, { method: "POST" });
-                if (res.ok) {
-                    statusLine.textContent = `Denied ${item.tool_name}.`;
-                    await load();
+                try {
+                    const res = await fetch(`/api/approvals/${item.id}/deny`, { method: "POST" });
+                    if (res.ok) {
+                        statusLine.textContent = `Denied ${item.tool_name}.`;
+                        await load();
+                    }
+                    else {
+                        statusLine.textContent = "Failed to deny tool call.";
+                        card.classList.remove("resolving");
+                        denyBtn.textContent = "Deny";
+                        approveBtn.disabled = false;
+                        denyBtn.disabled = false;
+                    }
                 }
-                else {
-                    statusLine.textContent = "Failed to deny tool call.";
+                catch {
+                    statusLine.textContent = "Network error while denying tool call.";
                     card.classList.remove("resolving");
                     denyBtn.textContent = "Deny";
                     approveBtn.disabled = false;

@@ -99,6 +99,16 @@ const STATUS_LABEL: Record<ActivityState, string> = {
   pending: "Approval Needed",
 };
 
+function genericArgumentsPreview(raw: string | undefined): HTMLElement | null {
+  const data = parseObject(raw);
+  if (!data || Object.keys(data).length === 0) return null;
+  const wrap = el("details", "approval-params-disclosure");
+  const summary = el("summary", "approval-params-summary", "Call parameters");
+  const pre = el("pre", "approval-preview", JSON.stringify(data, null, 2));
+  wrap.append(summary, pre);
+  return wrap;
+}
+
 /**
  * Approve/Deny for a paused tool call. The card sits after the tool group so
  * it stays visible while that group is collapsed.
@@ -120,6 +130,8 @@ export function renderInlineApproval(
       chip.dataset.state = "pending";
       chip.textContent = STATUS_LABEL.pending;
     }
+    const group = running.closest<HTMLDetailsElement>(".tool-group");
+    if (group) syncGroupLabel(group);
   }
 
   const card = el("div", "approval-action-bar");
@@ -147,6 +159,8 @@ export function renderInlineApproval(
         chip.dataset.state = decision === "approved" ? "running" : "error";
         chip.textContent = decision === "approved" ? STATUS_LABEL.running : "Denying…";
       }
+      const group = running.closest<HTMLDetailsElement>(".tool-group");
+      if (group) syncGroupLabel(group);
     }
     msg.textContent = decision === "approved" ? `Executing approved ${toolName}…` : `Denying ${toolName}…`;
     try {
@@ -157,10 +171,12 @@ export function renderInlineApproval(
       }
       const resp = await fetch(`/api/approvals/${approvalId}/${endpoint}`, options);
       if (!resp.ok) {
-        msg.textContent = `Action failed: ${resp.statusText}`;
+        msg.textContent = `Action failed: ${resp.statusText || "Request failed"}`;
         card.classList.remove("resolving");
         approveBtn.disabled = false;
         denyBtn.disabled = false;
+        approveBtn.textContent = "Approve";
+        denyBtn.textContent = "Deny";
         if (running) {
           running.dataset.state = "pending";
           const chip = running.querySelector<HTMLElement>(".tool-status");
@@ -168,37 +184,72 @@ export function renderInlineApproval(
             chip.dataset.state = "pending";
             chip.textContent = STATUS_LABEL.pending;
           }
+          const group = running.closest<HTMLDetailsElement>(".tool-group");
+          if (group) syncGroupLabel(group);
         }
         return;
       }
       btns.remove();
       card.classList.remove("resolving");
-      card.classList.add(decision === "approved" ? "resolved-ok" : "resolved-error");
-      if (decision === "approved") {
-        msg.textContent = `✓ Approved ${toolName}`;
-      } else {
+      const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
+      const isStreaming = contentType.includes("text/event-stream") && typeof onStream === "function";
+
+      if (decision === "denied") {
+        card.classList.add("resolved-error");
         msg.textContent = `✕ Denied ${toolName}`;
-      }
-      if (running) {
-        const chip = running.querySelector<HTMLElement>(".tool-status");
-        if (decision === "approved") {
-          running.dataset.state = "ok";
-          if (chip) {
-            chip.dataset.state = "ok";
-            chip.textContent = STATUS_LABEL.ok;
-          }
-        } else {
+        if (running) {
           running.dataset.state = "error";
+          const chip = running.querySelector<HTMLElement>(".tool-status");
           if (chip) {
             chip.dataset.state = "error";
             chip.textContent = "Denied";
           }
+          const group = running.closest<HTMLDetailsElement>(".tool-group");
+          if (group) syncGroupLabel(group);
         }
+        if (isStreaming) {
+          await onStream(resp);
+        } else {
+          const data = (await resp.json()) as { status: string; reply?: string };
+          onResolved(data.reply);
+        }
+        return;
       }
-      const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
-      if (contentType.includes("text/event-stream") && onStream) {
+
+      // decision === "approved"
+      if (isStreaming) {
+        card.classList.add("executing");
+        msg.textContent = `✓ Approved · Running ${toolName}…`;
+        if (running) {
+          running.dataset.state = "running";
+          const chip = running.querySelector<HTMLElement>(".tool-status");
+          if (chip) {
+            chip.dataset.state = "running";
+            chip.textContent = STATUS_LABEL.running;
+          }
+          const group = running.closest<HTMLDetailsElement>(".tool-group");
+          if (group) syncGroupLabel(group);
+        }
         await onStream(resp);
+        card.classList.remove("executing");
+        card.classList.add("resolved-ok");
+        msg.textContent = `✓ Approved ${toolName}`;
+        if (running && running.dataset.state === "running") {
+          completeToolRow(running, "ok", "");
+        }
       } else {
+        card.classList.add("resolved-ok");
+        msg.textContent = `✓ Approved ${toolName}`;
+        if (running) {
+          running.dataset.state = "ok";
+          const chip = running.querySelector<HTMLElement>(".tool-status");
+          if (chip) {
+            chip.dataset.state = "ok";
+            chip.textContent = STATUS_LABEL.ok;
+          }
+          const group = running.closest<HTMLDetailsElement>(".tool-group");
+          if (group) syncGroupLabel(group);
+        }
         const data = (await resp.json()) as { status: string; reply?: string };
         onResolved(data.reply);
       }
@@ -207,6 +258,18 @@ export function renderInlineApproval(
       card.classList.remove("resolving");
       approveBtn.disabled = false;
       denyBtn.disabled = false;
+      approveBtn.textContent = "Approve";
+      denyBtn.textContent = "Deny";
+      if (running) {
+        running.dataset.state = "pending";
+        const chip = running.querySelector<HTMLElement>(".tool-status");
+        if (chip) {
+          chip.dataset.state = "pending";
+          chip.textContent = STATUS_LABEL.pending;
+        }
+        const group = running.closest<HTMLDetailsElement>(".tool-group");
+        if (group) syncGroupLabel(group);
+      }
     }
   }
 
@@ -215,7 +278,12 @@ export function renderInlineApproval(
 
   btns.append(approveBtn, denyBtn);
   card.append(msg);
-  if (preview) card.append(preview.note, preview.body);
+  if (preview) {
+    card.append(preview.note, preview.body);
+  } else if (toolArguments) {
+    const argsPreview = genericArgumentsPreview(toolArguments);
+    if (argsPreview) card.append(argsPreview);
+  }
   card.append(btns);
 
   placeApprovalCard(container, running, card);
@@ -340,7 +408,9 @@ function sheetResultLink(output: string): HTMLAnchorElement | null {
  * group until something else is appended to the transcript.
  */
 export function appendToolActivity(container: HTMLElement, frame: ToolFrame): HTMLElement {
-  const running = lastRunningTool(container);
+  const running =
+    lastRunningTool(container) ||
+    (frame.event === "tool_result" && frame.name ? runningToolNamed(container, frame.name) : null);
   if (frame.event === "tool_result" && running) {
     completeToolRow(running, "ok", frame.content ?? "");
     return running;
@@ -377,12 +447,24 @@ function syncGroupLabel(group: HTMLDetailsElement): void {
   const numRows = toolRowCount(group);
   const running = group.querySelector<HTMLDetailsElement>('.tool-row[data-state="running"]');
   const runningName = running?.querySelector(".tool-name")?.textContent;
+  const pending = group.querySelector<HTMLDetailsElement>('.tool-row[data-state="pending"]');
+  const pendingName = pending?.querySelector(".tool-name")?.textContent;
 
-  group.dataset.state = running ? "running" : "ok";
+  if (pending) {
+    group.dataset.state = "pending";
+  } else if (running) {
+    group.dataset.state = "running";
+  } else {
+    group.dataset.state = "ok";
+  }
+
   if (label) label.textContent = group.open ? "Hide tool calls" : "Expand tool calls";
   if (count) count.textContent = `${numRows} ${numRows === 1 ? "call" : "calls"}`;
   if (live) {
-    if (runningName) {
+    if (pendingName) {
+      live.textContent = `· Approval required for ${pendingName}…`;
+      live.hidden = false;
+    } else if (runningName) {
       live.textContent = `· Running ${runningName}...`;
       live.hidden = false;
     } else {
@@ -401,7 +483,9 @@ function toolRowCount(group: HTMLElement): number {
 }
 
 function runningToolNamed(container: HTMLElement, toolName: string): HTMLDetailsElement | null {
-  const rows = container.querySelectorAll<HTMLDetailsElement>('.tool-row[data-state="running"]');
+  const rows = container.querySelectorAll<HTMLDetailsElement>(
+    '.tool-row[data-state="running"], .tool-row[data-state="pending"]',
+  );
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     if (rows[index].querySelector(".tool-name")?.textContent === toolName) return rows[index];
   }

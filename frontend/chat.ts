@@ -344,6 +344,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   let draft: HTMLElement | null = null;
   let blocked: string | null = null;
   let running = false;
+  let currentExecutingTool: string | null = null;
   let liveTurn: string | null = null;
   let polling = false;
   let questionAsked = false;
@@ -502,10 +503,53 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     capsuleAgentLabel.textContent = `${emoji} ${currentAgentName}`;
   }
 
-  function updateDraftStatus(): void {
+  function syncComposerState(): void {
+    if (blocked !== null) {
+      form.dataset.blocked = "true";
+      capsuleDraftBadge.classList.remove("is-running", "has-draft");
+      capsulePulse.classList.add("paused");
+      capsulePulse.classList.remove("active");
+      if (blocked === WAITING_FOR_APPROVAL) {
+        capsuleDraftBadge.classList.add("needs-approval");
+        capsuleDraftBadge.classList.remove("needs-answer");
+        capsuleDraftText.textContent = "Action waiting for approval";
+        input.placeholder = "Action waiting for approval above…";
+      } else if (blocked === WAITING_FOR_ANSWER) {
+        capsuleDraftBadge.classList.add("needs-answer");
+        capsuleDraftBadge.classList.remove("needs-approval");
+        capsuleDraftText.textContent = "Waiting for answer";
+        input.placeholder = "Please answer the question above…";
+      } else {
+        capsuleDraftText.textContent = blocked;
+      }
+      return;
+    }
+
+    form.dataset.blocked = "";
+    capsuleDraftBadge.classList.remove("needs-approval", "needs-answer");
+
+    if (running) {
+      form.dataset.busy = "true";
+      capsuleDraftBadge.classList.add("is-running");
+      capsuleDraftBadge.classList.remove("has-draft");
+      capsulePulse.classList.add("active");
+      capsulePulse.classList.remove("paused");
+      if (currentExecutingTool) {
+        capsuleDraftText.textContent = `Running ${currentExecutingTool}…`;
+        input.placeholder = `${currentExecutingTool} running…`;
+      } else {
+        capsuleDraftText.textContent = "Agent is working…";
+        input.placeholder = `${currentAgentName} is working…`;
+      }
+      return;
+    }
+
+    form.dataset.busy = "";
+    capsuleDraftBadge.classList.remove("is-running");
+    capsulePulse.classList.remove("active", "paused");
+    updatePlaceholder();
     const val = input.value.trim();
-    const hasText = val.length > 0;
-    if (hasText) {
+    if (val.length > 0) {
       const wordCount = val.split(/\s+/).filter(Boolean).length;
       capsuleDraftBadge.classList.add("has-draft");
       capsuleDraftText.textContent = `Typing · not sent (${wordCount} words)`;
@@ -513,6 +557,10 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       capsuleDraftBadge.classList.remove("has-draft");
       capsuleDraftText.textContent = "Ready";
     }
+  }
+
+  function updateDraftStatus(): void {
+    syncComposerState();
   }
 
   function selectAgent(name: string, emoji?: string): void {
@@ -649,9 +697,17 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     if (distanceFromBottom > 40) {
       userScrolledUp = true;
       scrollBottomBtn.hidden = false;
+      if (blocked === WAITING_FOR_APPROVAL) {
+        scrollBottomBtn.classList.add("has-approval");
+        scrollBottomBtn.title = "Action waiting for approval below";
+      } else {
+        scrollBottomBtn.classList.remove("has-approval");
+        scrollBottomBtn.title = "Scroll to bottom";
+      }
     } else if (distanceFromBottom <= 40) {
       userScrolledUp = false;
       scrollBottomBtn.hidden = true;
+      scrollBottomBtn.classList.remove("has-approval");
     }
   }
 
@@ -693,11 +749,17 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     transcript.scrollTop = transcript.scrollHeight;
     userScrolledUp = false;
     scrollBottomBtn.hidden = true;
+    scrollBottomBtn.classList.remove("has-approval");
   });
 
   function scrollToBottom(force = false): void {
     if (force || !userScrolledUp) {
       transcript.scrollTop = transcript.scrollHeight;
+      if (force) {
+        userScrolledUp = false;
+        scrollBottomBtn.hidden = true;
+        scrollBottomBtn.classList.remove("has-approval");
+      }
     }
   }
 
@@ -998,6 +1060,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     flushTokenRender();
     const text = reply || draftText;
     dropDraft();
+    if (!text.trim()) return;
     transcript.append(renderAssistantTurn(text));
   }
 
@@ -1012,10 +1075,20 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     sendButton.disabled = busy || blocked !== null;
     modelPicker.disabled = busy;
     abortButton.hidden = !busy;
+    syncComposerState();
   }
 
   function setStatus(text: string): void {
     statusLine.textContent = text;
+    if (!text) {
+      statusLine.removeAttribute("data-kind");
+      return;
+    }
+    const isError =
+      text.toLowerCase().includes("failed") ||
+      text.toLowerCase().includes("error") ||
+      text.toLowerCase().includes("could not");
+    statusLine.dataset.kind = isError ? "error" : "info";
   }
 
   /** A pending question or approval holds the session: no new message until it is resolved. */
@@ -1025,6 +1098,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     sendButton.disabled = running || reason !== null;
     form.dataset.blocked = reason === null ? "" : "true";
     setStatus(reason ?? "");
+    syncComposerState();
   }
 
   async function loadModels(): Promise<void> {
@@ -1124,7 +1198,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   async function handleStreamResume(response: Response): Promise<void> {
     setBusy(true);
     setStatus("");
-    showThinking();
+    showThinking("Executing approved tool…");
     try {
       await readSse(response);
     } catch {
@@ -1132,6 +1206,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       setStatus("The resumed turn could not be completed.");
     } finally {
       controller = null;
+      currentExecutingTool = null;
       setBusy(false);
       setBlocked(null);
       if (blocked !== null) setStatus(blocked);
@@ -1140,10 +1215,11 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
   }
 
   function onApprovalResolved(reply?: string): void {
-    if (reply) {
+    if (reply && reply.trim()) {
       transcript.append(renderAssistantTurn(reply));
       scrollToBottom();
     }
+    currentExecutingTool = null;
     setBlocked(null);
   }
 
@@ -1320,12 +1396,14 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       if (draft?.classList.contains("thinking")) {
         dropDraft();
       }
+      currentExecutingTool = payload.name ?? "tool";
       appendToolActivity(transcript, {
         event: "tool_call",
         name: payload.name ?? "tool",
         arguments: payload.arguments ?? "",
       });
       showThinking(`Executing ${payload.name ?? "tool"}`);
+      syncComposerState();
       scrollToBottom();
       return;
     }
@@ -1334,6 +1412,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       if (draft?.classList.contains("thinking")) {
         dropDraft();
       }
+      currentExecutingTool = null;
       renderInlineApproval(
         transcript,
         payload.approval_id ?? "",
@@ -1342,17 +1421,21 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         payload.arguments,
         handleStreamResume,
       );
-      scrollToBottom();
+      setBlocked(WAITING_FOR_APPROVAL);
+      syncComposerState();
+      scrollToBottom(true);
       return;
     }
     if (frame.event === "tool_result") {
       flushTokenRender();
+      currentExecutingTool = null;
       appendToolActivity(transcript, {
         event: "tool_result",
         name: payload.name ?? "tool",
         content: payload.content ?? "",
       });
       showThinking("Thinking");
+      syncComposerState();
       scrollToBottom();
       return;
     }
@@ -1367,6 +1450,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     if (frame.event === "done") {
       flushTokenRender();
+      currentExecutingTool = null;
       commitReply(payload.reply ?? "");
       if (payload.status === "pending_approval" && questionAsked) {
         setBlocked(WAITING_FOR_ANSWER);
@@ -1374,16 +1458,20 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         setBlocked(WAITING_FOR_APPROVAL);
       } else {
         setStatus("");
+        setBlocked(null);
       }
+      syncComposerState();
       return;
     }
     if (frame.event === "error") {
       flushTokenRender();
+      currentExecutingTool = null;
       const failure =
         payload.error ?? "The turn failed before a reply was completed.";
       markRunningToolsError(transcript, failure);
       dropDraft();
       setStatus(failure);
+      syncComposerState();
     }
   }
 
@@ -1474,6 +1562,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       }
       controller = null;
       liveTurn = null;
+      currentExecutingTool = null;
       setBusy(false);
       if (!sessionTitle) void loadTitle();
       if (blocked !== null) setStatus(blocked);

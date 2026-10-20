@@ -842,6 +842,43 @@ test("composer defaults to Agent Capsule layout with ribbon and clean toolbar", 
   );
 });
 
+test("capsule ribbon provides clear responsive feedback during tool execution and approval", async () => {
+  const root = document.createElement("div");
+  document.body.replaceChildren(root);
+
+  const frames = [
+    'event: tool_call\ndata: {"name":"dbsql_query","arguments":"{}"}\n\n',
+    'event: approval_required\ndata: {"name":"dbsql_query","approval_id":"appr-test-1","arguments":"{}"}\n\n',
+    'event: done\ndata: {"status":"pending_approval","reply":"","approval_id":"appr-test-1"}\n\n',
+  ].join("");
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") return streamResponse(frames);
+    if (url.endsWith("/transcript")) return jsonResponse({ entries: [] });
+    if (url.endsWith("/questions")) return jsonResponse([]);
+    if (url === "/api/approvals") return jsonResponse({ pending: [] });
+    return jsonResponse({ models: [] });
+  });
+
+  mount(root, context());
+  await vi.waitFor(() => expect(root.querySelector(".empty")).not.toBeNull());
+
+  const input = root.querySelector("#message") as HTMLTextAreaElement;
+  input.value = "run analysis";
+  root.querySelector("#composer")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+
+  await vi.waitFor(() => {
+    const ribbon = root.querySelector(".capsule-ribbon") as HTMLElement;
+    expect(ribbon.querySelector(".capsule-draft-badge")?.classList.contains("needs-approval")).toBe(true);
+    expect(ribbon.querySelector(".capsule-draft-text")?.textContent).toBe("Action waiting for approval");
+    expect(input.placeholder).toBe("Action waiting for approval above…");
+  });
+
+  expect(root.querySelector(".approval-action-bar")).not.toBeNull();
+  expect(root.querySelector("#status")?.textContent).toBe("Ação aguardando aprovação acima.");
+});
+
 test("active agent display shows name in top ribbon and updates on agent query param", async () => {
   const root = document.createElement("div");
   document.body.replaceChildren(root);
