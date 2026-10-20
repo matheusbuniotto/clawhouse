@@ -220,6 +220,34 @@ async def test_sandbox_list_files_returns_sorted_paths() -> None:
     assert res == {"files": ["a.txt", "b.txt"]}
 
 
+@pytest.mark.asyncio
+async def test_sandbox_list_files_returns_nested_relative_paths() -> None:
+    client = MagicMock()
+    slug = user_sandbox_slug(OWNER)
+    root = f"/Workspace/Shared/clawhouse/sandboxes/{slug}"
+    item1 = MagicMock()
+    item1.path = f"{root}/sub/nested.txt"
+    item1.is_dir = False
+    dir_item = MagicMock()
+    dir_item.path = f"{root}/sub"
+    dir_item.is_dir = True
+    root_item = MagicMock()
+    root_item.path = f"{root}/top.txt"
+    root_item.is_dir = False
+
+    def mock_list(path: str) -> list[MagicMock]:
+        if path == root:
+            return [dir_item, root_item]
+        if path == f"{root}/sub":
+            return [item1]
+        return []
+
+    client.workspace.list.side_effect = mock_list
+    tools = _make_tools(client)
+    res = await sandbox_list_files(tools)
+    assert res == {"files": ["sub/nested.txt", "top.txt"]}
+
+
 # --- C14: Path traversal denial ---
 @pytest.mark.asyncio
 async def test_sandbox_file_tools_deny_path_traversal() -> None:

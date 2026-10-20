@@ -14,12 +14,10 @@ env:
     valueFrom: serving-endpoint
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
-  # Optional extra OpenAI-compatible models (OpenRouter, etc.). Add a secret
-  # resource with key `openrouter-api-key` in the app UI, then uncomment:
-  # - name: OPENROUTER_API_KEY
-  #   valueFrom: openrouter-api-key
-  # - name: CLAWHOUSE_MODELS
-  #   value: '[{"id":"openrouter-model","label":"My model (OpenRouter)","model":"<provider>/<model>","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
+  - name: OPENROUTER_API_KEY
+    valueFrom: openrouter-api-key
+  - name: CLAWHOUSE_MODELS
+    value: '[{"id":"openai-gpt-6-luna","label":"GPT-6 Luna (OpenRouter)","model":"openai/gpt-6-luna","base_url":"https://openrouter.ai/api/v1","api_key_env":"OPENROUTER_API_KEY","default":true}]'
   - name: CLAWHOUSE_MLFLOW_TRACING
     value: "true"
   # Traces go to a shared workspace experiment; point this at any experiment

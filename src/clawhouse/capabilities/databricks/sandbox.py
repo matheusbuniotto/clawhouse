@@ -189,14 +189,13 @@ async def sandbox_read_file(
     return {"path": path, "content": data}
 
 
-def _collect_files(client: Any, root_dir: str) -> list[str]:
+def _collect_files(client: Any, current_dir: str, base_prefix: str) -> list[str]:
     files: list[str] = []
     try:
-        items = list(client.workspace.list(root_dir))
+        items = list(client.workspace.list(current_dir))
     except Exception:  # noqa: BLE001
         return files
 
-    prefix = root_dir.rstrip("/") + "/"
     for item in items:
         path = str(item.path)
         is_directory = (
@@ -204,9 +203,9 @@ def _collect_files(client: Any, root_dir: str) -> list[str]:
             or str(getattr(item, "object_type", "")).upper() == "DIRECTORY"
         )
         if is_directory:
-            files.extend(_collect_files(client, path))
+            files.extend(_collect_files(client, path, base_prefix))
         else:
-            rel = path[len(prefix) :] if path.startswith(prefix) else path
+            rel = path[len(base_prefix) :] if path.startswith(base_prefix) else path
             files.append(rel)
     return files
 
@@ -224,8 +223,9 @@ async def sandbox_list_files(
     except ValueError as err:
         return {"error": str(err)}
 
+    prefix = abs_dir.rstrip("/") + "/"
     try:
-        items = tools._call(lambda cl: _collect_files(cl, abs_dir))
+        items = tools._call(lambda cl: _collect_files(cl, abs_dir, prefix))
     except Exception as exc:  # noqa: BLE001
         return {"error": f"list failed: {exc}"}
 

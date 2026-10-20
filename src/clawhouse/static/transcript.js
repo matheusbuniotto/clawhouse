@@ -140,28 +140,29 @@ export function renderInlineApproval(container, approvalId, toolName, onResolved
             else {
                 msg.textContent = `✕ Denied ${toolName}`;
             }
+            if (running) {
+                const chip = running.querySelector(".tool-status");
+                if (decision === "approved") {
+                    running.dataset.state = "ok";
+                    if (chip) {
+                        chip.dataset.state = "ok";
+                        chip.textContent = STATUS_LABEL.ok;
+                    }
+                }
+                else {
+                    running.dataset.state = "error";
+                    if (chip) {
+                        chip.dataset.state = "error";
+                        chip.textContent = "Denied";
+                    }
+                }
+            }
             const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
             if (contentType.includes("text/event-stream") && onStream) {
                 await onStream(resp);
             }
             else {
                 const data = (await resp.json());
-                if (decision === "approved" && running) {
-                    running.dataset.state = "ok";
-                    const chip = running.querySelector(".tool-status");
-                    if (chip) {
-                        chip.dataset.state = "ok";
-                        chip.textContent = STATUS_LABEL.ok;
-                    }
-                }
-                else if (decision === "denied" && running) {
-                    running.dataset.state = "error";
-                    const chip = running.querySelector(".tool-status");
-                    if (chip) {
-                        chip.dataset.state = "error";
-                        chip.textContent = "Denied";
-                    }
-                }
                 onResolved(data.reply);
             }
         }

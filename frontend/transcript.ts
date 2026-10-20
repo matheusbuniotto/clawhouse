@@ -179,26 +179,27 @@ export function renderInlineApproval(
       } else {
         msg.textContent = `✕ Denied ${toolName}`;
       }
-      const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
-      if (contentType.includes("text/event-stream") && onStream) {
-        await onStream(resp);
-      } else {
-        const data = (await resp.json()) as { status: string; reply?: string };
-        if (decision === "approved" && running) {
+      if (running) {
+        const chip = running.querySelector<HTMLElement>(".tool-status");
+        if (decision === "approved") {
           running.dataset.state = "ok";
-          const chip = running.querySelector<HTMLElement>(".tool-status");
           if (chip) {
             chip.dataset.state = "ok";
             chip.textContent = STATUS_LABEL.ok;
           }
-        } else if (decision === "denied" && running) {
+        } else {
           running.dataset.state = "error";
-          const chip = running.querySelector<HTMLElement>(".tool-status");
           if (chip) {
             chip.dataset.state = "error";
             chip.textContent = "Denied";
           }
         }
+      }
+      const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
+      if (contentType.includes("text/event-stream") && onStream) {
+        await onStream(resp);
+      } else {
+        const data = (await resp.json()) as { status: string; reply?: string };
         onResolved(data.reply);
       }
     } catch {
