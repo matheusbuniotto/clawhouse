@@ -655,6 +655,8 @@ def test_default_approval_required_tools_contents() -> None:
         "update_google_sheet",
         "run_python_analysis",
         "jobs_schedule",
+        "python_exec",
+        "sandbox_write_file",
     }
     assert expected == DEFAULT_APPROVAL_REQUIRED_TOOLS
 
@@ -771,3 +773,53 @@ async def test_each_sensitive_tool_pauses_turn_and_generates_pending_approval(
     assert approval.status == "pending"
     assert approval.tool_name == tool_name
     assert await store.has_pending_approval(session.id) is True
+
+
+async def test_approve_tool_with_event_stream_header_streams_sse() -> None:
+    store = MemorySessionStore()
+
+    async def call_sensitive(
+        messages: list[ModelMessage], info: AgentInfo
+    ) -> AsyncIterator[str | dict[int, DeltaToolCall]]:
+        del messages, info
+        yield {0: DeltaToolCall(name="clock", json_args="{}", tool_call_id="call-clk-stream")}
+
+    app = _app(store, FunctionModel(stream_function=call_sensitive), sensitive_tools=("clock",))
+
+    async with _client(app) as client:
+        # Trigger sensitive turn
+        turn_resp = await client.post(
+            f"/api/sessions/{SESSION_ID}/turns",
+            headers=HEADERS,
+            json={"message": "check time"},
+        )
+        assert turn_resp.status_code == 200
+        assert "approval_required" in turn_resp.text
+
+        # Get approval ID
+        list_resp = await client.get("/api/approvals", headers=HEADERS)
+        data = list_resp.json()
+        assert len(data["pending"]) == 1
+        approval_id = data["pending"][0]["id"]
+
+        # Swap model for resumed reply
+        async def reply_resumed(
+            messages: list[ModelMessage], info: AgentInfo
+        ) -> AsyncIterator[str]:
+            del messages, info
+            yield "Clock checked successfully."
+
+        app.state.model_for = lambda _c, _m: FunctionModel(  # type: ignore[attr-defined]
+            stream_function=reply_resumed
+        )
+
+        # Approve with Accept: text/event-stream
+        stream_resp = await client.post(
+            f"/api/approvals/{approval_id}/approve",
+            headers={**HEADERS, "Accept": "text/event-stream"},
+        )
+        assert stream_resp.status_code == 200
+        assert "text/event-stream" in stream_resp.headers["content-type"]
+        body = stream_resp.text
+        assert "event: done" in body
+        assert "Clock checked successfully." in body

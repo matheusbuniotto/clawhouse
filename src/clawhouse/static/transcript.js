@@ -76,7 +76,7 @@ const STATUS_LABEL = {
  * Approve/Deny for a paused tool call. The card sits after the tool group so
  * it stays visible while that group is collapsed.
  */
-export function renderInlineApproval(container, approvalId, toolName, onResolved, toolArguments) {
+export function renderInlineApproval(container, approvalId, toolName, onResolved, toolArguments, onStream) {
     const running = runningToolNamed(container, toolName);
     if (running) {
         running.dataset.state = "pending";
@@ -99,22 +99,54 @@ export function renderInlineApproval(container, approvalId, toolName, onResolved
         denyBtn.disabled = true;
         approveBtn.textContent = decision === "approved" ? "Approving…" : "Approve";
         denyBtn.textContent = decision === "denied" ? "Denying…" : "Deny";
+        card.classList.add("resolving");
+        if (running) {
+            running.dataset.state = decision === "approved" ? "running" : "error";
+            const chip = running.querySelector(".tool-status");
+            if (chip) {
+                chip.dataset.state = decision === "approved" ? "running" : "error";
+                chip.textContent = decision === "approved" ? STATUS_LABEL.running : "Denying…";
+            }
+        }
+        msg.textContent = decision === "approved" ? `Executing approved ${toolName}…` : `Denying ${toolName}…`;
         try {
             const endpoint = decision === "approved" ? "approve" : "deny";
-            const resp = await fetch(`/api/approvals/${approvalId}/${endpoint}`, {
-                method: "POST",
-            });
+            const options = { method: "POST" };
+            if (onStream) {
+                options.headers = { Accept: "text/event-stream" };
+            }
+            const resp = await fetch(`/api/approvals/${approvalId}/${endpoint}`, options);
             if (!resp.ok) {
                 msg.textContent = `Action failed: ${resp.statusText}`;
+                card.classList.remove("resolving");
                 approveBtn.disabled = false;
                 denyBtn.disabled = false;
+                if (running) {
+                    running.dataset.state = "pending";
+                    const chip = running.querySelector(".tool-status");
+                    if (chip) {
+                        chip.dataset.state = "pending";
+                        chip.textContent = STATUS_LABEL.pending;
+                    }
+                }
                 return;
             }
-            const data = (await resp.json());
             btns.remove();
+            card.classList.remove("resolving");
+            card.classList.add(decision === "approved" ? "resolved-ok" : "resolved-error");
             if (decision === "approved") {
                 msg.textContent = `✓ Approved ${toolName}`;
-                if (running) {
+            }
+            else {
+                msg.textContent = `✕ Denied ${toolName}`;
+            }
+            const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
+            if (contentType.includes("text/event-stream") && onStream) {
+                await onStream(resp);
+            }
+            else {
+                const data = (await resp.json());
+                if (decision === "approved" && running) {
                     running.dataset.state = "ok";
                     const chip = running.querySelector(".tool-status");
                     if (chip) {
@@ -122,10 +154,7 @@ export function renderInlineApproval(container, approvalId, toolName, onResolved
                         chip.textContent = STATUS_LABEL.ok;
                     }
                 }
-            }
-            else {
-                msg.textContent = `✕ Denied ${toolName}`;
-                if (running) {
+                else if (decision === "denied" && running) {
                     running.dataset.state = "error";
                     const chip = running.querySelector(".tool-status");
                     if (chip) {
@@ -133,11 +162,12 @@ export function renderInlineApproval(container, approvalId, toolName, onResolved
                         chip.textContent = "Denied";
                     }
                 }
+                onResolved(data.reply);
             }
-            onResolved(data.reply);
         }
         catch {
             msg.textContent = "Network error while resolving approval.";
+            card.classList.remove("resolving");
             approveBtn.disabled = false;
             denyBtn.disabled = false;
         }

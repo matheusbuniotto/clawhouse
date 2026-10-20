@@ -109,6 +109,7 @@ export function renderInlineApproval(
   toolName: string,
   onResolved: (reply?: string) => void,
   toolArguments?: string,
+  onStream?: (response: Response) => Promise<boolean | void>,
 ): HTMLElement {
   const running = runningToolNamed(container, toolName);
   if (running) {
@@ -138,32 +139,59 @@ export function renderInlineApproval(
     denyBtn.disabled = true;
     approveBtn.textContent = decision === "approved" ? "Approving…" : "Approve";
     denyBtn.textContent = decision === "denied" ? "Denying…" : "Deny";
+    card.classList.add("resolving");
+    if (running) {
+      running.dataset.state = decision === "approved" ? "running" : "error";
+      const chip = running.querySelector<HTMLElement>(".tool-status");
+      if (chip) {
+        chip.dataset.state = decision === "approved" ? "running" : "error";
+        chip.textContent = decision === "approved" ? STATUS_LABEL.running : "Denying…";
+      }
+    }
+    msg.textContent = decision === "approved" ? `Executing approved ${toolName}…` : `Denying ${toolName}…`;
     try {
       const endpoint = decision === "approved" ? "approve" : "deny";
-      const resp = await fetch(`/api/approvals/${approvalId}/${endpoint}`, {
-        method: "POST",
-      });
+      const options: RequestInit = { method: "POST" };
+      if (onStream) {
+        options.headers = { Accept: "text/event-stream" };
+      }
+      const resp = await fetch(`/api/approvals/${approvalId}/${endpoint}`, options);
       if (!resp.ok) {
         msg.textContent = `Action failed: ${resp.statusText}`;
+        card.classList.remove("resolving");
         approveBtn.disabled = false;
         denyBtn.disabled = false;
+        if (running) {
+          running.dataset.state = "pending";
+          const chip = running.querySelector<HTMLElement>(".tool-status");
+          if (chip) {
+            chip.dataset.state = "pending";
+            chip.textContent = STATUS_LABEL.pending;
+          }
+        }
         return;
       }
-      const data = (await resp.json()) as { status: string; reply?: string };
       btns.remove();
+      card.classList.remove("resolving");
+      card.classList.add(decision === "approved" ? "resolved-ok" : "resolved-error");
       if (decision === "approved") {
         msg.textContent = `✓ Approved ${toolName}`;
-        if (running) {
+      } else {
+        msg.textContent = `✕ Denied ${toolName}`;
+      }
+      const contentType = (typeof resp.headers?.get === "function" ? resp.headers.get("content-type") : "") ?? "";
+      if (contentType.includes("text/event-stream") && onStream) {
+        await onStream(resp);
+      } else {
+        const data = (await resp.json()) as { status: string; reply?: string };
+        if (decision === "approved" && running) {
           running.dataset.state = "ok";
           const chip = running.querySelector<HTMLElement>(".tool-status");
           if (chip) {
             chip.dataset.state = "ok";
             chip.textContent = STATUS_LABEL.ok;
           }
-        }
-      } else {
-        msg.textContent = `✕ Denied ${toolName}`;
-        if (running) {
+        } else if (decision === "denied" && running) {
           running.dataset.state = "error";
           const chip = running.querySelector<HTMLElement>(".tool-status");
           if (chip) {
@@ -171,10 +199,11 @@ export function renderInlineApproval(
             chip.textContent = "Denied";
           }
         }
+        onResolved(data.reply);
       }
-      onResolved(data.reply);
     } catch {
       msg.textContent = "Network error while resolving approval.";
+      card.classList.remove("resolving");
       approveBtn.disabled = false;
       denyBtn.disabled = false;
     }

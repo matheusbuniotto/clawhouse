@@ -349,16 +349,27 @@ export function mountShell(root: ParentNode = document): void {
     }
   }
 
+  let lastSessionKey = "";
   async function loadSessions(): Promise<void> {
     try {
       const response = await fetch("/api/sessions");
       if (!response.ok) {
+        lastSessionKey = "";
         renderSessions([]);
         return;
       }
       const body = (await response.json()) as { sessions?: RailSession[] };
-      renderSessions(body.sessions ?? []);
+      const sessions = body.sessions ?? [];
+      const sessionKey = sessions
+        .map((s) => `${s.id}:${s.title}:${s.run_state}:${s.created_at}`)
+        .join(";");
+      if (sessionKey === lastSessionKey) {
+        return;
+      }
+      lastSessionKey = sessionKey;
+      renderSessions(sessions);
     } catch {
+      lastSessionKey = "";
       renderSessions([]);
     }
   }

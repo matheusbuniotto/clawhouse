@@ -527,6 +527,12 @@
   border-radius: var(--radius-lg);
   background: var(--card);
   box-shadow: var(--shadow);
+  transition: border-color var(--duration-fast) var(--ease), opacity var(--duration-fast) var(--ease);
+}
+
+.approval-card.resolving {
+  border-color: var(--accent);
+  opacity: 0.85;
 }
 
 .approval-header {

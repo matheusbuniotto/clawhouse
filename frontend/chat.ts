@@ -738,6 +738,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       setStatus("The transcript could not be cleared.");
       return;
     }
+    lastRenderedEntries = [];
     transcript.replaceChildren(renderNotice("Transcript cleared."));
     void loadTitle();
   }
@@ -819,7 +820,31 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     });
   }
 
+  let lastRenderedEntries: Entry[] = [];
+
+  function entriesIdentical(a: Entry[], b: Entry[]): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = a.length - 1; i >= 0; i--) {
+      const ea = a[i];
+      const eb = b[i];
+      if (
+        ea.role !== eb.role ||
+        ea.content !== eb.content ||
+        ea.tool_name !== eb.tool_name ||
+        ea.agent_id !== eb.agent_id ||
+        ea.model !== eb.model
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function renderTranscript(entries: Entry[]): void {
+    if (!liveTurn && lastRenderedEntries.length > 0 && entriesIdentical(lastRenderedEntries, entries)) {
+      return;
+    }
+    lastRenderedEntries = [...entries];
     // A message sent before the first load landed stays on screen, after the history.
     const live = liveTurn ? [...transcript.childNodes] : [];
     if (liveTurn) {
@@ -986,8 +1011,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       followRunningTurn();
       return;
     }
-    await loadPendingQuestions();
-    await loadPendingApprovals();
+    await Promise.all([loadPendingQuestions(), loadPendingApprovals()]);
   }
 
   /** After a reload mid-turn: keep the composer closed and poll until the turn settles. */
@@ -1008,8 +1032,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
             renderTranscript(body.entries ?? []);
             setBusy(false);
             setStatus("");
-            await loadPendingQuestions();
-            await loadPendingApprovals();
+            await Promise.all([loadPendingQuestions(), loadPendingApprovals()]);
             return;
           }
           renderTranscript(body.entries ?? []);
@@ -1028,6 +1051,24 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       if (card.dataset.approvalId === approvalId) return true;
     }
     return false;
+  }
+
+  async function handleStreamResume(response: Response): Promise<void> {
+    setBusy(true);
+    setStatus("");
+    showThinking();
+    try {
+      await readSse(response);
+    } catch {
+      dropDraft();
+      setStatus("The resumed turn could not be completed.");
+    } finally {
+      controller = null;
+      setBusy(false);
+      setBlocked(null);
+      if (blocked !== null) setStatus(blocked);
+      else input.focus();
+    }
   }
 
   function onApprovalResolved(reply?: string): void {
@@ -1057,6 +1098,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
             void resync();
           },
           item.arguments,
+          handleStreamResume,
         );
         rendered = true;
       }
@@ -1083,7 +1125,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   function showQuestion(question: QuestionCard): void {
     if (draft?.classList.contains("thinking")) dropDraft();
-    transcript.append(renderQuestionCard(question, onAnswered));
+    transcript.append(renderQuestionCard(question, onAnswered, handleStreamResume));
     scrollToBottom();
   }
 
@@ -1096,6 +1138,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       approval.tool_name ?? "tool",
       () => void resync(),
       approval.arguments,
+      handleStreamResume,
     );
     card.dataset.approvalId = approval.id;
     scrollToBottom();
@@ -1226,6 +1269,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         payload.name ?? "tool",
         onApprovalResolved,
         payload.arguments,
+        handleStreamResume,
       );
       scrollToBottom();
       return;
@@ -1298,6 +1342,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
     }
     questionAsked = false;
     liveTurn = text;
+    lastRenderedEntries = [];
     setBusy(true);
     setStatus("");
     controller = new AbortController();
@@ -1326,7 +1371,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
       if (response.status === 409) {
         // Nothing was saved: take the message back so it is not lost.
         bubble.remove();
-        if (!input.value) input.value = text;
+        input.value = text;
         dropDraft();
         const body = (await response.json()) as { error?: string };
         setStatus(body.error ?? "A turn is already running for this session.");
@@ -1647,7 +1692,7 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
         sessions?: unknown[];
       };
       const hasSessions = (sessionsData.sessions?.length ?? 0) > 0;
-      if (!hatchData.hatched && !hasSessions && !input.value) {
+      if (!hatchData.hatched && !hasSessions && !input.value && !liveTurn) {
         input.value = "Wake up, my friend!";
         grow();
       }
@@ -1658,6 +1703,6 @@ export function mount(root: HTMLElement, ctx: ScreenContext): void {
 
   void loadModels();
   void loadTitle();
-  void loadAgents().then(loadTranscript);
+  void Promise.all([loadAgents(), loadTranscript()]);
   void checkHatchDraft();
 }

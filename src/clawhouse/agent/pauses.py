@@ -42,6 +42,8 @@ DEFAULT_APPROVAL_REQUIRED_TOOLS = frozenset(
         "update_google_sheet",
         "run_python_analysis",
         "jobs_schedule",
+        "python_exec",
+        "sandbox_write_file",
     }
 )
 
