@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -20,6 +21,7 @@ from clawhouse.api.app import create_app
 from clawhouse.settings import Settings, settings_from_env
 from clawhouse.store.store import MemorySessionStore
 from clawhouse.telemetry import (
+    async_flush_telemetry,
     flush_telemetry,
     parse_otlp_headers,
     setup_telemetry,
@@ -427,3 +429,18 @@ def test_setup_telemetry_mlflow_tracking_uri_databricks() -> None:
         mock_set_uri.assert_called_once_with("databricks")
         mock_set_exp.assert_called_once_with("/Users/test/traces")
         mock_autolog.assert_called_once()
+
+
+async def test_async_flush_telemetry_invokes_flush() -> None:
+    with patch("clawhouse.telemetry.flush_telemetry") as mock_flush:
+        await async_flush_telemetry(timeout=1.0)
+        mock_flush.assert_called_once()
+
+
+async def test_async_flush_telemetry_times_out_safely() -> None:
+    def slow_flush() -> None:
+        time.sleep(0.1)
+
+    with patch("clawhouse.telemetry.flush_telemetry", side_effect=slow_flush):
+        # Must return cleanly without raising TimeoutError
+        await async_flush_telemetry(timeout=0.01)

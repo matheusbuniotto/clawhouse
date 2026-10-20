@@ -330,6 +330,33 @@
   font-family: var(--font-mono);
 }
 
+.tool-group-live {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  animation: thinking-pulse 1.8s ease-in-out infinite;
+}
+
+.tool-group[data-state="running"] {
+  border-color: var(--accent);
+}
+
+.tool-group[data-state="running"] .tool-group-icon {
+  animation: tool-spin 1.4s linear infinite;
+  color: var(--accent);
+}
+
+@keyframes tool-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .tool-group-toggle::after {
   content: "";
   margin-left: auto;

@@ -477,7 +477,7 @@ export function mount(root, ctx) {
     let userScrolledUp = false;
     function checkScrollPosition() {
         const distanceFromBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
-        if (distanceFromBottom > 80) {
+        if (distanceFromBottom > 40) {
             userScrolledUp = true;
             scrollBottomBtn.hidden = false;
         }
@@ -489,6 +489,22 @@ export function mount(root, ctx) {
     transcript.addEventListener("scroll", () => {
         checkScrollPosition();
     });
+    transcript.addEventListener("wheel", (e) => {
+        if (e.deltaY < 0) {
+            userScrolledUp = true;
+            scrollBottomBtn.hidden = false;
+        }
+    }, { passive: true });
+    let touchStartY = 0;
+    transcript.addEventListener("touchstart", (e) => {
+        touchStartY = e.touches[0]?.clientY ?? 0;
+    }, { passive: true });
+    transcript.addEventListener("touchmove", (e) => {
+        if ((e.touches[0]?.clientY ?? 0) > touchStartY + 10) {
+            userScrolledUp = true;
+            scrollBottomBtn.hidden = false;
+        }
+    }, { passive: true });
     scrollBottomBtn.addEventListener("click", () => {
         transcript.scrollTop = transcript.scrollHeight;
         userScrolledUp = false;
@@ -693,17 +709,51 @@ export function mount(root, ctx) {
         transcript.append(...live);
         scrollToBottom(true);
     }
-    function showThinking() {
+    let rafPending = false;
+    function scheduleTokenRender() {
+        if (typeof requestAnimationFrame !== "function") {
+            ensureDraft().textContent = draftText;
+            scrollToBottom();
+            return;
+        }
+        if (rafPending)
+            return;
+        rafPending = true;
+        requestAnimationFrame(() => {
+            rafPending = false;
+            if (draft && !draft.classList.contains("thinking")) {
+                draft.textContent = draftText;
+            }
+            scrollToBottom();
+        });
+    }
+    function flushTokenRender() {
+        if (rafPending) {
+            rafPending = false;
+        }
+        if (draft && !draft.classList.contains("thinking") && draft.textContent !== draftText) {
+            draft.textContent = draftText;
+        }
+    }
+    function showThinking(text = "Thinking") {
         transcript.querySelector(".empty")?.remove();
-        if (draft)
+        if (draft) {
+            if (draft.classList.contains("thinking")) {
+                const lbl = draft.querySelector(".thinking-label-text");
+                if (lbl)
+                    lbl.textContent = text;
+                return draft;
+            }
             return draft;
+        }
         draft = el("article", "assistant draft thinking");
         draft.dataset.draft = "true";
         draft.setAttribute("aria-busy", "true");
-        const label = el("span", "thinking-indicator", "Thinking");
+        const label = el("span", "thinking-indicator");
+        const labelText = el("span", "thinking-label-text", text);
         const dots = el("span", "thinking-dots");
         dots.append(el("span"), el("span"), el("span"));
-        label.append(dots);
+        label.append(labelText, dots);
         draft.append(label);
         transcript.append(draft);
         scrollToBottom();
@@ -727,11 +777,13 @@ export function mount(root, ctx) {
         return draft;
     }
     function dropDraft() {
+        flushTokenRender();
         draft?.remove();
         draft = null;
         draftText = "";
     }
     function commitReply(reply) {
+        flushTokenRender();
         const text = reply || draftText;
         dropDraft();
         transcript.append(renderAssistantTurn(text));
@@ -1021,11 +1073,12 @@ export function mount(root, ctx) {
         }
         if (frame.event === "token" && payload.text) {
             draftText += payload.text;
-            ensureDraft().textContent = draftText;
-            scrollToBottom();
+            ensureDraft();
+            scheduleTokenRender();
             return;
         }
         if (frame.event === "tool_call") {
+            flushTokenRender();
             if (draft?.classList.contains("thinking")) {
                 dropDraft();
             }
@@ -1034,10 +1087,12 @@ export function mount(root, ctx) {
                 name: payload.name ?? "tool",
                 arguments: payload.arguments ?? "",
             });
+            showThinking(`Executing ${payload.name ?? "tool"}`);
             scrollToBottom();
             return;
         }
         if (frame.event === "approval_required") {
+            flushTokenRender();
             if (draft?.classList.contains("thinking")) {
                 dropDraft();
             }
@@ -1046,13 +1101,13 @@ export function mount(root, ctx) {
             return;
         }
         if (frame.event === "tool_result") {
+            flushTokenRender();
             appendToolActivity(transcript, {
                 event: "tool_result",
                 name: payload.name ?? "tool",
                 content: payload.content ?? "",
             });
-            if (!draft)
-                showThinking();
+            showThinking("Thinking");
             scrollToBottom();
             return;
         }
@@ -1066,6 +1121,7 @@ export function mount(root, ctx) {
             return;
         }
         if (frame.event === "done") {
+            flushTokenRender();
             commitReply(payload.reply ?? "");
             if (payload.status === "pending_approval" && questionAsked) {
                 setBlocked(WAITING_FOR_ANSWER);
@@ -1079,6 +1135,7 @@ export function mount(root, ctx) {
             return;
         }
         if (frame.event === "error") {
+            flushTokenRender();
             const failure = payload.error ?? "The turn failed before a reply was completed.";
             markRunningToolsError(transcript, failure);
             dropDraft();

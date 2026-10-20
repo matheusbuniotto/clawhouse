@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Iterator
@@ -75,6 +76,8 @@ def setup_mlflow_tracing(settings: Settings) -> None:
     if not settings.mlflow_enabled:
         return
     try:
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "3")
+        os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "1")
         _configure_mlflow_uri(settings)
         _configure_mlflow_experiment(settings.mlflow_experiment)
         _enable_mlflow_autolog()
@@ -98,6 +101,16 @@ def flush_telemetry() -> None:
             flush_fn()
     except Exception as exc:  # noqa: BLE001
         logger.debug("Failed to flush MLflow traces: %s", exc)
+
+
+async def async_flush_telemetry(timeout: float = 1.5) -> None:
+    """Flush pending OpenTelemetry spans and MLflow traces in a thread with a strict timeout."""
+    try:
+        await asyncio.wait_for(asyncio.to_thread(flush_telemetry), timeout=timeout)
+    except TimeoutError:
+        logger.debug("Telemetry flush timed out after %ss", timeout)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Async telemetry flush failed: %s", exc)
 
 
 def setup_telemetry(settings: Settings) -> None:
