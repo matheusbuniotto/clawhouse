@@ -29,6 +29,20 @@ uv run pyright
 
 CI (`quality.yml`) runs ruff, complexipy, pyright, vulture, jscpd, and pytest on push/PR to main. Keep `main` green: small commits, gates passing locally first.
 
+## Where things live
+
+- **`frontend/`**: TypeScript UI sources and Vitest component tests; compiles to `src/clawhouse/static/` via `npm run build`.
+- **`src/clawhouse/static/`**: Served web assets (compiled JS, CSS stylesheets, HTML shell).
+- **`src/clawhouse/api/`**: FastAPI application, SSE event streaming, caller identity, and HTTP routes.
+- **`src/clawhouse/agent/`**: Pydantic AI agent runtime, turn lifecycle, system prompt builder, history, and approval pauses.
+- **`src/clawhouse/capabilities/`**: Agent tools (Databricks UC, DBSQL warehouse, Lakeflow jobs, Google Sheets, MCP, workspace files).
+- **`src/clawhouse/store/`**: Lakebase Postgres and in-memory session persistence, schema migrations, and trace models.
+- **`claw/agents/`**: Agent definitions, personal files (`SOUL.md`, `IDENTITY.md`, `USER.md`), and runtime skills.
+- **`.agents/skills/`**: Coding agent skills and engineering workflows for repository tasks.
+- **`tests/`**: Pytest suite for agent turns, capabilities, store, API routes, and wheel packaging.
+- **`e2e/`**: Playwright end-to-end browser tests.
+- **`docs/adr/`**: Architectural Decision Records for technical and design choices.
+
 ## Patterns
 
 - Pure resolvers first: path/context composition does no I/O; stores hide behind injected dependencies.
