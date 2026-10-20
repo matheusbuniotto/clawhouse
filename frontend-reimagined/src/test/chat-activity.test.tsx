@@ -492,6 +492,7 @@ describe("chat activity", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Daily" }));
     expect(await screen.findByText("Network error while sending the answer.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Daily" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Hourly/ })).toBeEnabled();
   });
 
   it("an unanswered question disables the composer", async () => {
@@ -521,8 +522,12 @@ describe("chat activity", () => {
       questions: [question("q-9")],
     });
     expect(await screen.findByText("How often?")).toBeInTheDocument();
+    const card = screen.getByRole("group", { name: "How often?" });
+    expect(card).toHaveAttribute("data-question-id", "q-9");
     expect(screen.getAllByRole("button", { name: "Hourly" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: /Daily/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Hourly" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Daily/ })).toBeEnabled();
     expect(screen.queryByText("ask_user")).toBeNull();
   });
 
@@ -554,7 +559,12 @@ describe("chat activity", () => {
     const daily = await screen.findByRole("button", { name: /Daily/ });
     expect(daily).toBeDisabled();
     expect(daily).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Hourly" })).toHaveAttribute("aria-pressed", "false");
+    const hourly = screen.getByRole("button", { name: "Hourly" });
+    expect(hourly).toBeDisabled();
+    expect(hourly).toHaveAttribute("aria-pressed", "false");
+    const weekly = screen.getByRole("button", { name: "Weekly" });
+    expect(weekly).toBeDisabled();
+    expect(weekly).toHaveAttribute("aria-pressed", "false");
   });
 
   it("an approval card sits after the tool group", async () => {

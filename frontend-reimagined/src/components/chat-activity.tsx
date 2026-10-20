@@ -147,7 +147,12 @@ function QuestionCard({
   }
 
   return (
-    <div role="group" aria-label={item.question} className="rounded-lg border p-4">
+    <div
+      role="group"
+      aria-label={item.question}
+      data-question-id={item.id}
+      className="rounded-lg border p-4"
+    >
       <p>{item.question}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {item.options.map((label) => {
