@@ -1,9 +1,12 @@
 """FastAPI chat surface. Top-level application factory and router mounting."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager, suppress
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 from pydantic_ai.models import Model
@@ -63,6 +66,9 @@ from clawhouse.store.shapes import ScheduleEntry
 from clawhouse.store.store import SessionStore, open_store
 from clawhouse.telemetry import setup_telemetry
 
+if TYPE_CHECKING:
+    from databricks.sdk import WorkspaceClient
+
 OpenStore = Callable[[], Awaitable[SessionStore]]
 ModelFor = Callable[[Caller, str | None], Model]
 
@@ -121,14 +127,11 @@ def _production_model(settings: Settings, env: Mapping[str, str]) -> ModelFor:
     return model_for
 
 
-def create_app(
-    *,
+def _make_lifespan(
     settings: Settings,
-    model_for: ModelFor,
-    store: SessionStore | None = None,
-    open_store_fn: OpenStore = open_store,
-    mcp_toolset_factory: MCPToolsetFactory | None = None,
-) -> FastAPI:
+    store: SessionStore | None,
+    open_store_fn: OpenStore,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         setup_telemetry(settings)
@@ -162,12 +165,28 @@ def create_app(
             if store is None:
                 await app.state.store.close()
 
-    app = FastAPI(title="Clawhouse", lifespan=lifespan)
+    return lifespan
+
+
+def create_app(  # noqa: PLR0913
+    *,
+    settings: Settings,
+    model_for: ModelFor,
+    store: SessionStore | None = None,
+    open_store_fn: OpenStore = open_store,
+    mcp_toolset_factory: MCPToolsetFactory | None = None,
+    workspace_client_factory: Callable[[str], WorkspaceClient] | None = None,
+) -> FastAPI:
+    app = FastAPI(
+        title="Clawhouse",
+        lifespan=_make_lifespan(settings, store, open_store_fn),
+    )
     app.state.store = store
     app.state.settings = settings
     app.state.model_for = model_for
     app.state.workspace = resolve_agent_workspace(settings.agent_root, AGENT_NAME)
     app.state.mcp_toolset_factory = mcp_toolset_factory
+    app.state.workspace_client_factory = workspace_client_factory
     _routes(app)
     return app
 

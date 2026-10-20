@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, HTTPException, Request
 
 from clawhouse.api.identity import Caller
@@ -20,6 +22,8 @@ from clawhouse.capabilities.databricks.tools import DatabricksTools
 from clawhouse.settings import Settings, request_token
 from clawhouse.store.shapes import UserProfile
 from clawhouse.store.store import MemorySessionStore, SessionStore
+
+logger = logging.getLogger("clawhouse.status")
 
 
 def _hatch_routes(app: FastAPI) -> None:
@@ -62,7 +66,7 @@ def _hatch_routes(app: FastAPI) -> None:
         )
 
 
-def _make_sandbox_tools(request: Request, caller: Caller) -> DatabricksTools:
+def _make_sandbox_tools(request: Request, caller: Caller) -> DatabricksTools | None:
     settings: Settings = request.app.state.settings
     is_dev = bool(settings.dev_user and caller.user_id == settings.dev_user)
     dev_tok = settings.dev_token if is_dev else None
@@ -72,13 +76,22 @@ def _make_sandbox_tools(request: Request, caller: Caller) -> DatabricksTools:
         dev_user=settings.dev_user,
         dev_token=dev_tok,
     )
-    client = default_workspace_client(effective_token)
-    return DatabricksTools(
-        client=client,
-        warehouse_id=None,
-        user_token=effective_token,
-        owner_id=caller.user_id,
-    )
+    factory = getattr(request.app.state, "workspace_client_factory", None)
+    try:
+        client = (
+            factory(effective_token)
+            if factory is not None
+            else default_workspace_client(effective_token)
+        )
+        return DatabricksTools(
+            client=client,
+            warehouse_id=None,
+            user_token=effective_token,
+            owner_id=caller.user_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Sandbox WorkspaceClient initialization failed: %s", exc)
+        return None
 
 
 def _file_count(res: dict[str, object]) -> int:
@@ -94,6 +107,28 @@ def _log_tail_url(settings: Settings) -> str:
     return "#"
 
 
+async def _build_sandbox_status(
+    tools: DatabricksTools | None,
+    user_id: str,
+) -> SandboxStatusOut:
+    if tools is None:
+        return SandboxStatusOut(
+            owner_id=user_id,
+            workspace_path=user_sandbox_root(user_id),
+            backend="databricks_python_exec",
+            status="unavailable",
+            file_count=0,
+        )
+    sandbox_res = await sandbox_list_files(tools)
+    return SandboxStatusOut(
+        owner_id=user_id,
+        workspace_path=user_sandbox_root(user_id),
+        backend="databricks_python_exec",
+        status="ready",
+        file_count=_file_count(sandbox_res),
+    )
+
+
 def _sandbox_routes(app: FastAPI) -> None:
     @app.get("/api/sandbox")
     async def get_sandbox(
@@ -101,14 +136,7 @@ def _sandbox_routes(app: FastAPI) -> None:
         caller: Caller = _require_caller,
     ) -> SandboxStatusOut:
         tools = _make_sandbox_tools(request, caller)
-        res = await sandbox_list_files(tools)
-        return SandboxStatusOut(
-            owner_id=caller.user_id,
-            workspace_path=user_sandbox_root(caller.user_id),
-            backend="databricks_python_exec",
-            status="ready",
-            file_count=_file_count(res),
-        )
+        return await _build_sandbox_status(tools, caller.user_id)
 
     @app.post("/api/sandbox/reset")
     async def reset_sandbox(
@@ -116,6 +144,8 @@ def _sandbox_routes(app: FastAPI) -> None:
         caller: Caller = _require_caller,
     ) -> SandboxStatusOut:
         tools = _make_sandbox_tools(request, caller)
+        if tools is None:
+            raise HTTPException(status_code=502, detail="Databricks workspace client unavailable")
         res = await sandbox_reset(tools)
         if "error" in res:
             raise HTTPException(status_code=502, detail=str(res["error"]))
@@ -151,14 +181,7 @@ def _status_routes(app: FastAPI) -> None:
 
         summaries = await store.list_sessions(caller.user_id)
         tools = _make_sandbox_tools(request, caller)
-        sandbox_res = await sandbox_list_files(tools)
-        sandbox_status = SandboxStatusOut(
-            owner_id=caller.user_id,
-            workspace_path=user_sandbox_root(caller.user_id),
-            backend="databricks_python_exec",
-            status="ready",
-            file_count=_file_count(sandbox_res),
-        )
+        sandbox_status = await _build_sandbox_status(tools, caller.user_id)
         return StatusOut(
             auth=AuthSnapshotOut(
                 user_id=caller.user_id,

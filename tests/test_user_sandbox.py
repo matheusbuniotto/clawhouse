@@ -33,7 +33,12 @@ def _make_tools(client: MagicMock, token: str = "tok_user", owner: str = OWNER) 
     return DatabricksTools(client, warehouse_id=None, user_token=token, owner_id=owner)
 
 
-def _app(store: MemorySessionStore | None = None) -> object:
+def _app(
+    store: MemorySessionStore | None = None,
+    client: MagicMock | None = None,
+) -> object:
+    mock_client = client if client is not None else MagicMock()
+    mock_client.workspace.list.return_value = []
     settings = Settings(
         dev_user=None,
         dev_token=None,
@@ -49,6 +54,7 @@ def _app(store: MemorySessionStore | None = None) -> object:
         settings=settings,
         model_for=_model_factory,
         store=s,
+        workspace_client_factory=lambda token: mock_client,
     )
 
 
@@ -323,3 +329,33 @@ async def test_headless_turn_python_exec_empty_token() -> None:
     tools = _make_tools(client, token="")
     res = await tools.python_exec("print(1)")
     assert res == {"error": "user token required"}
+
+
+@pytest.mark.asyncio
+async def test_api_sandbox_unavailable_when_client_fails() -> None:
+    settings = Settings(
+        dev_user=None,
+        dev_token=None,
+        serving_endpoint=None,
+        workspace_host="https://adb-123.databricks.com",
+    )
+
+    def _failing_factory(_token: str) -> MagicMock:
+        raise ValueError("auth failure")
+
+    app = create_app(
+        settings=settings,
+        model_for=lambda caller, model_id: FunctionModel(stream_function=lambda m, i: ["ok"]),  # type: ignore[return-value]
+        store=MemorySessionStore(),
+        workspace_client_factory=_failing_factory,  # type: ignore[arg-type]
+    )
+    async with _client(app) as client:
+        status_resp = await client.get("/api/status", headers=HEADERS)
+        sandbox_resp = await client.get("/api/sandbox", headers=HEADERS)
+        reset_resp = await client.post("/api/sandbox/reset", headers=HEADERS)
+
+    assert status_resp.status_code == 200
+    assert status_resp.json()["sandbox"]["status"] == "unavailable"
+    assert sandbox_resp.status_code == 200
+    assert sandbox_resp.json()["status"] == "unavailable"
+    assert reset_resp.status_code == 502
