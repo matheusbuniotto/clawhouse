@@ -20,9 +20,9 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 ## Handoff
 
 **Feature**: chat-activity
-**Where**: `.specs/features/chat-activity/verification.md` — C1–C31 PASS at `fb1d5d2`, gate 0 errors
+**Where**: `.specs/features/chat-activity/verification.md` — C1–C31 PASS; static bundle deployed
 **In progress**: none
-**Next step**: none. FastAPI still serves `src/clawhouse/static`; run `scripts/sync-lovable-static.sh` when the served bundle should include this chat
+**Next step**: none. App `clawhouse` deployment `01f1ccbcd7ed1473a5670b8f1034bc3c` is RUNNING
 **Blockers**: none
 **Uncommitted**: none
 **Branch**: feat/lovable-ui-mirror
