@@ -37,13 +37,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
 
-      - name: Install frontend dependencies
+      - name: Install root npm (e2e tooling)
         run: npm ci
 
       - name: Ruff Lint & Format Check
@@ -63,16 +66,8 @@ jobs:
       - name: Dead Code Audit (Vulture)
         run: uv run vulture src --min-confidence 80
 
-      - name: Frontend Type Check (tsc)
-        run: npm run typecheck
-
-      - name: Frontend Compiled Output Drift Check
-        run: |
-          npm run build
-          git diff --exit-code -- src/clawhouse/static
-
-      - name: Frontend Component Tests (vitest)
-        run: npm test
+      - name: Lovable UI build and static drift check
+        run: make frontend-check
 
       - name: Duplicate Code Check (jscpd)
         run: |

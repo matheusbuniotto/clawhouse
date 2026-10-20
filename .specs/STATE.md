@@ -19,11 +19,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: user-sandbox
-**Where**: `.specs/features/user-sandbox/verification.md`
-**In progress**: none — complete
-**Verdict**: PASS (24/24 checks proven)
-**Next step**: ship / merge
+**Feature**: chat-activity
+**Where**: `.specs/features/chat-activity/verification.md` — C1–C31 PASS; static bundle deployed
+**In progress**: none
+**Next step**: none. App `clawhouse` deployment `01f1ccbf26af14afb7f6c0647d10af6f` is RUNNING
 **Blockers**: none
 **Uncommitted**: none
-**Branch**: feat/demo-mode
+**Branch**: feat/lovable-ui-mirror

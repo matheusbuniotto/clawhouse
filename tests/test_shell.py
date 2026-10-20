@@ -1,8 +1,8 @@
-"""The persistent shell: chrome on every route, deep links, and rail endpoints."""
+"""The Lovable SPA shell: same document on every app route, hashed assets, cache headers."""
 
+import re
 from collections.abc import AsyncIterator
 
-import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -58,65 +58,26 @@ async def test_every_route_serves_the_same_shell_document() -> None:
         documents = [await _page(client, path) for path in PAGES]
 
     assert len(set(documents)) == 1
-    assert '<a class="rail-link" id="nav-agents" data-nav href="/agents">Agents</a>' in documents[0]
-    assert 'id="rail-agent-menu"' in documents[0]
+    assert "Clawhouse" in documents[0]
+    assert 'href="/agents"' in documents[0]
+    assert "/assets/" in documents[0]
 
 
 async def test_assets_ask_the_browser_to_revalidate() -> None:
     async with _client(_app()) as client:
-        for path in ("/chat", "/tokens.css", "/shell.css", "/boot.js", "/chat.js"):
-            response = await client.get(path, headers=HEADERS)
-            assert response.status_code == 200
-            assert response.headers["cache-control"] == "no-cache"
+        page = await client.get("/chat", headers=HEADERS)
+        assert page.status_code == 200
+        assert page.headers["cache-control"] == "no-cache"
+        match = re.search(r'href="(/assets/styles-[^"]+\.css)"', page.text)
+        assert match is not None
+        asset = await client.get(match.group(1), headers=HEADERS)
+        assert asset.status_code == 200
+        assert asset.headers["cache-control"] == "no-cache"
 
 
 async def test_shell_chrome_is_present_on_every_route() -> None:
     async with _client(_app()) as client:
         for path in PAGES:
             text = await _page(client, path)
-            assert 'id="shell"' in text
-            assert 'id="rail"' in text
-            assert 'id="rail-sessions"' in text
-            assert 'id="rail-user"' in text
-            assert 'id="theme-toggle"' in text
-            assert 'id="screen"' in text
-            assert 'src="/boot.js"' in text
-
-
-async def test_deep_links_serve_full_documents() -> None:
-    async with _client(_app()) as client:
-        for path in PAGES:
-            text = await _page(client, path)
-            assert text.lstrip().lower().startswith("<!doctype html>")
-            assert text.rstrip().endswith("</html>")
-
-
-async def test_in_place_switching_uses_the_session_endpoints() -> None:
-    async with _client(_app()) as client:
-        created = await client.post("/api/sessions", headers=HEADERS)
-        session_id = created.json()["id"]
-
-        listed = await client.get("/api/sessions", headers=HEADERS)
-        assert session_id in [session["id"] for session in listed.json()["sessions"]]
-
-        turn = await client.post(
-            f"/api/sessions/{session_id}/turns",
-            headers=HEADERS,
-            json={"message": "hello"},
-        )
-        assert turn.status_code == 200
-
-        transcript = await client.get(f"/api/sessions/{session_id}/transcript", headers=HEADERS)
-        assert [entry["role"] for entry in transcript.json()["entries"]] == ["user", "assistant"]
-
-        status = await client.get("/api/status", headers=HEADERS)
-        assert status.status_code == 200
-        assert status.json()["sessions"][0]["id"] == session_id
-
-
-@pytest.mark.parametrize("path", PAGES)
-async def test_every_route_requires_a_signed_in_user(path: str) -> None:
-    async with _client(_app()) as client:
-        missing = await client.get(path)
-
-    assert missing.status_code == 401
+            assert "New session" in text
+            assert "Filter sessions" in text

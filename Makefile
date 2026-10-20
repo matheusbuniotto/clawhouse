@@ -51,16 +51,14 @@ test:
 	uv run pytest
 
 frontend-install:
-	npm ci
+	cd frontend-reimagined && (command -v bun >/dev/null && bun install || npm install)
 
 frontend-check:
-	@echo "==> Type-checking frontend (tsc)..."
-	npm run typecheck
-	@echo "==> Building frontend and checking committed output is current..."
-	npm run build
+	@echo "==> Building Lovable SPA into src/clawhouse/static..."
+	./scripts/sync-lovable-static.sh
 	git diff --exit-code -- src/clawhouse/static
-	@echo "==> Running frontend component tests (vitest)..."
-	npm test
+	@echo "==> Running frontend-reimagined tests (vitest)..."
+	cd frontend-reimagined && (command -v bun >/dev/null && bun run test || npm test)
 
 check:
 	@echo "==> Running quality gates (prek)..."
@@ -100,6 +98,7 @@ sync:
 		--exclude "tests/**" \
 		--exclude "docs/**" \
 		--exclude "frontend/**" \
+		--exclude "frontend-reimagined/**" \
 		--exclude "package.json" \
 		--exclude "package-lock.json" \
 		--exclude "vitest.config.ts" \

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -125,8 +126,7 @@ async def test_chat_page_requires_a_signed_in_user() -> None:
     assert missing.status_code == 401
     assert page.status_code == 200
     assert "Clawhouse" in page.text
-    assert 'src="/boot.js"' in page.text
-    assert 'id="shell"' in page.text
+    assert "/assets/" in page.text
     assert "dapi-secret" not in page.text
     assert me.json() == {"user_id": "ada@example.com"}
     assert "dapi-secret" not in me.text
@@ -493,33 +493,19 @@ async def test_the_sessions_and_new_pages_require_a_signed_in_user(path: str) ->
     assert page.status_code == 200
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/boot.js",
-        "/shell.js",
-        "/dom.js",
-        "/chat.js",
-        "/transcript.js",
-        "/highlight.js",
-        "/jobs.js",
-        "/jobspage.js",
-        "/sessions.js",
-        "/new.js",
-        "/approvals.js",
-        "/status.js",
-        "/tokens.css",
-        "/shell.css",
-        "/transcript.css",
-        "/screens.css",
-    ],
-)
-async def test_static_assets_are_served(path: str) -> None:
+async def test_spa_assets_are_served() -> None:
     app = _app(MemorySessionStore(), FunctionModel(stream_function=_reply("ok")))
     async with _client(app) as client:
-        response = await client.get(path)
-    assert response.status_code == 200
-    assert response.text
+        page = await client.get("/chat", headers=HEADERS)
+        css_href = re.search(r'href="(/assets/styles-[^"]+\.css)"', page.text)
+        js_href = re.search(r'src="(/assets/index-[^"]+\.js)"', page.text)
+        assert css_href is not None and js_href is not None
+        css = await client.get(css_href.group(1))
+        js = await client.get(js_href.group(1))
+    assert css.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+    assert js.status_code == 200
+    assert "javascript" in js.headers.get("content-type", "")
 
 
 class _UCServer(AbstractToolset[object]):

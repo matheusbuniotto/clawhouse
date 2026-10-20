@@ -327,16 +327,18 @@ def test_create_app_mounts_sandbox_routes() -> None:
 
 # --- C21: Status.js contains User Sandbox and button ---
 def test_status_js_contains_user_sandbox_and_reset_button() -> None:
-    status_js = Path("src/clawhouse/static/status.js").read_text(encoding="utf-8")
-    assert "User Sandbox" in status_js
-    assert "btn-reset-sandbox" in status_js
-    assert "stat-sandbox-files" in status_js
+    status_tsx = Path("frontend-reimagined/src/routes/status.tsx").read_text(encoding="utf-8")
+    assert "User Sandbox" in status_tsx
+    assert "btn-reset-sandbox" in status_tsx
+    assert "stat-sandbox-files" in status_tsx
 
 
-# --- C22: Status.js wires reset click ---
+# --- C22: Status screen wires reset click ---
 def test_status_js_wires_reset_sandbox_click() -> None:
-    status_js = Path("src/clawhouse/static/status.js").read_text(encoding="utf-8")
-    assert "/api/sandbox/reset" in status_js
+    status_tsx = Path("frontend-reimagined/src/routes/status.tsx").read_text(encoding="utf-8")
+    assert "resetSandbox" in status_tsx
+    api_ts = Path("frontend-reimagined/src/lib/api.ts").read_text(encoding="utf-8")
+    assert "/api/sandbox/reset" in api_ts
 
 
 # --- C23: DatabricksTools includes sandbox tools ---

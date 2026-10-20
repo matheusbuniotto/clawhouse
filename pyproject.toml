@@ -21,28 +21,6 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
 ]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/clawhouse/static/agents.js" = "clawhouse/static/agents.js"
-"src/clawhouse/static/approvals.js" = "clawhouse/static/approvals.js"
-"src/clawhouse/static/boot.js" = "clawhouse/static/boot.js"
-"src/clawhouse/static/cards.js" = "clawhouse/static/cards.js"
-"src/clawhouse/static/jobspage.js" = "clawhouse/static/jobspage.js"
-"src/clawhouse/static/chat.js" = "clawhouse/static/chat.js"
-"src/clawhouse/static/dom.js" = "clawhouse/static/dom.js"
-"src/clawhouse/static/highlight.js" = "clawhouse/static/highlight.js"
-"src/clawhouse/static/index.html" = "clawhouse/static/index.html"
-"src/clawhouse/static/jobs.js" = "clawhouse/static/jobs.js"
-"src/clawhouse/static/mentions.js" = "clawhouse/static/mentions.js"
-"src/clawhouse/static/new.js" = "clawhouse/static/new.js"
-"src/clawhouse/static/screens.css" = "clawhouse/static/screens.css"
-"src/clawhouse/static/sessions.js" = "clawhouse/static/sessions.js"
-"src/clawhouse/static/shell.css" = "clawhouse/static/shell.css"
-"src/clawhouse/static/shell.js" = "clawhouse/static/shell.js"
-"src/clawhouse/static/status.js" = "clawhouse/static/status.js"
-"src/clawhouse/static/tokens.css" = "clawhouse/static/tokens.css"
-"src/clawhouse/static/transcript.css" = "clawhouse/static/transcript.css"
-"src/clawhouse/static/transcript.js" = "clawhouse/static/transcript.js"
-
 [dependency-groups]
 dev = [
     "complexipy>=0.4.0",
