@@ -346,6 +346,18 @@
   color: var(--accent);
 }
 
+.tool-group[data-state="pending"] {
+  border-color: var(--warn);
+}
+
+.tool-group[data-state="pending"] .tool-group-icon {
+  color: var(--warn);
+}
+
+.tool-group[data-state="pending"] .tool-group-live {
+  color: var(--warn);
+}
+
 .tool-group-toggle::after {
   content: "";
   margin-left: auto;
@@ -454,10 +466,37 @@
   transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
 
-.tool-status[data-state="running"],
-.tool-status[data-state="pending"] {
+@keyframes tool-pulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.tool-status[data-state="running"] {
   background: var(--warn-subtle);
   color: var(--warn);
+}
+
+.tool-status[data-state="running"]::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  animation: tool-pulse 1.2s infinite ease-in-out;
+}
+
+.tool-status[data-state="pending"] {
+  background: var(--orange-subtle);
+  color: var(--orange);
+  border: 1px solid var(--orange);
 }
 
 .tool-status[data-state="ok"] {
@@ -607,6 +646,49 @@
 .approval-action-bar.resolving {
   border-color: var(--accent);
   background: var(--accent-subtle);
+}
+
+.approval-action-bar.executing {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.approval-params-disclosure {
+  width: 100%;
+  margin: 6px 0 2px;
+}
+
+.approval-params-summary {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.approval-params-summary:hover {
+  color: var(--text);
+}
+
+.approval-params-summary::-webkit-details-marker {
+  display: none;
+}
+
+.approval-params-summary::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--duration) var(--ease);
+}
+
+.approval-params-disclosure[open] > .approval-params-summary::after {
+  transform: rotate(45deg);
 }
 
 .approval-action-bar.resolved-ok {

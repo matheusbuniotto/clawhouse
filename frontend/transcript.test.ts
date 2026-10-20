@@ -384,6 +384,64 @@ test("renders inline approval card and handles approval resolution", async () =>
   vi.unstubAllGlobals();
 });
 
+test("streaming approval resolution keeps tool row running while stream is active", async () => {
+  const container = document.createElement("div");
+  appendToolActivity(container, { event: "tool_call", name: "jobs_create" });
+  const toolRow = container.querySelector(".tool-row") as HTMLDetailsElement;
+  const group = container.querySelector(".tool-group") as HTMLDetailsElement;
+
+  let streamResolve: () => void = () => {};
+  const streamPromise = new Promise<void>((resolve) => {
+    streamResolve = resolve;
+  });
+
+  const onStreamMock = vi.fn().mockImplementation(async () => {
+    // Assert while stream is active:
+    expect(toolRow.dataset.state).toBe("running");
+    expect(card?.classList.contains("executing")).toBe(true);
+    expect(container.querySelector(".approval-msg")?.textContent).toBe("✓ Approved · Running jobs_create…");
+    await streamPromise;
+  });
+
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    headers: {
+      get: (h: string) => (h.toLowerCase() === "content-type" ? "text/event-stream" : null),
+    },
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const card = renderInlineApproval(
+    container,
+    "appr-stream-1",
+    "jobs_create",
+    () => {},
+    JSON.stringify({ name: "my_job" }),
+    onStreamMock,
+  );
+
+  expect(group.dataset.state).toBe("pending");
+  expect(group.querySelector(".tool-group-live")?.textContent).toContain("Approval required for jobs_create");
+  expect(card?.querySelector(".approval-params-disclosure")).not.toBeNull();
+  expect(card?.querySelector(".approval-preview")?.textContent).toContain('"name": "my_job"');
+
+  const approveBtn = container.querySelector<HTMLButtonElement>(".btn-approve");
+  approveBtn?.click();
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(onStreamMock).toHaveBeenCalled();
+  streamResolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(card?.classList.contains("resolved-ok")).toBe(true);
+  expect(card?.querySelector(".approval-msg")?.textContent).toBe("✓ Approved jobs_create");
+
+  vi.unstubAllGlobals();
+});
+
 const SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 
 test("a create sheet approval card shows the question, exact rows, and warning", () => {
