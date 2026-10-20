@@ -19,11 +19,10 @@ Project-level architectural decisions are recorded as ADRs in `docs/adr/`:
 
 ## Handoff
 
-**Feature**: user-sandbox
-**Where**: `.specs/features/user-sandbox/verification.md`
-**In progress**: none — complete
-**Verdict**: PASS (24/24 checks proven)
-**Next step**: ship / merge
+**Feature**: chat-activity
+**Where**: `.specs/features/chat-activity/checks.md` — C1–C31 implemented, proofs green
+**In progress**: none
+**Next step**: independent verification
 **Blockers**: none
-**Uncommitted**: none
-**Branch**: feat/demo-mode
+**Uncommitted**: chat activity implementation
+**Branch**: feat/lovable-ui-mirror

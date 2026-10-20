@@ -37,7 +37,20 @@ export interface Status {
   sandbox?: SandboxStatus | null;
 }
 export interface ModelOption { id: string; label: string; default: boolean }
+export interface Question {
+  id: string; session_id: string; question: string; options: string[];
+  default: string | null; multi: boolean; status: string;
+}
 export interface Frame { event: string; data: Record<string, unknown> }
+
+export class StreamStatusError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(String(status));
+    this.name = "StreamStatusError";
+    this.status = status;
+  }
+}
 
 let demo = false;
 export const isDemo = () => demo;
@@ -79,7 +92,25 @@ export const api = {
   createAgent: (a: Partial<Agent>) => json<Agent>("/api/agents", post(a)),
   deleteAgent: (id: string) => json<unknown>(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" }),
   approvals: () => json<{ pending?: Approval[]; history?: Approval[] }>("/api/approvals"),
+  questions: (sessionId: string) => json<Question[]>(`/api/sessions/${sessionId}/questions`),
   resolveApproval: (id: string, ok: boolean) => call(`/api/approvals/${id}/${ok ? "approve" : "deny"}`, post()),
+  async *streamAnswer(id: string, selected: string[]): AsyncGenerator<Frame> {
+    const res = await fetch(`${BASE}/api/questions/${encodeURIComponent(id)}/answer`, {
+      method: "POST",
+      headers: { Accept: "text/event-stream", "content-type": "application/json" },
+      body: JSON.stringify({ selected }),
+    });
+    if (!res.ok) throw new StreamStatusError(res.status);
+    yield* readFrames(res);
+  },
+  async *streamDecision(id: string, ok: boolean): AsyncGenerator<Frame> {
+    const res = await fetch(`${BASE}/api/approvals/${encodeURIComponent(id)}/${ok ? "approve" : "deny"}`, {
+      method: "POST",
+      headers: { Accept: "text/event-stream" },
+    });
+    if (!res.ok) throw new StreamStatusError(res.status);
+    yield* readFrames(res);
+  },
   jobs: () => json<{ jobs: Job[]; databricks_error?: string | null }>("/api/jobs"),
   runJob: (id: string) => call(`/api/jobs/${encodeURIComponent(id)}/run`, post()),
   deleteJob: (id: string) => call(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -92,26 +123,33 @@ export const api = {
       yield { event: "error", data: { error: (b as { error?: string }).error ?? `Request failed (${res.status})` } };
       return;
     }
-    const reader = res.body!.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop() ?? "";
-      for (const raw of parts) {
-        let event = "message"; let data = "";
-        for (const line of raw.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
-        }
-        try { yield { event, data: data ? JSON.parse(data) : {} }; } catch { /* skip */ }
-      }
-    }
+    yield* readFrames(res);
   },
 };
+
+export async function* readFrames(res: Response): AsyncGenerator<Frame> {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const raw of parts) {
+      if (!raw.trim()) continue;
+      let event = "message";
+      let data = "";
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      try { yield { event, data: data ? JSON.parse(data) as Record<string, unknown> : {} }; } catch { /* skip */ }
+    }
+  }
+}
 
 // ---------------- demo backend ----------------
 const now = Date.now();
@@ -170,6 +208,7 @@ async function mock(path: string, init?: RequestInit): Promise<Response> {
       return s ? r(s) : r({ error: "not found" }, 404);
     }
     if (sub === "transcript") return r({ entries: db.transcripts[id] ?? [], run_state: "idle" });
+    if (sub === "questions") return r([]);
     if (sub === "cancel") return r({});
     if (sub === "turns") return mockTurn(id, body.message, body.agent);
   }
