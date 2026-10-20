@@ -159,6 +159,20 @@ test("consecutive tool calls share one closed tool group", () => {
   expect(group.querySelector(".tool-group-count")?.textContent).toBe("2 calls");
 });
 
+test("tool group reflects active running tool state", () => {
+  const host = document.createElement("div");
+  appendToolActivity(host, { event: "tool_call", name: "query", arguments: "{}" });
+  const group = host.querySelector(".tool-group") as HTMLDetailsElement;
+  expect(group.dataset.state).toBe("running");
+  const live = group.querySelector<HTMLElement>(".tool-group-live");
+  expect(live?.hidden).toBe(false);
+  expect(live?.textContent).toContain("Running query...");
+
+  appendToolActivity(host, { event: "tool_result", name: "query", content: "done" });
+  expect(group.dataset.state).toBe("ok");
+  expect(live?.hidden).toBe(true);
+});
+
 test("a break between tool calls starts another group", () => {
   const host = document.createElement("div");
   appendToolActivity(host, { event: "tool_call", name: "lookup", arguments: "{}" });

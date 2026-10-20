@@ -86,12 +86,10 @@
 }
 
 @keyframes thinking-pulse {
-  0%, 80%, 100% {
-    transform: scale(0.6);
-    opacity: 0.35;
+  0%, 100% {
+    opacity: 0.3;
   }
-  40% {
-    transform: scale(1.15);
+  50% {
     opacity: 1;
   }
 }
@@ -267,6 +265,7 @@
   border-radius: var(--radius-md);
   background: var(--bg-accent);
   overflow: hidden;
+  transition: border-color var(--duration) var(--ease);
 }
 
 .tool-group-toggle {
@@ -302,6 +301,7 @@
   height: 14px;
   color: var(--muted);
   flex-shrink: 0;
+  transition: color var(--duration) var(--ease);
 }
 
 .tool-group-icon::before {
@@ -328,6 +328,22 @@
   color: var(--muted);
   font-size: 10.5px;
   font-family: var(--font-mono);
+}
+
+.tool-group-live {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+}
+
+.tool-group[data-state="running"] {
+  border-color: var(--accent);
+}
+
+.tool-group[data-state="running"] .tool-group-icon {
+  color: var(--accent);
 }
 
 .tool-group-toggle::after {
@@ -435,6 +451,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
 
 .tool-status[data-state="running"],

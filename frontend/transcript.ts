@@ -361,7 +361,9 @@ function ensureToolGroup(container: HTMLElement): HTMLDetailsElement {
   const icon = el("span", "tool-group-icon");
   const label = el("span", "tool-group-label", "Expand tool calls");
   const count = el("span", "tool-group-count", "0 calls");
-  summary.append(icon, label, count);
+  const live = el("span", "tool-group-live", "");
+  live.hidden = true;
+  summary.append(icon, label, count, live);
   group.append(summary);
   group.addEventListener("toggle", () => syncGroupLabel(group));
   container.append(group);
@@ -371,9 +373,23 @@ function ensureToolGroup(container: HTMLElement): HTMLDetailsElement {
 function syncGroupLabel(group: HTMLDetailsElement): void {
   const label = group.querySelector(".tool-group-label");
   const count = group.querySelector(".tool-group-count");
+  const live = group.querySelector<HTMLElement>(".tool-group-live");
   const numRows = toolRowCount(group);
+  const running = group.querySelector<HTMLDetailsElement>('.tool-row[data-state="running"]');
+  const runningName = running?.querySelector(".tool-name")?.textContent;
+
+  group.dataset.state = running ? "running" : "ok";
   if (label) label.textContent = group.open ? "Hide tool calls" : "Expand tool calls";
   if (count) count.textContent = `${numRows} ${numRows === 1 ? "call" : "calls"}`;
+  if (live) {
+    if (runningName) {
+      live.textContent = `· Running ${runningName}...`;
+      live.hidden = false;
+    } else {
+      live.textContent = "";
+      live.hidden = true;
+    }
+  }
 }
 
 function toolRowCount(group: HTMLElement): number {
@@ -449,6 +465,8 @@ function completeToolRow(row: HTMLDetailsElement, state: ActivityState, output: 
     chip.dataset.state = state;
     chip.textContent = STATUS_LABEL[state];
   }
+  const group = row.closest<HTMLDetailsElement>(".tool-group");
+  if (group) syncGroupLabel(group);
   if (!output) return;
   const existing = row.querySelector<HTMLElement>(".tool-output");
   if (existing) {

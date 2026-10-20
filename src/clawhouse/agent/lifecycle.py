@@ -26,7 +26,11 @@ from clawhouse.agent.runner import _append, _run_model, _run_model_resume
 from clawhouse.capabilities.mcp import scrub_token
 from clawhouse.store.shapes import ApprovalEntry, TranscriptEntry, TurnStatus
 from clawhouse.store.store import ApprovalForbidden
-from clawhouse.telemetry import flush_telemetry, record_turn_status, turn_span
+from clawhouse.telemetry import (
+    async_flush_telemetry,
+    record_turn_status,
+    turn_span,
+)
 
 logger = logging.getLogger("clawhouse.turn")
 
@@ -116,8 +120,8 @@ async def _worker(claimed: _Claimed, queue: _Queue, holder: list[TurnResult]) ->
             record_turn_status("error", exc)
             holder.append(await _error_result(claimed.session_id, claimed.ctx))
         finally:
-            flush_telemetry()
             await queue.put(_END)
+            await async_flush_telemetry()
 
 
 async def _worker_resume(
@@ -138,8 +142,8 @@ async def _worker_resume(
             record_turn_status("error", exc)
             holder.append(await _error_result(claimed.session_id, claimed.ctx))
         finally:
-            flush_telemetry()
             await queue.put(_END)
+            await async_flush_telemetry()
 
 
 async def _claim(session_id: str, user_message: str, ctx: TurnContext) -> _Claimed:
