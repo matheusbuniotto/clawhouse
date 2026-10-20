@@ -136,3 +136,6 @@ Proof: `cd frontend-reimagined && bun run test -- src/test/chat-activity.test.ts
 ## Handoff
 
 - S1–S3 share the production chat. `frontend-reimagined/src/routes/index.tsx` is 13517 bytes and `frontend-reimagined/src/lib/api.ts` is 13716 bytes; the new view and the test add about 28 KB. 55 KB / 4 ≈ 14k, under the 150k budget — one builder
+- **Boundary:** C1–C31 closed at `9e5ff5ed9b790a425ceb40521ac5bb57cb6d92f8`
+- **Settled mid-build:** none
+- **Abandoned:** a full prettier reformat of `api.ts` — discarded so the diff stays the behavior change
