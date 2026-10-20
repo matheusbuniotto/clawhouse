@@ -1,33 +1,20 @@
-"""The wheel ships every static file the app serves, and every script is compiled."""
+"""The wheel ships every static file the app serves."""
 
-import re
 import subprocess
-import sys
-import tomllib
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_SOURCE = ROOT / "src" / "clawhouse" / "api" / "app.py"
-ASSETS_SOURCE = ROOT / "src" / "clawhouse" / "api" / "routes" / "assets.py"
-FRONTEND = ROOT / "frontend"
 STATIC = ROOT / "src" / "clawhouse" / "static"
 STATIC_PREFIX = "clawhouse/static/"
-IMPORT_SPECIFIER = re.compile(r"""(?:\bfrom\s+|\bimport\s*\(|\bimport\s+)["'](\./[^"']+)["']""")
 
 
-def _served_static_files() -> set[str]:
-    """Every static filename handed to a FileResponse, in serve order."""
-    found: set[str] = set()
-    for source_file in (APP_SOURCE, ASSETS_SOURCE):
-        if source_file.exists():
-            found.update(re.findall(r'STATIC / "([^"]+)"', source_file.read_text(encoding="utf-8")))
-    return found
-
-
-def _force_include_declared() -> set[str]:
-    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    return set(manifest["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"])
+def _local_static_files() -> set[str]:
+    return {
+        str(path.relative_to(STATIC)).replace("\\", "/")
+        for path in STATIC.rglob("*")
+        if path.is_file()
+    }
 
 
 def _wheel_static_entries(tmp_path: Path) -> set[str]:
@@ -48,54 +35,26 @@ def _wheel_static_entries(tmp_path: Path) -> set[str]:
         }
 
 
-def test_the_wheel_ships_every_served_static_file(tmp_path: Path) -> None:
-    served = _served_static_files()
+def test_the_wheel_ships_every_committed_static_file(tmp_path: Path) -> None:
+    local = _local_static_files()
     shipped = _wheel_static_entries(tmp_path)
 
-    assert served, "no static files are served"
-    assert served <= shipped, f"wheel is missing {sorted(served - shipped)}"
+    assert local, "no static files under src/clawhouse/static"
+    assert local <= shipped, f"wheel is missing {sorted(local - shipped)}"
 
 
-def test_force_include_declares_every_served_static_file() -> None:
-    assert _force_include_declared() == {
-        f"src/clawhouse/static/{name}" for name in _served_static_files()
-    }
-
-
-def test_every_imported_module_is_served_and_shipped() -> None:
-    served = _served_static_files()
-    declared = _force_include_declared()
-    imports = 0
-
-    for name in sorted(served):
-        if not name.endswith(".js"):
-            continue
-        source = (STATIC / name).read_text(encoding="utf-8")
-        for specifier in IMPORT_SPECIFIER.findall(source):
-            imports += 1
-            target = specifier.removeprefix("./")
-            assert target in served, f"{name} imports {specifier}, which is not served"
-            assert f"src/clawhouse/static/{target}" in declared, (
-                f"{name} imports {specifier}, which is not in the wheel force-include"
-            )
-
-    assert imports > 0, "no relative imports found in served scripts"
-
-
-def test_every_served_script_has_a_typescript_source() -> None:
-    sources = {path.stem for path in FRONTEND.glob("*.ts") if not path.name.endswith(".test.ts")}
-    scripts = sorted(name for name in _served_static_files() if name.endswith(".js"))
-
-    assert scripts, "no served scripts found"
-    for script in scripts:
-        stem = Path(script).stem
-        assert stem in sources, f"{script} has no frontend/{stem}.ts source"
+def test_spa_shell_is_present() -> None:
+    assert (STATIC / "index.html").is_file()
+    assert (STATIC / "assets").is_dir()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "/assets/" in html
+    assert "Clawhouse" in html
 
 
 def test_ast_limits_in_src() -> None:
     script = ROOT / "scripts" / "check_ast_limits.py"
     result = subprocess.run(
-        [sys.executable, str(script)],
+        [__import__("sys").executable, str(script)],
         cwd=ROOT,
         capture_output=True,
         text=True,

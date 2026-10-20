@@ -32,11 +32,7 @@ from clawhouse.api.routes.approvals import (
     _approval_routes,
     _question_routes,
 )
-from clawhouse.api.routes.assets import (
-    _asset_routes,
-    _cache_headers,
-    _page_routes,
-)
+from clawhouse.api.routes.assets import register_assets
 from clawhouse.api.routes.job_hooks import _job_hook_routes
 from clawhouse.api.routes.memory import _memory_routes
 from clawhouse.api.routes.schedules import (
@@ -85,9 +81,7 @@ __all__ = [
 
 
 def _routes(app: FastAPI) -> None:
-    _cache_headers(app)
-    _page_routes(app)
-    _asset_routes(app)
+    register_assets(app)
     _session_routes(app)
     _hatch_routes(app)
     _approval_routes(app)

@@ -245,18 +245,17 @@ async def test_status_page_requires_auth_and_serves_html() -> None:
     assert unauth.status_code == 401
     assert auth.status_code == 200
     assert "Clawhouse" in auth.text
-    assert 'src="/boot.js"' in auth.text
-    assert 'id="rail"' in auth.text
+    assert "/assets/" in auth.text
 
 
-async def test_status_asset_route() -> None:
+async def test_status_page_links_spa_bundle() -> None:
     store = MemorySessionStore()
     app = _app(store, FunctionModel(stream_function=_reply("ok")))
     async with _client(app) as client:
-        resp = await client.get("/status.js")
+        resp = await client.get("/status", headers=HEADERS)
 
     assert resp.status_code == 200
-    assert "javascript" in resp.headers.get("content-type", "")
+    assert "/assets/styles-" in resp.text
 
 
 @pytest.mark.parametrize("path", ["/chat", "/sessions", "/new", "/approvals", "/status"])
@@ -267,6 +266,6 @@ async def test_navigation_parity_across_all_five_screens(path: str) -> None:
         resp = await client.get(path, headers=HEADERS)
 
     assert resp.status_code == 200
-    for target in ["/chat", "/sessions", "/approvals", "/status"]:
+    for target in ["/", "/sessions", "/approvals", "/status"]:
         assert f'href="{target}"' in resp.text
-    assert 'id="rail-new"' in resp.text
+    assert "New session" in resp.text

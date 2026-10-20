@@ -23,10 +23,18 @@ export interface Job {
   last_run: { status: string; started_at: string; run_url?: string | null } | null;
   can_run: boolean; can_delete: boolean;
 }
+export interface SandboxStatus {
+  owner_id: string;
+  workspace_path: string;
+  backend: string;
+  status: string;
+  file_count: number;
+}
 export interface Status {
   auth: { user_id: string; token_present: boolean; auth_type: string };
   connection: { workspace_host: string | null; serving_endpoint: string | null; store_type: string };
   sessions: Session[];
+  sandbox?: SandboxStatus | null;
 }
 export interface ModelOption { id: string; label: string; default: boolean }
 export interface Frame { event: string; data: Record<string, unknown> }
@@ -76,6 +84,7 @@ export const api = {
   runJob: (id: string) => call(`/api/jobs/${encodeURIComponent(id)}/run`, post()),
   deleteJob: (id: string) => call(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
   status: () => json<Status>("/api/status"),
+  resetSandbox: () => call("/api/sandbox/reset", post()),
   async *turn(id: string, body: { message: string; model: string | null; agent: string | null }, signal: AbortSignal): AsyncGenerator<Frame> {
     const res = await call(`/api/sessions/${id}/turns`, { ...post(body), signal });
     if (!res.ok) {
@@ -181,7 +190,32 @@ async function mock(path: string, init?: RequestInit): Promise<Response> {
     auth: { user_id: "you@clawhouse.dev", token_present: true, auth_type: "demo" },
     connection: { workspace_host: "demo.local", serving_endpoint: "claude-sonnet", store_type: "memory" },
     sessions: db.sessions,
+    sandbox: {
+      owner_id: "you@clawhouse.dev",
+      workspace_path: "/Workspace/demo/sandbox",
+      backend: "databricks_python_exec",
+      status: "ready",
+      file_count: 2,
+    },
   });
+  if (a === "sandbox") {
+    if (id === "reset" && m === "POST") {
+      return r({
+        owner_id: "you@clawhouse.dev",
+        workspace_path: "/Workspace/demo/sandbox",
+        backend: "databricks_python_exec",
+        status: "ready",
+        file_count: 0,
+      });
+    }
+    return r({
+      owner_id: "you@clawhouse.dev",
+      workspace_path: "/Workspace/demo/sandbox",
+      backend: "databricks_python_exec",
+      status: "ready",
+      file_count: 2,
+    });
+  }
   return r({ error: "not found" }, 404);
 }
 

@@ -1,15 +1,51 @@
-"""Static file serving and shell HTML routes."""
+"""Static file serving and SPA shell routes for the Lovable (TanStack) UI bundle."""
 
+import mimetypes
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
 from clawhouse.api.identity import Caller
 from clawhouse.api.routes.sessions import _require_caller
 
 STATIC = Path(__file__).resolve().parent.parent.parent / "static"
+SHELL = STATIC / "index.html"
+
+_PAGE_PATHS = (
+    "/",
+    "/chat",
+    "/sessions",
+    "/agents",
+    "/new",
+    "/approvals",
+    "/status",
+    "/jobs",
+)
+
+_MIME: dict[str, str] = {
+    ".js": "text/javascript",
+    ".css": "text/css",
+    ".ico": "image/x-icon",
+    ".txt": "text/plain",
+}
+
+
+def _media_type(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in _MIME:
+        return _MIME[ext]
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
+
+
+def _safe_file(relative: str) -> Path | None:
+    base = STATIC.resolve()
+    candidate = (STATIC / relative).resolve()
+    if not str(candidate).startswith(str(base)):
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _cache_headers(app: FastAPI) -> None:
@@ -27,106 +63,43 @@ def _cache_headers(app: FastAPI) -> None:
 
 
 def _page_routes(app: FastAPI) -> None:
-    @app.get("/")
-    @app.get("/chat")
-    @app.get("/sessions")
-    @app.get("/agents")
-    @app.get("/new")
-    @app.get("/approvals")
-    @app.get("/status")
-    @app.get("/jobs")
-    async def shell_page(caller: Caller = _require_caller) -> FileResponse:
-        del caller
-        return FileResponse(STATIC / "index.html")
+    for path in _PAGE_PATHS:
+
+        @app.get(path)
+        async def shell_page(caller: Caller = _require_caller) -> FileResponse:
+            del caller
+            if not SHELL.is_file():
+                raise HTTPException(
+                    status_code=503,
+                    detail="UI bundle missing; run scripts/sync-lovable-static.sh",
+                )
+            return FileResponse(SHELL, media_type="text/html")
 
 
 def _asset_routes(app: FastAPI) -> None:
-    _style_routes(app)
-    _script_routes(app)
+    @app.get("/assets/{asset_path:path}")
+    async def spa_asset(asset_path: str) -> FileResponse:
+        file = _safe_file(f"assets/{asset_path}")
+        if file is None:
+            raise HTTPException(status_code=404)
+        return FileResponse(file, media_type=_media_type(file))
+
+    @app.get("/favicon.ico")
+    async def favicon() -> FileResponse:
+        file = _safe_file("favicon.ico")
+        if file is None:
+            raise HTTPException(status_code=404)
+        return FileResponse(file, media_type=_media_type(file))
+
+    @app.get("/robots.txt")
+    async def robots() -> FileResponse:
+        file = _safe_file("robots.txt")
+        if file is None:
+            raise HTTPException(status_code=404)
+        return FileResponse(file, media_type=_media_type(file))
 
 
-def _style_routes(app: FastAPI) -> None:
-    @app.get("/tokens.css")
-    async def tokens_style() -> FileResponse:
-        return FileResponse(STATIC / "tokens.css", media_type="text/css")
-
-    @app.get("/shell.css")
-    async def shell_style() -> FileResponse:
-        return FileResponse(STATIC / "shell.css", media_type="text/css")
-
-    @app.get("/transcript.css")
-    async def transcript_style() -> FileResponse:
-        return FileResponse(STATIC / "transcript.css", media_type="text/css")
-
-    @app.get("/screens.css")
-    async def screens_style() -> FileResponse:
-        return FileResponse(STATIC / "screens.css", media_type="text/css")
-
-
-def _script_routes(app: FastAPI) -> None:
-    _core_script_routes(app)
-    _screen_script_routes(app)
-
-
-def _core_script_routes(app: FastAPI) -> None:
-    @app.get("/boot.js")
-    async def boot_script() -> FileResponse:
-        return FileResponse(STATIC / "boot.js", media_type="text/javascript")
-
-    @app.get("/shell.js")
-    async def shell_script() -> FileResponse:
-        return FileResponse(STATIC / "shell.js", media_type="text/javascript")
-
-    @app.get("/dom.js")
-    async def dom_script() -> FileResponse:
-        return FileResponse(STATIC / "dom.js", media_type="text/javascript")
-
-    @app.get("/transcript.js")
-    async def transcript_script() -> FileResponse:
-        return FileResponse(STATIC / "transcript.js", media_type="text/javascript")
-
-    @app.get("/highlight.js")
-    async def highlight_script() -> FileResponse:
-        return FileResponse(STATIC / "highlight.js", media_type="text/javascript")
-
-    @app.get("/jobs.js")
-    async def jobs_script() -> FileResponse:
-        return FileResponse(STATIC / "jobs.js", media_type="text/javascript")
-
-    @app.get("/cards.js")
-    async def cards_script() -> FileResponse:
-        return FileResponse(STATIC / "cards.js", media_type="text/javascript")
-
-    @app.get("/mentions.js")
-    async def mentions_script() -> FileResponse:
-        return FileResponse(STATIC / "mentions.js", media_type="text/javascript")
-
-
-def _screen_script_routes(app: FastAPI) -> None:
-    @app.get("/agents.js")
-    async def agents_page_script() -> FileResponse:
-        return FileResponse(STATIC / "agents.js", media_type="text/javascript")
-
-    @app.get("/jobspage.js")
-    async def jobs_page_script() -> FileResponse:
-        return FileResponse(STATIC / "jobspage.js", media_type="text/javascript")
-
-    @app.get("/chat.js")
-    async def chat_script() -> FileResponse:
-        return FileResponse(STATIC / "chat.js", media_type="text/javascript")
-
-    @app.get("/sessions.js")
-    async def sessions_script() -> FileResponse:
-        return FileResponse(STATIC / "sessions.js", media_type="text/javascript")
-
-    @app.get("/new.js")
-    async def new_script() -> FileResponse:
-        return FileResponse(STATIC / "new.js", media_type="text/javascript")
-
-    @app.get("/approvals.js")
-    async def approvals_script() -> FileResponse:
-        return FileResponse(STATIC / "approvals.js", media_type="text/javascript")
-
-    @app.get("/status.js")
-    async def status_script() -> FileResponse:
-        return FileResponse(STATIC / "status.js", media_type="text/javascript")
+def register_assets(app: FastAPI) -> None:
+    _cache_headers(app)
+    _page_routes(app)
+    _asset_routes(app)
