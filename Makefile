@@ -100,6 +100,7 @@ sync:
 		--exclude "tests/**" \
 		--exclude "docs/**" \
 		--exclude "frontend/**" \
+		--exclude "frontend-reimagined/**" \
 		--exclude "package.json" \
 		--exclude "package-lock.json" \
 		--exclude "vitest.config.ts" \

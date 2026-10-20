@@ -32,6 +32,7 @@ CI (`quality.yml`) runs ruff, complexipy, pyright, vulture, jscpd, and pytest on
 ## Where things live
 
 - **`frontend/`**: TypeScript UI sources and Vitest component tests; compiles to `src/clawhouse/static/` via `npm run build`.
+- **`frontend-reimagined/`**: Lovable mirror (TanStack Start + React + Tailwind) for the OpenClaw-style UI refactor; not served by the App yet. Dev: `cd frontend-reimagined && bun install && bun run dev`. Re-sync from Lovable: `LOVABLE_API_KEY=… node scripts/sync-lovable-frontend.mjs`.
 - **`src/clawhouse/static/`**: Served web assets (compiled JS, CSS stylesheets, HTML shell).
 - **`src/clawhouse/api/`**: FastAPI application, SSE event streaming, caller identity, and HTTP routes.
 - **`src/clawhouse/agent/`**: Pydantic AI agent runtime, turn lifecycle, system prompt builder, history, and approval pauses.

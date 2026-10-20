@@ -14,6 +14,7 @@ sync:
     - tests/
     - docs/
     - frontend/
+    - frontend-reimagined/
     # Static assets are committed; without these the Apps builder runs `npm run build` and fails.
     - package.json
     - package-lock.json
