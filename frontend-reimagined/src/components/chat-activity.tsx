@@ -120,6 +120,16 @@ function ToolGroup({ tools }: { tools: ToolItem[] }) {
   );
 }
 
+function columnsFor(options: string[]): string {
+  const short = options.length > 1 && options.every((label) => label.length <= 32);
+  return short ? "mt-3 grid grid-cols-1 gap-2 @sm:grid-cols-2" : "mt-3 grid grid-cols-1 gap-2";
+}
+
+function marked(item: QuestionItem, label: string, picked: string[]): boolean {
+  if (item.chosen !== null) return item.chosen.includes(label);
+  return item.multi && picked.includes(label);
+}
+
 function QuestionCard({
   item,
   onAnswer,
@@ -128,15 +138,15 @@ function QuestionCard({
   onAnswer: (id: string, selected: string[]) => Promise<void>;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
-  const [sending, setSending] = useState(false);
-  const locked = item.chosen !== null || sending;
+  const [sending, setSending] = useState<string[] | null>(null);
+  const locked = item.chosen !== null || sending !== null;
 
   async function send(selected: string[]) {
-    setSending(true);
+    setSending(selected);
     try {
       await onAnswer(item.id, selected);
     } finally {
-      setSending(false);
+      setSending(null);
     }
   }
 
@@ -151,47 +161,69 @@ function QuestionCard({
       role="group"
       aria-label={item.question}
       data-question-id={item.id}
-      className="rounded-lg border p-4"
+      className="@container min-w-0 rounded-xl border bg-surface p-4"
     >
-      <p>{item.question}</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {item.options.map((label) => {
-          const chosen = item.chosen?.includes(label) ?? false;
-          return (
-            <button
-              key={label}
-              type="button"
-              disabled={locked}
-              aria-pressed={
-                item.chosen === null
-                  ? item.multi && picked.includes(label)
-                    ? "true"
-                    : "false"
-                  : chosen
-                    ? "true"
-                    : "false"
-              }
-              onClick={() => (item.multi ? toggle(label) : void send([label]))}
-              className="rounded-md border px-3 py-1 text-sm"
-            >
-              {label}
-              {label === item.default ? <span> default</span> : null}
-            </button>
-          );
-        })}
+      <p className="text-pretty break-words text-[15px] leading-relaxed">{item.question}</p>
+      <div className={columnsFor(item.options)}>
+        {item.options.map((label) => (
+          <OptionButton
+            key={label}
+            label={label}
+            isDefault={label === item.default}
+            locked={locked}
+            pressed={marked(item, label, picked)}
+            pending={sending?.includes(label) ?? false}
+            onClick={() => (item.multi ? toggle(label) : void send([label]))}
+          />
+        ))}
       </div>
       {item.multi && item.chosen === null ? (
         <button
           type="button"
           disabled={locked || picked.length === 0}
           onClick={() => void send(picked)}
-          className="mt-3 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-30"
+          className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:opacity-30 @sm:w-auto"
         >
+          {sending ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
           Send
         </button>
       ) : null}
       {item.error ? <p className="mt-3 text-sm text-destructive">{item.error}</p> : null}
     </div>
+  );
+}
+
+function OptionButton({
+  label,
+  isDefault,
+  locked,
+  pressed,
+  pending,
+  onClick,
+}: {
+  label: string;
+  isDefault: boolean;
+  locked: boolean;
+  pressed: boolean;
+  pending: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      aria-pressed={pressed}
+      onClick={onClick}
+      className="flex min-h-11 w-full items-center gap-2 whitespace-normal break-words rounded-lg border bg-background px-3 py-2.5 text-left text-sm leading-snug transition hover:border-primary/60 hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:border-primary aria-pressed:bg-accent"
+    >
+      {pending ? (
+        <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+      ) : null}
+      <span className="min-w-0">
+        {label}
+        {isDefault ? <span className="text-muted-foreground"> default</span> : null}
+      </span>
+    </button>
   );
 }
 

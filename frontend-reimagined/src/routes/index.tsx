@@ -208,7 +208,7 @@ function Chat() {
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-5 px-6 py-8">
+          <div className="mx-auto min-w-0 max-w-3xl space-y-5 px-4 py-6 sm:px-6 sm:py-8">
             <ActivityList items={items} onAnswer={answer} onResolve={resolve} />
             {busy && !items.some((item) => item.kind === "assistant" && item.live) && (
               <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
